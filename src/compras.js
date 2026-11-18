@@ -27,7 +27,8 @@ function asientoCompra(c, param, tarifas) {
   const mov = (cuenta, debito, credito, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'compra', cuenta: a8(cuenta), tercero_id: c.tercero_id || null, detalle, debito, credito }); };
   const nom = TIPOS_COMPRA[c.tipo].nombre;
   if (c.tipo === 'CE') {
-    for (const a of c.aplicaciones || []) mov(P.proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim());
+    // Cada aplicación paga una factura (a proveedores) o un saldo de nómina (a su cuenta: salarios, aportes, prestaciones).
+    for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || P.proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim());
     mov(P.anticipos_prov, num(c.anticipo), 0, 'Anticipo a proveedor');
     mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
     return out;
