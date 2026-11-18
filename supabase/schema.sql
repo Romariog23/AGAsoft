@@ -647,7 +647,8 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- Panel del administrador: todas las cuentas con su plan y su uso.
-create or replace function public.admin_cuentas() returns table (
+drop function if exists public.admin_cuentas();
+create function public.admin_cuentas() returns table (
   id uuid, nombre text, correo text, es_admin boolean, aprobado boolean, suspendido boolean, plan_id uuid, plan_vence date, notas text,
   creado_en timestamptz, empresas integer, documentos_mes integer, usuarios integer, ultimo_documento date)
 language plpgsql stable security definer set search_path = public as $$
