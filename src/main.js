@@ -805,18 +805,22 @@ function vClientes(m) {
 }
 
 /* ---------- Productos ---------- */
+// Lista de cuentas auxiliares (6 dígitos o más) que empiezan como indica el patrón.
+const selCuenta = (name, etiqueta, patron, valor, defecto) => `<div><label for="f_${name}">${etiqueta}</label><select id="f_${name}" name="${name}"><option value="">La de la empresa (${esc(defecto)})</option>${S.d.cuentas.filter(c => patron.test(c.codigo) && c.codigo.length >= 6).map(c => `<option value="${c.codigo}" ${c.codigo === valor ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>`;
 function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
     <div class="grid2">${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}${campoSel('iva_pct', 'IVA', [['19', '19%'], ['5', '5%'], ['0', 'Excluido o exento (0%)']], String(num(p.iva_pct ?? 19)))}</div>
-    <div><label for="f_cta">Cuenta de ingreso</label><select id="f_cta" name="cuenta_ingreso"><option value="">La de la empresa (${esc(param().ingresos)})</option>${S.d.cuentas.filter(c => /^4[12]/.test(c.codigo) && c.codigo.length >= 6).map(c => `<option value="${c.codigo}" ${c.codigo === p.cuenta_ingreso ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>
+    <h3>Contabilización</h3>
+    <div class="grid2">${selCuenta('cuenta_ingreso', 'Cuenta en factura y nota débito', /^4[12]/, p.cuenta_ingreso, param().ingresos)}${selCuenta('cuenta_devolucion', 'Cuenta en nota crédito y devolución', /^4/, p.cuenta_devolucion, param().devoluciones)}</div>
+    <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas.</p>
     ${p.id ? check('activo', 'Activo (aparece al facturar)', p.activo !== false) : ''}
     ${pie()}`, async fd => {
     const codigo = String(fd.get('codigo')).trim(), nombre = String(fd.get('nombre')).trim();
     if (!codigo || !nombre) throw new Error('Escribe el código y el nombre.');
     if (S.d.productos.some(x => x.id !== p.id && x.codigo.toLowerCase() === codigo.toLowerCase())) throw new Error('Ya existe un producto con ese código.');
-    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', activo: p.id ? fd.get('activo') === 'on' : true };
+    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true };
     await store.save('productos', p.id ? { ...row, id: p.id } : row); await cargarEmpresa(); toast('Guardado.'); route();
   });
 }

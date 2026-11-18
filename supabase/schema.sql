@@ -185,6 +185,7 @@ create policy cuentas_editar on public.cuentas for all to authenticated using (p
 -- Cuentas que usa la contabilización automática (clientes, IVA, ingresos, retenciones, caja, bancos…).
 alter table public.empresas add column if not exists contabilidad jsonb not null default '{}'::jsonb;
 alter table public.productos add column if not exists cuenta_ingreso text not null default '';
+alter table public.productos add column if not exists cuenta_devolucion text not null default '';
 alter table public.empresas add column if not exists departamento text not null default '';
 alter table public.terceros add column if not exists departamento text not null default '';
 

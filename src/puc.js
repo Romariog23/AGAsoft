@@ -306,9 +306,9 @@ function planInicial() {
 // Parámetros de la contabilización automática (se pueden cambiar por empresa).
 const PARAMETROS = {
   clientes: ['130505', 'Clientes (cuenta por cobrar)'],
-  ingresos: ['413501', 'Ingresos por ventas (si el producto no tiene cuenta)'],
+  ingresos: ['413501', 'Ingresos por ventas (si el producto no tiene cuenta propia)'],
   iva: ['240801', 'IVA generado'],
-  devoluciones: ['417501', 'Devoluciones, rebajas y descuentos'],
+  devoluciones: ['417501', 'Devoluciones, rebajas y descuentos (si el producto no tiene cuenta propia)'],
   intereses: ['421005', 'Ingresos por intereses (nota débito por intereses)'],
   retefuente: ['135515', 'Retención en la fuente que le practican'],
   reteiva: ['135517', 'ReteIVA que le practican'],

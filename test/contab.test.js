@@ -47,3 +47,18 @@ test('balance, auxiliar y estados', () => {
   assert.equal(esf.patrimonio, 1050000);
 });
 function r2x(n) { return Math.round(n * 100) / 100; }
+
+test('cuentas propias del producto en nota débito y nota crédito', () => {
+  const prods = [{ id: 'p1', cuenta_ingreso: '415501', cuenta_devolucion: '417502' }];
+  const ndIts = [{ id: 'd1', documento_id: 'nd1', cantidad: 1, precio: 10000, iva_pct: 0, producto_id: 'p1' }];
+  const nd = { id: 'nd1', tipo: 'ND', estado: 'emitido', prefijo: 'ND', numero: 1, fecha: '2026-11-06', tercero_id: 't1', concepto: '1', ...totales(ndIts, {}) };
+  const ncI = [{ id: 'c1', documento_id: 'nc2', cantidad: 1, precio: 20000, iva_pct: 19, producto_id: 'p1' }];
+  const nc2 = { id: 'nc2', tipo: 'NC', estado: 'emitido', prefijo: 'NC', numero: 2, fecha: '2026-11-07', tercero_id: 't1', concepto: '1', ...totales(ncI, {}) };
+  const ctx = { items: [...ndIts, ...ncI], productos: prods, param: {} };
+  const a = asiento(nd, ctx); assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '415501').credito, 10000);
+  const b = asiento(nc2, ctx); assert.ok(cuadra(b)); assert.equal(b.find(m => m.cuenta === '417502').debito, 20000);
+  assert.equal(b.find(m => m.cuenta === '240801').debito, 3800);
+  // Sin cuenta propia: la nota débito por intereses va a la de intereses de la empresa.
+  const c = asiento(nd, { ...ctx, productos: [] }); assert.equal(c.find(m => m.cuenta === '421005').credito, 10000);
+});
+
