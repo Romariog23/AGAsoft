@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AGAsoft Admin</title>
+<meta name="description" content="Administración de AGAsoft: cuentas, planes y uso.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0b2938">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+<div class="auth-wrap" id="auth" hidden>
+  <form class="auth-card panel stack" id="authForm" novalidate>
+    <div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft Admin</h1></div>
+    <p class="sub" id="authSub">Panel de planes y uso. Solo para el administrador de AGAsoft.</p>
+    <div><label for="aEmail">Correo</label><input id="aEmail" type="email" autocomplete="email" required></div>
+    <div><label for="aPass">Clave</label><input id="aPass" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="eAuth" hidden></p>
+    <button type="submit" class="primary" id="aSubmit">Entrar al panel</button>
+    <a class="btn ghost" href="/">Ir a AGAsoft</a>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <a class="brand" href="/admin"><span class="mark" aria-hidden="true">AGA</span><span class="brand-name">AGAsoft Admin</span></a>
+    <span class="spacer"></span>
+    <span class="who" id="who"></span>
+    <a class="btn ghost" href="/">Ir a AGAsoft</a>
+    <button class="ghost" id="salir">Salir</button>
+  </header>
+  <main class="admin-main stack" id="main"></main>
+</div>
+<dialog id="dlg"><form method="dialog" id="dlgForm" class="stack"></form></dialog>
+<div id="toast" role="status" hidden></div>
+<script type="module" src="/src/admin.js"></script>
+</body>
+</html>

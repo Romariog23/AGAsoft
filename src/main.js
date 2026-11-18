@@ -66,6 +66,11 @@ async function iniciar() {
   S.user = await store.session();
   if (!S.user) { $('auth').hidden = false; $('app').hidden = true; return; }
   S.perfil = await store.perfil();
+  if (S.perfil?.suspendido) {
+    $('auth').hidden = false; $('app').hidden = true;
+    $('authSub').textContent = 'Tu cuenta está suspendida. Comunícate con AGAsoft para reactivarla.';
+    await store.signOut(); return;
+  }
   if (!S.perfil?.aprobado) {
     $('auth').hidden = false; $('app').hidden = true;
     $('authSub').textContent = 'Tu cuenta está pendiente de aprobación. Cuando el administrador la apruebe, vuelve a entrar.';
@@ -366,6 +371,7 @@ function vEmpresa(m) {
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN y se pueden eliminar aunque estén emitidas.</p></section>
+  ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
   ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
     <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
@@ -373,6 +379,7 @@ function vEmpresa(m) {
   <section class="panel stack danger"><h3>Zona de cuidado</h3>
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
+  if ($('miPlan')) store.miPlan().then(x => { if ($('miPlan')) $('miPlan').innerHTML = tuPlan(x); }).catch(() => { if ($('miPlan')) $('miPlan').hidden = true; });
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
@@ -1021,7 +1028,7 @@ function vNumeraciones(m) {
 /* ---------- Usuarios (administrador) ---------- */
 async function vUsuarios(m) {
   if (!S.perfil?.es_admin) { m.innerHTML = '<p>Solo el administrador ve esta sección.</p>'; return; }
-  m.innerHTML = '<header class="vhead"><h2>Usuarios</h2></header><section class="panel" id="lst"><p class="muted">Cargando…</p></section>';
+  m.innerHTML = '<header class="vhead"><h2>Usuarios</h2><a class="btn primary" href="/admin">Abrir panel de planes y uso</a></header><p class="hint">Los planes, los límites y el uso de cada cuenta se manejan en el panel del administrador (/admin), con su propio ingreso.</p><section class="panel" id="lst"><p class="muted">Cargando…</p></section>';
   try {
     const l = await store.listPerfiles();
     $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Correo</th><th>Estado</th><th></th></tr></thead><tbody>
@@ -1794,4 +1801,15 @@ async function ejecutarImport(cual, r) {
   const nT = r.terceros.length + r.marcar.length;
   const msg = cual === 'terceros' ? `${nT - errs.length} terceros importados.` : `${ok} documentos importados${r.terceros.length ? ` y ${r.terceros.length} terceros nuevos` : ''}.`;
   return msg + (errs.length ? ` ${errs.length} con problemas: ${errs.slice(0, 3).join('; ')}${errs.length > 3 ? '…' : ''}` : '');
+}
+
+// Plan de la cuenta y su uso (lo asigna el administrador en /admin).
+function tuPlan(x) {
+  if (!x) return '<h3>Tu plan</h3><p class="muted">Sin información.</p>';
+  const p = x.plan, lim = (v, max) => `<span class="mono">${v}${max === null || max === undefined ? '' : ' de ' + max}</span>`;
+  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(p.precio_mensual)} al mes</dd>
+    <dt>Pagado hasta</dt><dd>${x.plan_vence ? fFecha(x.plan_vence) + (x.plan_vence < hoy() ? ' <span class="tag bad">Vencido</span>' : '') : 'Sin vencimiento'}</dd>
+    <dt>Contabilidades</dt><dd>${lim(x.empresas, p.max_empresas)}</dd><dt>Documentos este mes</dt><dd>${lim(x.documentos_mes, p.max_documentos_mes)}</dd>
+    <dt>Personas con acceso</dt><dd>${lim(x.usuarios, p.max_usuarios)}</dd></dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
+    <p class="hint">Para cambiar de plan o renovarlo, comunícate con AGAsoft.</p>`;
 }

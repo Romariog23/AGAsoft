@@ -1,0 +1,207 @@
+// Panel del administrador de AGAsoft (/admin): cuentas, planes y uso.
+// Entra con su propio login y solo deja pasar al administrador. Los límites de cada plan los hace cumplir la base de datos.
+import './style.css';
+import { crearStore } from './store.js';
+
+const store = crearStore();
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+const money = v => COP.format(Number(v) || 0);
+const hoy = () => new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
+const fFecha = f => f ? new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+function toast(msg, err) { const t = $('toast'); t.textContent = msg; t.className = err ? 'bad' : ''; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, err ? 6000 : 3500); }
+const fail = e => toast(e?.message || String(e), true);
+
+/* ---------- Datos: Supabase, o una demostración local para probar el panel ---------- */
+function apiNube(sb) {
+  const ok = ({ data, error }) => { if (error) throw new Error(/admin_cuentas|planes/.test(error.message) && /exist|schema|find/i.test(error.message) ? 'Falta correr en Supabase el archivo supabase/009_planes.sql.' : error.message); return data; };
+  return {
+    async cuentas() { return ok(await sb.rpc('admin_cuentas')); },
+    async planes() { return ok(await sb.from('planes').select('*').order('orden').order('nombre')); },
+    async guardarPlan(p) { const { id, creado_en, ...c } = p; return id ? ok(await sb.from('planes').update(c).eq('id', id)) : ok(await sb.from('planes').insert(c)); },
+    async borrarPlan(id) { ok(await sb.from('planes').delete().eq('id', id)); },
+    async setCuenta(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
+  };
+}
+function apiDemo() {
+  const KEY = 'agasoft-admin-demo';
+  let db; try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (_) { db = null; }
+  const id = () => Math.random().toString(36).slice(2);
+  if (!db) {
+    const planes = [
+      { id: 'p1', nombre: 'Básico', precio_mensual: 49900, max_empresas: 1, max_documentos_mes: 100, max_usuarios: 1, descripcion: 'Una contabilidad, hasta 100 documentos al mes.', activo: true, orden: 1 },
+      { id: 'p2', nombre: 'Profesional', precio_mensual: 119900, max_empresas: 5, max_documentos_mes: 1000, max_usuarios: 3, descripcion: 'Hasta 5 contabilidades y 3 personas con acceso.', activo: true, orden: 2 },
+      { id: 'p3', nombre: 'Contador', precio_mensual: 249900, max_empresas: 30, max_documentos_mes: 5000, max_usuarios: 10, descripcion: 'Para contadores con varias empresas cliente.', activo: true, orden: 3 },
+    ];
+    const c = (nombre, correo, x) => ({ id: id(), nombre, correo, es_admin: false, aprobado: true, suspendido: false, plan_id: null, plan_vence: null, notas: '', creado_en: new Date().toISOString(), empresas: 0, documentos_mes: 0, usuarios: 0, ultimo_documento: null, ...x });
+    db = { planes, cuentas: [
+      c('Administrador', 'admin@agasoft.co', { es_admin: true, empresas: 3, documentos_mes: 42 }),
+      c('Contadores Asociados', 'contador@ejemplo.co', { plan_id: 'p3', plan_vence: '2027-01-31', empresas: 12, documentos_mes: 830, usuarios: 4, ultimo_documento: hoy() }),
+      c('Ferretería La 30', 'gerencia@ferre30.co', { plan_id: 'p1', plan_vence: '2026-12-15', empresas: 1, documentos_mes: 97, usuarios: 1, ultimo_documento: hoy() }),
+      c('Distribuidora Norte', 'admin@dnorte.co', { plan_id: 'p2', plan_vence: '2026-11-10', empresas: 2, documentos_mes: 120, usuarios: 2 }),
+      c('Nuevo cliente', 'nuevo@cliente.co', { aprobado: false }),
+    ] };
+  }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) {} };
+  return {
+    async cuentas() { return db.cuentas.map(x => ({ ...x })); },
+    async planes() { return [...db.planes].sort((a, b) => a.orden - b.orden); },
+    async guardarPlan(p) { if (p.id) Object.assign(db.planes.find(x => x.id === p.id), p); else db.planes.push({ ...p, id: id() }); save(); },
+    async borrarPlan(pid) { db.planes = db.planes.filter(x => x.id !== pid); save(); },
+    async setCuenta(cid, campos) { Object.assign(db.cuentas.find(x => x.id === cid), campos); save(); },
+  };
+}
+const api = store.mode === 'supabase' ? apiNube(store.sb) : apiDemo();
+
+/* ---------- Entrada ---------- */
+async function iniciar() {
+  if (store.mode === 'local') return entrar({ nombre: 'Modo demostración' });
+  const u = await store.session();
+  if (!u) return pedirLogin();
+  const p = await store.perfil();
+  if (!p?.es_admin || !p?.aprobado || p?.suspendido) { await store.signOut(); return pedirLogin('Esta cuenta no es administradora de AGAsoft.'); }
+  entrar(p);
+}
+function pedirLogin(msg) {
+  $('auth').hidden = false; $('app').hidden = true;
+  if (msg) { $('eAuth').textContent = msg; $('eAuth').hidden = false; }
+}
+$('authForm').onsubmit = async ev => {
+  ev.preventDefault(); $('eAuth').hidden = true; $('aSubmit').disabled = true;
+  try { await store.signIn($('aEmail').value.trim(), $('aPass').value); await iniciar(); }
+  catch (e) { $('eAuth').textContent = e.message; $('eAuth').hidden = false; }
+  finally { $('aSubmit').disabled = false; }
+};
+$('salir').onclick = async () => { await store.signOut(); location.reload(); };
+
+let S = { tab: 'cuentas', filtro: '', cuentas: [], planes: [] };
+async function entrar(p) {
+  $('auth').hidden = true; $('app').hidden = false;
+  $('who').textContent = p.nombre || p.correo || '';
+  $('salir').hidden = store.mode === 'local';
+  await cargar();
+}
+async function cargar() {
+  try { [S.cuentas, S.planes] = await Promise.all([api.cuentas(), api.planes()]); pintar(); }
+  catch (e) { $('main').innerHTML = `<section class="panel"><p class="err">${esc(e.message)}</p></section>`; }
+}
+
+/* ---------- Estado y uso de cada cuenta ---------- */
+const planDe = c => S.planes.find(p => p.id === c.plan_id);
+function estado(c) {
+  if (c.es_admin) return ['Administrador', 'el'];
+  if (!c.aprobado) return ['Pendiente', 'bad'];
+  if (c.suspendido) return ['Suspendida', 'bad'];
+  if (c.plan_vence && c.plan_vence < hoy()) return ['Plan vencido', 'bad'];
+  if (!c.plan_id) return ['Sin plan', ''];
+  return ['Activa', 'ok'];
+}
+function uso(v, max) {
+  if (max === null || max === undefined) return `<span class="mono">${v}</span> <span class="muted">/ ∞</span>`;
+  const pct = max ? Math.min(100, Math.round(v / max * 100)) : 100;
+  return `<div class="uso ${pct >= 100 ? 'lleno' : pct >= 80 ? 'casi' : ''}"><span class="mono">${v} / ${max}</span><i style="width:${pct}%"></i></div>`;
+}
+const sobreLimite = c => { const p = planDe(c); return p && ((p.max_empresas !== null && c.empresas > p.max_empresas) || (p.max_documentos_mes !== null && c.documentos_mes >= p.max_documentos_mes) || (p.max_usuarios !== null && c.usuarios > p.max_usuarios)); };
+
+function pintar() {
+  const clientes = S.cuentas.filter(c => !c.es_admin);
+  const activas = clientes.filter(c => estado(c)[0] === 'Activa');
+  const ingreso = activas.reduce((s, c) => s + Number(planDe(c)?.precio_mensual || 0), 0);
+  const pend = clientes.filter(c => !c.aprobado).length;
+  const vencen = clientes.filter(c => c.plan_vence && c.plan_vence >= hoy() && c.plan_vence <= new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10)).length;
+  $('main').innerHTML = `${store.mode === 'local' ? '<p class="aviso">Modo demostración: datos de ejemplo guardados solo en este navegador. Con Supabase configurado, aquí ves las cuentas reales.</p>' : ''}
+    <header class="vhead"><div><h2>Administración de AGAsoft</h2><p class="sub">Cuentas, planes y uso de cada contabilidad.</p></div></header>
+    <section class="kpis">
+      <div class="kpi"><span>Cuentas activas</span><b class="mono">${activas.length}</b></div>
+      <div class="kpi"><span>Ingreso mensual de los planes</span><b class="mono">${money(ingreso)}</b></div>
+      <div class="kpi ${pend ? 'warn' : ''}"><span>Por aprobar</span><b class="mono">${pend}</b></div>
+      <div class="kpi ${vencen ? 'warn' : ''}"><span>Planes que vencen en 15 días</span><b class="mono">${vencen}</b></div>
+    </section>
+    <div class="row tabs" role="tablist"><button class="${S.tab === 'cuentas' ? 'primary' : ''}" data-tab="cuentas">Cuentas</button><button class="${S.tab === 'planes' ? 'primary' : ''}" data-tab="planes">Planes</button></div>
+    <section class="panel stack" id="tabC"></section>`;
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; pintar(); });
+  S.tab === 'cuentas' ? pintarCuentas() : pintarPlanes();
+}
+
+function pintarCuentas() {
+  const q = S.filtro.toLowerCase();
+  const l = S.cuentas.filter(c => !q || `${c.nombre} ${c.correo}`.toLowerCase().includes(q))
+    .sort((a, b) => (a.aprobado - b.aprobado) || (b.es_admin - a.es_admin) || a.nombre.localeCompare(b.nombre));
+  $('tabC').innerHTML = `<div class="row filters"><input id="q" type="search" placeholder="Buscar por nombre o correo" value="${esc(S.filtro)}"></div>
+    <p class="hint">Cada cuenta es un usuario dueño de sus contabilidades (empresas). Las personas nuevas se registran en AGAsoft con "Solicitar acceso" y aparecen aquí como pendientes: apruébalas y asígnales un plan.</p>
+    <div class="tbl-wrap"><table class="tbl adm"><thead><tr><th>Cuenta</th><th>Plan</th><th>Vence</th><th>Contabilidades</th><th>Documentos del mes</th><th>Personas</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${l.map(c => { const p = planDe(c), [est, cls] = estado(c); return `<tr class="${c.suspendido ? 'muted' : ''}">
+      <td><b>${esc(c.nombre || '(sin nombre)')}</b><br><small class="muted">${esc(c.correo)}</small>${c.notas ? `<br><small class="muted">${esc(c.notas)}</small>` : ''}</td>
+      <td>${c.es_admin ? '—' : p ? `${esc(p.nombre)}<br><small class="muted">${money(p.precio_mensual)}/mes</small>` : '<span class="muted">Sin plan</span>'}</td>
+      <td>${c.es_admin ? '—' : fFecha(c.plan_vence)}</td>
+      <td>${uso(c.empresas, c.es_admin ? null : p?.max_empresas)}</td><td>${uso(c.documentos_mes, c.es_admin ? null : p?.max_documentos_mes)}</td><td>${uso(c.usuarios, c.es_admin ? null : p?.max_usuarios)}</td>
+      <td><span class="tag ${cls}">${est}</span>${sobreLimite(c) ? ' <span class="tag bad">En el límite</span>' : ''}</td>
+      <td class="r nowrap">${c.es_admin ? '' : `${!c.aprobado ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}`}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
+  $('q').oninput = () => { S.filtro = $('q').value; const pos = $('q').selectionStart; pintarCuentas(); $('q').focus(); $('q').setSelectionRange(pos, pos); };
+  $('tabC').onclick = async ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const c = S.cuentas.find(x => x.id === (b.dataset.ap || b.dataset.ed || b.dataset.sus)); if (!c) return;
+    if (b.dataset.ed || b.dataset.ap) return formCuenta(c, !!b.dataset.ap);
+    try { await api.setCuenta(c.id, { suspendido: !c.suspendido }); toast(c.suspendido ? 'Cuenta reactivada.' : 'Cuenta suspendida: ya no puede entrar a sus contabilidades.'); await cargar(); } catch (e) { fail(e); }
+  };
+}
+
+function dialogo(html, onOk) {
+  const d = $('dlg'), f = $('dlgForm');
+  f.innerHTML = html + '<p class="err" id="dErr" hidden></p><div class="row end"><button type="button" class="ghost" id="dCancel">Cancelar</button><button class="primary" id="dOk">Guardar</button></div>';
+  $('dCancel').onclick = () => d.close();
+  f.onsubmit = async ev => {
+    ev.preventDefault(); $('dOk').disabled = true;
+    try { await onOk(new FormData(f)); d.close(); } catch (e) { $('dErr').textContent = e.message; $('dErr').hidden = false; } finally { $('dOk').disabled = false; }
+  };
+  d.showModal(); return f;
+}
+function formCuenta(c, aprobar) {
+  const sugerido = c.plan_vence || new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  dialogo(`<h2>${aprobar ? 'Aprobar cuenta' : 'Plan de la cuenta'}</h2><p><b>${esc(c.nombre)}</b> · ${esc(c.correo)}</p>
+    <div><label for="f_plan">Plan</label><select id="f_plan" name="plan_id"><option value="">Sin plan (sin límites)</option>${S.planes.filter(p => p.activo || p.id === c.plan_id).map(p => `<option value="${p.id}" ${p.id === c.plan_id ? 'selected' : ''}>${esc(p.nombre)} · ${money(p.precio_mensual)}/mes</option>`).join('')}</select></div>
+    <div><label for="f_vence">Pagado hasta</label><input id="f_vence" name="plan_vence" type="date" value="${c.plan_id || aprobar ? sugerido : (c.plan_vence || '')}"><p class="hint">Después de esta fecha la cuenta puede ver sus datos pero no registrar documentos nuevos. Déjalo vacío si no vence.</p></div>
+    <div><label for="f_notas">Notas internas</label><input id="f_notas" name="notas" maxlength="200" value="${esc(c.notas)}" placeholder="Forma de pago, contacto…"></div>`, async fd => {
+    const campos = { plan_id: fd.get('plan_id') || null, plan_vence: fd.get('plan_vence') || null, notas: String(fd.get('notas') || '').trim() };
+    if (aprobar) campos.aprobado = true;
+    await api.setCuenta(c.id, campos); toast(aprobar ? 'Cuenta aprobada.' : 'Plan guardado.'); await cargar();
+  });
+}
+
+function pintarPlanes() {
+  const usan = id => S.cuentas.filter(c => c.plan_id === id).length;
+  const lim = v => v === null || v === undefined ? 'Sin límite' : Number(v).toLocaleString('es-CO');
+  $('tabC').innerHTML = `<header class="vhead"><p class="hint">Los límites se aplican al dueño de cada cuenta, sumando todas sus contabilidades. Deja un límite vacío para que no tenga tope.</p><button class="primary" id="nuevoP">Nuevo plan</button></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plan</th><th class="r">Precio mensual</th><th class="r">Contabilidades</th><th class="r">Documentos al mes</th><th class="r">Personas con acceso</th><th class="r">Cuentas</th><th></th></tr></thead><tbody>
+    ${S.planes.map(p => `<tr class="${p.activo ? '' : 'muted'}"><td><b>${esc(p.nombre)}</b>${p.activo ? '' : ' <span class="tag">Inactivo</span>'}<br><small class="muted">${esc(p.descripcion)}</small></td>
+      <td class="r mono">${money(p.precio_mensual)}</td><td class="r mono">${lim(p.max_empresas)}</td><td class="r mono">${lim(p.max_documentos_mes)}</td><td class="r mono">${lim(p.max_usuarios)}</td><td class="r mono">${usan(p.id)}</td>
+      <td class="r"><button class="sm" data-ep="${p.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay planes.</td></tr>'}</tbody></table></div>`;
+  $('nuevoP').onclick = () => formPlan({ activo: true, orden: S.planes.length + 1 });
+  $('tabC').querySelectorAll('[data-ep]').forEach(b => b.onclick = () => formPlan(S.planes.find(p => p.id === b.dataset.ep)));
+}
+function formPlan(p) {
+  const n = v => v === null || v === undefined ? '' : v;
+  const enUso = p.id ? S.cuentas.filter(c => c.plan_id === p.id).length : 0;
+  const f = dialogo(`<h2>${p.id ? 'Editar plan' : 'Nuevo plan'}</h2>
+    <div class="grid2"><div><label for="p_n">Nombre</label><input id="p_n" name="nombre" required maxlength="40" value="${esc(p.nombre)}"></div>
+      <div><label for="p_pr">Precio mensual (COP)</label><input id="p_pr" name="precio_mensual" type="number" min="0" step="100" class="mono" required value="${n(p.precio_mensual)}"></div></div>
+    <div class="grid3"><div><label for="p_e">Contabilidades</label><input id="p_e" name="max_empresas" type="number" min="0" class="mono" value="${n(p.max_empresas)}" placeholder="Sin límite"></div>
+      <div><label for="p_d">Documentos al mes</label><input id="p_d" name="max_documentos_mes" type="number" min="0" class="mono" value="${n(p.max_documentos_mes)}" placeholder="Sin límite"></div>
+      <div><label for="p_u">Personas con acceso</label><input id="p_u" name="max_usuarios" type="number" min="0" class="mono" value="${n(p.max_usuarios)}" placeholder="Sin límite"></div></div>
+    <p class="hint">Documentos: facturas, notas y recibos emitidos, compras y comprobantes contables del mes. Personas: a quienes el dueño da acceso, sin contarlo a él.</p>
+    <div><label for="p_ds">Descripción</label><input id="p_ds" name="descripcion" maxlength="200" value="${esc(p.descripcion)}"></div>
+    <label class="check"><input type="checkbox" name="activo" ${p.activo !== false ? 'checked' : ''}> Activo (se puede asignar a cuentas)</label>
+    ${p.id && !enUso ? '<button type="button" class="ghost" id="delP">Borrar este plan</button>' : p.id ? `<p class="hint">${enUso} cuenta(s) usan este plan: para dejar de ofrecerlo, desmárcalo como activo.</p>` : ''}`, async fd => {
+    const lim = k => { const v = String(fd.get(k) ?? '').trim(); return v === '' ? null : Math.max(0, Math.round(Number(v))); };
+    const row = { nombre: String(fd.get('nombre')).trim(), precio_mensual: Math.max(0, Number(fd.get('precio_mensual')) || 0), max_empresas: lim('max_empresas'), max_documentos_mes: lim('max_documentos_mes'),
+      max_usuarios: lim('max_usuarios'), descripcion: String(fd.get('descripcion') || '').trim(), activo: fd.get('activo') === 'on', orden: p.orden ?? S.planes.length + 1 };
+    if (!row.nombre) throw new Error('Escribe el nombre del plan.');
+    await api.guardarPlan(p.id ? { ...row, id: p.id } : row); toast('Plan guardado.'); await cargar();
+  });
+  const del = f.querySelector('#delP');
+  if (del) del.onclick = async () => { try { await api.borrarPlan(p.id); $('dlg').close(); toast('Plan borrado.'); await cargar(); } catch (e) { fail(e); } };
+}
+
+iniciar().catch(e => { document.body.insertAdjacentHTML('afterbegin', `<p class="err" style="padding:16px">No se pudo iniciar el panel: ${esc(e.message)}</p>`); });

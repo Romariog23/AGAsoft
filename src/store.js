@@ -152,6 +152,7 @@ function supabaseStore(url, key) {
     async anular(id, motivo) { ok(await sb.rpc('anular_recibo', { p_id: id, p_motivo: motivo })); return ok(await sb.from('documentos').select('*').eq('id', id).single()); },
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
+    async miPlan() { return ok(await sb.rpc('mi_plan')); },
     async listPerfiles() { return ok(await sb.from('perfiles').select('*').order('creado_en', { ascending: false })); },
     async setPerfil(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
   };
