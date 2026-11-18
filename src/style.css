@@ -85,16 +85,18 @@ pre{background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:0;font
 .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;max-width:1280px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px)) 60px max(16px,env(safe-area-inset-left,0px))}
 .nav{display:flex;flex-direction:column;gap:2px;position:sticky;top:78px;align-self:start}
 .nav-g{display:flex;flex-direction:column}
-.nav-g>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:8px 10px;border-radius:7px;font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.nav-g>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:8px 10px;border-radius:7px;font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:800}
 .nav-g>summary::-webkit-details-marker{display:none}
 .nav-g>summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
 .nav-g[open]>summary::after{transform:rotate(45deg)}
 .nav-g>summary:hover{background:var(--surface-2);color:var(--fg)}
-.nav .nav-g a{padding-left:20px}
+.nav .nav-g a{padding-left:14px;margin-left:10px;border-left:2px solid var(--line);border-radius:0 7px 7px 0;color:var(--muted)}
+.nav .nav-g a:hover{color:var(--fg)}
 @media (prefers-reduced-motion:reduce){.nav-g>summary::after{transition:none}}
 .nav a{display:block;padding:7px 10px;border-radius:7px;text-decoration:none;font-weight:500}
 .nav a:hover{background:var(--surface-2)}
-.nav a[aria-current="page"]{background:var(--accent-soft);color:var(--fg);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.nav a[aria-current="page"]{background:var(--accent-soft);color:var(--fg)!important;font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.nav .nav-g a[aria-current="page"]{border-left-color:var(--accent);box-shadow:none}
 main{display:flex;flex-direction:column;gap:16px;min-width:0}
 main:focus{outline:none}
 @media (max-width:860px){
