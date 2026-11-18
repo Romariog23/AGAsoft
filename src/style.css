@@ -190,6 +190,11 @@ main:focus{outline:none}
 .firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px}
 .firmas span{border-top:1px solid var(--fg);padding-top:4px;font-size:.82rem;text-align:center}
 
+.nitrow{display:flex;align-items:center;gap:6px}
+.nitrow input:first-child{flex:1}
+.nitrow .dvbox{width:52px;flex:none;text-align:center;font-weight:700;background:var(--surface-2)}
+.dvsep{color:var(--muted);font-weight:700}
+
 /* Primer ingreso */
 body.onboarding .nav,body.onboarding #empSel,body.onboarding .menu-btn,body.onboarding .gear{display:none!important}
 .gear{padding:6px 8px}

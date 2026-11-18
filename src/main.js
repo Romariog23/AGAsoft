@@ -247,14 +247,32 @@ function campoUbicacion(x = {}) {
   return `<div class="grid2"><div><label for="f_depto">Departamento</label><select id="f_depto" name="departamento" data-depto><option value="">Escoge el departamento…</option>${DEPTOS.map(d => `<option ${d === dep ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
     <div><label for="f_muni">Municipio</label><select id="f_muni" name="ciudad" data-muni ${dep ? '' : 'disabled'}><option value="">${dep ? 'Escoge el municipio…' : 'Primero el departamento'}</option>${munis.map(m => `<option ${m === x.ciudad ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div></div>`;
 }
+// NIT con su dígito de verificación al lado, calculado mientras se escribe.
+const campoNit = (k, label, val, dv) => `<div><label for="f_${k}">${label}</label><div class="nitrow"><input id="f_${k}" name="${k}" value="${esc(val ?? '')}" required inputmode="numeric" class="mono" placeholder="900123456" autocomplete="off">
+  <span class="dvsep" aria-hidden="true">-</span><input class="mono dvbox" data-dv value="${dv ?? ''}" readonly tabindex="-1" aria-label="Dígito de verificación" title="Dígito de verificación (automático)"></div><p class="err" data-nerr hidden></p></div>`;
+function ligarDv(input, esNit) {
+  const box = input.parentElement.querySelector('[data-dv]'), err = input.closest('div:not(.nitrow)').querySelector('[data-nerr]');
+  const ver = () => {
+    const activo = esNit(); box.hidden = input.parentElement.querySelector('.dvsep').hidden = !activo;
+    const v = input.value.trim(); err.hidden = true;
+    if (!activo || !v) { box.value = ''; return; }
+    const digitos = v.replace(/[^\d]/g, '');
+    if (!/^\d{5,15}$/.test(digitos.split('-')[0])) { box.value = ''; return; }
+    const p = parseNit(v.includes('-') ? v : digitos);
+    if (p.error) { box.value = ''; err.textContent = p.error; err.hidden = false; return; }
+    box.value = p.dv;
+    if (p.nit !== digitos && !v.includes('-')) { input.value = p.nit; } // si pegaron el NIT con el DV pegado, se separa
+  };
+  input.oninput = ver; ver();
+  return ver;
+}
 const check = (k, label, val) => `<label class="check"><input type="checkbox" name="${k}" ${val ? 'checked' : ''}> ${label}</label>`;
 
 /* ---------- Empresa ---------- */
 function camposEmpresa(e = {}) {
   return `${campo('nombre', 'Razón social o nombre', e.nombre, 'required maxlength="200"')}
-    <div class="grid2">${campo('nit', 'NIT', e.nit ? `${e.nit}-${e.dv}` : '', 'required inputmode="numeric" class="mono" placeholder="900123456-8"')}
+    <div class="grid2">${campoNit('nit', 'NIT', e.nit, e.dv)}
     ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], e.tipo_persona)}</div>
-    <p class="hint" id="nitHint"></p>
     <div class="grid2">${campoSel('regimen', 'Régimen', REGIMENES, e.regimen)}
     ${campo('actividad', 'Actividad económica (CIIU)', e.actividad, 'maxlength="60" inputmode="numeric" placeholder="6920"')}</div>
     ${check('responsable_iva', 'Es responsable de IVA (cobra IVA en sus facturas)', e.id ? e.responsable_iva : true)}
@@ -264,9 +282,7 @@ function camposEmpresa(e = {}) {
     <div><label for="f_pie">Texto al pie de las facturas (opcional)</label><textarea id="f_pie" name="pie_factura" rows="2" maxlength="600">${esc(e.pie_factura)}</textarea></div>`;
 }
 function activarNit(f) {
-  const n = f.querySelector('[name=nit]'), h = f.querySelector('#nitHint');
-  n.oninput = () => { const p = parseNit(n.value); h.textContent = !n.value.trim() ? '' : p.error || `Dígito de verificación: ${p.dv}`; h.className = p.error && n.value.trim() ? 'err' : 'hint'; };
-  n.oninput();
+  ligarDv(f.querySelector('[name=nit]'), () => true);
 }
 async function guardarEmpresa(fd, e = {}) {
   const nit = parseNit(fd.get('nit'));
@@ -730,8 +746,7 @@ function descargar(nombre, texto) { const a = document.createElement('a'); a.hre
 /* ---------- Clientes ---------- */
 function formTercero(t = {}, despues) {
   const f = dialogo(`<h2>${t.id ? 'Editar cliente' : 'Nuevo cliente'}</h2>
-    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campo('numero', 'Número', t.numero ? (t.tipo_id === '31' ? `${t.numero}-${t.dv}` : t.numero) : '', 'required class="mono" inputmode="numeric"')}</div>
-    <p class="hint" id="numHint"></p>
+    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
     ${campo('nombre', 'Nombre o razón social', t.nombre, 'required maxlength="200"')}
     ${campo('direccion', 'Dirección', t.direccion)}
     ${campoUbicacion(t)}
@@ -754,9 +769,9 @@ function formTercero(t = {}, despues) {
     toast('Cliente guardado.');
     if (despues) await despues(g); else { await cargarEmpresa(); route(); }
   }, { ancho: true });
-  const tsel = f.querySelector('[name=tipo_id]'), n = f.querySelector('[name=numero]'), h = $('numHint');
-  const ver = () => { if (tsel.value !== '31' || !n.value.trim()) { h.textContent = ''; return; } const p = parseNit(n.value); h.textContent = p.error || `Dígito de verificación: ${p.dv}`; h.className = p.error ? 'err' : 'hint'; };
-  n.oninput = ver; tsel.onchange = ver; ver();
+  const tsel = f.querySelector('[name=tipo_id]');
+  const ver = ligarDv(f.querySelector('[name=numero]'), () => tsel.value === '31');
+  tsel.onchange = ver;
 }
 function vClientes(m) {
   let q = '';
