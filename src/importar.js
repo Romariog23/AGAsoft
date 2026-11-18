@@ -3,6 +3,15 @@
 // pasa los datos a estas plantillas y AGAsoft los valida y los carga. Funciones puras: no tocan la base de datos.
 import { r2, num, parseNit, totales } from './calc.js';
 import { esAuxiliar } from './puc.js';
+import { nombreTercero } from './nombres.js';
+
+// Nombre del tercero: persona natural (dos nombres y dos apellidos) o jurídica (razón social).
+const colsNombre = (quien, alias) => [
+  ['tipo_persona', `Tipo persona${quien} (Natural o Jurídica)`, false, ['tipopersona', 'persona', 'naturaleza', 'tipodepersona']],
+  ['razon_social', `Razón social${quien}`, false, alias],
+  ['primer_nombre', `Primer nombre${quien}`, false, ['primernombre', 'nombre1']], ['segundo_nombre', `Segundo nombre${quien}`, false, ['segundonombre', 'nombre2', 'otrosnombres']],
+  ['primer_apellido', `Primer apellido${quien}`, false, ['primerapellido', 'apellido1']], ['segundo_apellido', `Segundo apellido${quien}`, false, ['segundoapellido', 'apellido2']],
+];
 
 // Cada columna: [clave, título en la plantilla, obligatoria, otros títulos que también se aceptan].
 const PLANTILLAS = {
@@ -12,13 +21,13 @@ const PLANTILLAS = {
     cols: [
       ['tipo_id', 'Tipo ID', false, ['tipo', 'tipodocumento', 'tipoidentificacion']],
       ['numero', 'NIT o cédula', true, ['nit', 'numero', 'identificacion', 'documento', 'cedula', 'nitocedula']],
-      ['nombre', 'Nombre o razón social', true, ['nombre', 'razonsocial', 'nombrerazonsocial']],
+      ...colsNombre('', ['razonsocial', 'nombre', 'nombrerazonsocial', 'nombreorazonsocial']),
       ['direccion', 'Dirección', false, []], ['ciudad', 'Ciudad', false, ['municipio']], ['telefono', 'Teléfono', false, ['celular']],
       ['correo', 'Correo', false, ['email', 'correoelectronico']],
       ['es_cliente', 'Cliente (S/N)', false, ['cliente']], ['es_proveedor', 'Proveedor (S/N)', false, ['proveedor']],
     ],
-    ejemplo: [['NIT', '900123456-8', 'Cliente Ejemplo S.A.S.', 'Calle 1 # 2-3', 'Barranquilla', '3001234567', 'pagos@cliente.co', 'S', 'N'],
-      ['CC', '1045678901', 'María Pérez', '', 'Barranquilla', '', '', 'S', 'N']],
+    ejemplo: [['NIT', '900123456-8', 'Jurídica', 'Cliente Ejemplo S.A.S.', '', '', '', '', 'Calle 1 # 2-3', 'Barranquilla', '3001234567', 'pagos@cliente.co', 'S', 'N'],
+      ['CC', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', '', 'Barranquilla', '', '', 'S', 'N']],
   },
   ventas: {
     titulo: 'Facturas de venta', archivo: 'plantilla-facturas-venta.csv',
@@ -27,7 +36,7 @@ const PLANTILLAS = {
       ['prefijo', 'Prefijo', false, []], ['numero', 'Número', true, ['folio', 'consecutivo', 'numerofactura']],
       ['fecha', 'Fecha', true, ['fechaemision', 'fechadeemision']], ['vence', 'Vence', false, ['fechavencimiento', 'vencimiento']],
       ['nit', 'NIT cliente', true, ['nitcliente', 'nitreceptor', 'nitadquiriente', 'identificacioncliente']],
-      ['nombre', 'Nombre cliente', false, ['nombrecliente', 'nombrereceptor', 'cliente', 'razonsocial']],
+      ...colsNombre(' cliente', ['razonsocialcliente', 'nombrecliente', 'nombrereceptor', 'cliente', 'razonsocial', 'nombre']),
       ['codigo', 'Código', false, ['codigoproducto', 'referencia']], ['descripcion', 'Descripción', false, ['concepto', 'detalle']],
       ['cantidad', 'Cantidad', false, ['cant']], ['precio', 'Valor unitario antes de IVA', true, ['precio', 'valorunitario', 'preciounitario', 'valor', 'base', 'valorantesdeiva']],
       ['descuento_pct', 'Descuento %', false, ['descuento']], ['iva_pct', 'IVA %', false, ['iva', 'tarifaiva']],
@@ -35,8 +44,8 @@ const PLANTILLAS = {
       ['retefuente_pct', 'Retefuente %', false, ['retefuente']], ['reteiva_pct', 'ReteIVA %', false, ['reteiva']], ['reteica_milaje', 'ReteICA por mil', false, ['reteica']],
       ['electronica', 'Electrónica (S/N)', false, ['electronica']],
     ],
-    ejemplo: [['FE', '101', '2026-10-05', '2026-11-04', '900123456-8', 'Cliente Ejemplo S.A.S.', 'ASE-01', 'Asesoría contable octubre', '1', '1200000', '0', '19', '', '2.5', '15', '4.14', 'S'],
-      ['FE', '101', '2026-10-05', '2026-11-04', '900123456-8', 'Cliente Ejemplo S.A.S.', '', 'Papelería', '2', '18500', '0', '19', '', '2.5', '15', '4.14', 'S']],
+    ejemplo: [['FE', '101', '2026-10-05', '2026-11-04', '900123456-8', 'Jurídica', 'Cliente Ejemplo S.A.S.', '', '', '', '', 'ASE-01', 'Asesoría contable octubre', '1', '1200000', '0', '19', '', '2.5', '15', '4.14', 'S'],
+      ['FE', '101', '2026-10-05', '2026-11-04', '900123456-8', 'Jurídica', 'Cliente Ejemplo S.A.S.', '', '', '', '', '', 'Papelería', '2', '18500', '0', '19', '', '2.5', '15', '4.14', 'S']],
   },
   compras: {
     titulo: 'Facturas de compra y documentos soporte', archivo: 'plantilla-compras.csv',
@@ -46,14 +55,14 @@ const PLANTILLAS = {
       ['num_proveedor', 'Número del proveedor', true, ['numero', 'numerofactura', 'folio', 'prefijoynumero']],
       ['fecha', 'Fecha', true, ['fechaemision', 'fechadeemision']], ['vence', 'Vence', false, ['fechavencimiento', 'vencimiento']],
       ['nit', 'NIT proveedor', true, ['nitproveedor', 'nitemisor', 'identificacionproveedor']],
-      ['nombre', 'Nombre proveedor', false, ['nombreproveedor', 'nombreemisor', 'proveedor', 'razonsocial']],
+      ...colsNombre(' proveedor', ['razonsocialproveedor', 'nombreproveedor', 'nombreemisor', 'proveedor', 'razonsocial', 'nombre']),
       ['cuenta', 'Cuenta (gasto, costo, inventario o activo)', true, ['cuenta', 'cuentacontable', 'cuentagasto']],
       ['descripcion', 'Descripción', false, ['concepto', 'detalle']],
       ['base', 'Valor antes de IVA', true, ['valor', 'base', 'subtotal', 'valorantesdeiva']], ['iva_pct', 'IVA %', false, ['iva', 'tarifaiva']],
       ['retefuente_pct', 'Retefuente %', false, ['retefuente']], ['reteiva_pct', 'ReteIVA %', false, ['reteiva']], ['reteica_milaje', 'ReteICA por mil', false, ['reteica']],
     ],
-    ejemplo: [['FC', 'FV-5521', '2026-10-03', '2026-11-02', '830122566-1', 'Telecomunicaciones Demo S.A.S.', '51350501', 'Internet octubre', '250000', '19', '4', '0', '0'],
-      ['DS', 'DS-1', '2026-10-10', '', '1045678901', 'María Pérez', '51100501', 'Honorarios', '800000', '0', '10', '0', '0']],
+    ejemplo: [['FC', 'FV-5521', '2026-10-03', '2026-11-02', '830122566-1', 'Jurídica', 'Telecomunicaciones Demo S.A.S.', '', '', '', '', '51350501', 'Internet octubre', '250000', '19', '4', '0', '0'],
+      ['DS', 'DS-1', '2026-10-10', '', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', '51100501', 'Honorarios', '800000', '0', '10', '0', '0']],
   },
 };
 
@@ -127,8 +136,9 @@ function terceroDe(f, ctx, nuevos, rol) {
   if (existe) return { numero: id.numero, existe };
   let n = nuevos.get(id.numero);
   if (!n) {
-    if (!f.nombre) return { error: `el tercero ${id.numero} no existe: escribe su nombre en la plantilla` };
-    n = { ...id, nombre: f.nombre, es_cliente: rol === 'cliente', es_proveedor: rol === 'proveedor' };
+    if (![f.razon_social, f.primer_nombre, f.primer_apellido].some(Boolean)) return { error: `el tercero ${id.numero} no existe: escribe su razón social o sus nombres y apellidos en la plantilla` };
+    const nom = nombreTercero(f, id.tipo_id); if (nom.error) return { error: `tercero ${id.numero}: ${nom.error}` };
+    n = { ...id, ...nom, es_cliente: rol === 'cliente', es_proveedor: rol === 'proveedor' };
     nuevos.set(id.numero, n);
   } else if (rol === 'cliente') n.es_cliente = true; else if (rol === 'proveedor') n.es_proveedor = true;
   return { numero: id.numero, nuevo: n };
@@ -139,12 +149,13 @@ function prepararTerceros(filas, ctx) {
   for (const f of filas) {
     const id = leerId(f.numero, f.tipo_id);
     if (id.error) { errores.push(`Fila ${f._fila}: ${id.error}`); continue; }
-    if (!f.nombre) { errores.push(`Fila ${f._fila}: falta el nombre`); continue; }
+    const nom = nombreTercero(f, id.tipo_id);
+    if (nom.error) { errores.push(`Fila ${f._fila}: ${nom.error}`); continue; }
     const cli = siNo(f.es_cliente, true), prov = siNo(f.es_proveedor, false);
     const existe = ctx.terceros.find(t => t.numero === id.numero);
     if (existe) { if ((cli && existe.es_cliente === false) || (prov && !existe.es_proveedor)) marcar.push({ id: existe.id, es_cliente: existe.es_cliente !== false || cli, es_proveedor: !!existe.es_proveedor || prov }); continue; }
     if (crear.has(id.numero)) { errores.push(`Fila ${f._fila}: el número ${id.numero} está repetido en la plantilla`); continue; }
-    crear.set(id.numero, { ...id, nombre: f.nombre, direccion: f.direccion || '', ciudad: f.ciudad || '', telefono: f.telefono || '', correo: f.correo || '', es_cliente: cli, es_proveedor: prov });
+    crear.set(id.numero, { ...id, ...nom, direccion: f.direccion || '', ciudad: f.ciudad || '', telefono: f.telefono || '', correo: f.correo || '', es_cliente: cli, es_proveedor: prov });
   }
   return { terceros: [...crear.values()], marcar, docs: [], errores };
 }

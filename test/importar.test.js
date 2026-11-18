@@ -54,3 +54,17 @@ test('terceros: nuevos y existentes', () => {
   assert.equal(r.terceros.length, 1); // el NIT 900123456 ya existe
   assert.equal(r.terceros[0].tipo_id, '13');
 });
+
+test('terceros: persona natural con dos nombres y dos apellidos, jurídica con razón social', async () => {
+  const { nombreTercero } = await import('../src/nombres.js');
+  const r = prepararTerceros(filasDe('terceros', csvPlantilla('terceros')).filas, { ...ctx, terceros: [] });
+  assert.deepEqual(r.errores, []);
+  const [j, n] = r.terceros;
+  assert.equal(j.tipo_persona, 'juridica'); assert.equal(j.nombre, 'Cliente Ejemplo S.A.S.'); assert.equal(j.razon_social, 'Cliente Ejemplo S.A.S.');
+  assert.equal(n.tipo_persona, 'natural'); assert.equal(n.nombre, 'María José Pérez Gómez'); assert.equal(n.primer_apellido, 'Pérez'); assert.equal(n.razon_social, '');
+  assert.ok(nombreTercero({ tipo_persona: 'Jurídica' }, '31').error);
+  assert.ok(nombreTercero({ tipo_persona: 'Natural', primer_nombre: 'Ana' }, '13').error);
+  assert.equal(nombreTercero({ razon_social: 'Pedro Ruiz' }, '13').nombre, 'Pedro Ruiz'); // plantilla vieja con el nombre en una casilla
+  const c = prepararCompras(filasDe('compras', csvPlantilla('compras')).filas, ctx, totalesCompra);
+  assert.equal(c.terceros.find(t => t.numero === '1045678901').nombre, 'María José Pérez Gómez');
+});

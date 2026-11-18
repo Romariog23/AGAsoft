@@ -5,6 +5,7 @@ import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
+import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
@@ -930,13 +931,23 @@ function vCartera(m) {
 function descargar(nombre, texto) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
 /* ---------- Clientes ---------- */
+// Partes del nombre de un tercero viejo que solo tenía el nombre completo.
+function partesDe(t) {
+  if (t.primer_nombre || t.primer_apellido || !t.nombre) return t;
+  const w = String(t.nombre).trim().split(/\s+/);
+  const [n1, n2, a1, a2] = w.length >= 4 ? [w[0], w[1], w[2], w.slice(3).join(' ')] : w.length === 3 ? [w[0], '', w[1], w[2]] : [w[0], '', w[1] || '', ''];
+  return { ...t, primer_nombre: n1, segundo_nombre: n2, primer_apellido: a1, segundo_apellido: a2 };
+}
 function formTercero(t = {}, despues, modo = 'cliente') {
   const prov = modo === 'proveedor';
   const quien = prov ? 'proveedor' : 'cliente';
   const esProv = t.id ? !!t.es_proveedor : prov, esCli = t.id ? t.es_cliente !== false : !prov;
   const f = dialogo(`<h2>${t.id ? `Editar ${quien}` : `Nuevo ${quien}`}</h2>
     <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
-    ${campo('nombre', 'Nombre o razón social', t.nombre, 'required maxlength="200"')}
+    ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], t.tipo_persona || personaDe('', t, t.tipo_id || '31'))}
+    <div data-p="juridica">${campo('razon_social', 'Razón social', t.razon_social || (t.tipo_persona !== 'natural' ? t.nombre : '') || '', 'maxlength="200"')}</div>
+    <div data-p="natural" class="grid2">${(pn => `${campo('primer_nombre', 'Primer nombre', pn.primer_nombre || '', 'maxlength="60"')}${campo('segundo_nombre', 'Segundo nombre', pn.segundo_nombre || '', 'maxlength="60"')}
+      ${campo('primer_apellido', 'Primer apellido', pn.primer_apellido || '', 'maxlength="60"')}${campo('segundo_apellido', 'Segundo apellido', pn.segundo_apellido || '', 'maxlength="60"')}`)(t.tipo_persona === 'natural' || (t.id && t.tipo_id !== '31') ? partesDe(t) : t)}</div>
     ${campo('direccion', 'Dirección', t.direccion)}
     ${campoUbicacion(t)}
     <div class="grid2">${campo('telefono', 'Teléfono', t.telefono, 'type="tel"')}${campo('correo', 'Correo para enviar facturas', t.correo, 'type="email"')}</div>
@@ -956,10 +967,11 @@ function formTercero(t = {}, despues, modo = 'cliente') {
     const tipo = fd.get('tipo_id'); let numero = String(fd.get('numero')).trim(), dv = null;
     if (tipo === '31') { const p = parseNit(numero); if (p.error) throw new Error(p.error); numero = p.nit; dv = p.dv; }
     else { numero = numero.replace(/[.\s]/g, ''); if (!/^[0-9A-Za-z-]{3,20}$/.test(numero)) throw new Error('Revisa el número de documento.'); }
-    const nombre = String(fd.get('nombre')).trim(); if (!nombre) throw new Error(`Escribe el nombre del ${quien}.`);
+    const nom = nombreTercero(Object.fromEntries(['tipo_persona', 'razon_social', ...PARTES].map(k => [k, fd.get(k) || ''])), tipo);
+    if (nom.error) throw new Error(nom.error.charAt(0).toUpperCase() + nom.error.slice(1) + '.');
     if (fd.get('es_cliente') !== 'on' && fd.get('es_proveedor') !== 'on') throw new Error('Marca si es cliente, proveedor o ambos.');
     if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un tercero con ese documento (búscalo en Clientes o Proveedores).');
-    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, nombre, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
+    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, ...nom, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
       plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')),
       es_cliente: fd.get('es_cliente') === 'on', es_proveedor: fd.get('es_proveedor') === 'on', ret_compra_fuente_pct: num(fd.get('ret_compra_fuente_pct')), ret_compra_iva_pct: num(fd.get('ret_compra_iva_pct')), ret_compra_ica_milaje: num(fd.get('ret_compra_ica_milaje')) };
     const g = await store.save('terceros', t.id ? { ...row, id: t.id } : row);
@@ -968,9 +980,12 @@ function formTercero(t = {}, despues, modo = 'cliente') {
   }, { ancho: true });
   const sync = () => { f.querySelector('[data-fs=cli]').hidden = !f.querySelector('[name=es_cliente]').checked; f.querySelector('[data-fs=prov]').hidden = !f.querySelector('[name=es_proveedor]').checked; };
   f.querySelectorAll('[name=es_cliente],[name=es_proveedor]').forEach(x => x.onchange = sync); sync();
+  const psel = f.querySelector('[name=tipo_persona]');
+  const verP = () => f.querySelectorAll('[data-p]').forEach(x => { x.hidden = x.dataset.p !== psel.value; });
+  psel.onchange = verP; verP();
   const tsel = f.querySelector('[name=tipo_id]');
   const ver = ligarDv(f.querySelector('[name=numero]'), () => tsel.value === '31');
-  tsel.onchange = ver;
+  tsel.onchange = () => { ver(); if (!t.id) { psel.value = tsel.value === '31' ? 'juridica' : 'natural'; verP(); } };
 }
 function vClientes(m) {
   let q = '';
