@@ -74,9 +74,38 @@ function cuadrar(out, P) {
   }
   return out;
 }
+/* ---------- Comprobantes contables manuales ---------- */
+const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', plural: 'Notas de contabilidad' }, SI: { nombre: 'Saldos iniciales', corto: 'Saldos ini.', plural: 'Saldos iniciales' } };
+function asientoComprobante(c) {
+  if (c.estado === 'anulado') return [];
+  const ref = `${c.tipo} ${c.numero}`;
+  return (c.lineas || []).map(l => ({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'comp', cuenta: String(l.cuenta || '').trim(), tercero_id: l.tercero_id || null,
+    detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)) })).filter(m => m.debito || m.credito);
+}
+// Errores del comprobante (lista vacía si está bien). Solo se contabiliza en cuentas auxiliares: las que no tienen subcuentas.
+function erroresComprobante(c, cuentas) {
+  const idx = indexar(cuentas), out = [];
+  const ls = (c.lineas || []).filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito));
+  if (!c.fecha) out.push('Escribe la fecha.');
+  if (ls.length < 2) out.push('El comprobante necesita al menos dos líneas.');
+  ls.forEach((l, i) => {
+    const cta = String(l.cuenta || '').trim(), n = `Línea ${i + 1}`;
+    if (!cta) out.push(`${n}: falta la cuenta.`);
+    else if (!idx[cta]) out.push(`${n}: la cuenta ${cta} no existe en el plan de cuentas.`);
+    else if (cuentas.some(x => x.codigo.length > cta.length && x.codigo.startsWith(cta))) out.push(`${n}: la cuenta ${cta} tiene subcuentas; usa una auxiliar.`);
+    const d = num(l.debito), k = num(l.credito);
+    if (d < 0 || k < 0) out.push(`${n}: los valores no pueden ser negativos.`);
+    else if (d && k) out.push(`${n}: lleva débito o crédito, no los dos.`);
+    else if (!d && !k) out.push(`${n}: falta el valor.`);
+  });
+  const td = r2(ls.reduce((s, l) => s + num(l.debito), 0)), tc = r2(ls.reduce((s, l) => s + num(l.credito), 0));
+  if (ls.length >= 2 && td !== tc) out.push(`No cuadra: la diferencia es ${r2(td - tc)}.`);
+  return out;
+}
+
 function movimientos(S) {
   const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos };
-  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx))
+  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante))
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }
 
@@ -194,4 +223,4 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { asiento, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
