@@ -57,7 +57,9 @@ function asiento(d, ctx) {
     mov(cuenta, dr ? valor : 0, dr ? 0 : valor, detalle);
   };
   const det = `${TIPO_NOMBRE[d.tipo]} ${ref}`;
-  lado(P.clientes, d.neto, det, true);
+  // La forma de pago de contado lleva el valor a caja, bancos u otra cuenta en vez de clientes. Las notas siguen a su factura.
+  const fac = d.tipo === 'FV' ? d : (ctx.docs || []).find(x => x.id === d.ref_id);
+  lado(String(fac?.cuenta_pago || '').trim() || P.clientes, d.neto, det, true);
   lado(P.retefuente, d.retefuente, 'Retención en la fuente', true);
   lado(P.reteiva, d.reteiva, 'ReteIVA', true);
   lado(P.reteica, d.reteica, 'ReteICA', true);
