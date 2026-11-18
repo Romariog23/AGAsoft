@@ -80,6 +80,9 @@ function localStore() {
       if (!d || d.estado !== 'borrador') throw new Error('El documento ya no es un borrador.');
       if (d.tipo === 'NC' || d.tipo === 'ND') d.electronica = !!db.documentos.find(x => x.id === d.ref_id)?.electronica;
       if (d.tipo === 'RC') d.electronica = false;
+      // Sin numeración para un documento que no es electrónico: se crea una desde el 1.
+      if (!d.electronica && !db.numeraciones.some(x => x.empresa_id === d.empresa_id && x.tipo === d.tipo && x.activa && (d.tipo !== 'FV' || !x.electronica)))
+        db.numeraciones.push({ id: uid(), empresa_id: d.empresa_id, tipo: d.tipo, prefijo: d.tipo === 'FV' ? 'FN' : d.tipo, desde: 1, hasta: 999999999, siguiente: 1, activa: true, electronica: false, resolucion: '', creado_en: ahora() });
       const n = numeracionPara(d, db.numeraciones);
       d.prefijo = n.prefijo || ''; d.numero = Number(n.siguiente); d.numeracion_id = n.id; d.estado = 'emitido'; d.emitido_en = ahora();
       n.siguiente = Number(n.siguiente) + 1;
