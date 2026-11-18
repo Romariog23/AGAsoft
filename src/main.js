@@ -1215,9 +1215,33 @@ function vAuxiliar(m, q) {
 }
 
 // Nivel de detalle de los estados financieros: solo rubros NIIF (desplegables) o cuentas del PUC hasta el nivel escogido.
-let infOpc = { nivel: '0' };
+let infOpc = { nivel: '0', tercero: '', detalle: '' };
+// Movimientos y periodo del informe que se está pintando (para el detalle por tercero).
+let infCtx = { ms: [], desde: null, hasta: '' };
 const NIVELES_INF = [['0', 'Rubros NIIF'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']];
-function selNivelInf() { return `<div class="row filters"><div><label for="ninf">Nivel</label><select id="ninf">${opts(NIVELES_INF, infOpc.nivel)}</select></div></div>`; }
+function selNivelInf() {
+  const ts = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return `<div class="row filters"><div><label for="ninf">Nivel</label><select id="ninf">${opts(NIVELES_INF, infOpc.nivel)}</select></div>
+    <div class="grow"><label for="iter">Tercero</label><select id="iter"><option value="">Todos los terceros</option>${ts.map(t => `<option value="${t.id}" ${t.id === infOpc.tercero ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select></div>
+    <div><label for="idet">Detallar por tercero</label><select id="idet">${opts([['', 'No'], ['nivel', 'Solo el nivel escogido'], ['todos', 'En todos los niveles']], infOpc.detalle)}</select></div></div>`;
+}
+// Conecta los filtros del informe (nivel, tercero y detalle por tercero).
+function filtrosInf(pintar) {
+  $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
+  $('iter').onchange = () => { infOpc.tercero = $('iter').value; pintar(); };
+  $('idet').onchange = () => { infOpc.detalle = $('idet').value; pintar(); };
+}
+const movsInf = (desde, hasta) => { const ms = movs().filter(x => !infOpc.tercero || x.tercero_id === infOpc.tercero); infCtx = { ms, desde, hasta }; return ms; };
+// Filas de terceros debajo de una cuenta, con el mismo signo del rubro.
+function tercerosInf(codigo, signo, nivelFila) {
+  const n = Number(infOpc.nivel) || 8;
+  if (!infOpc.detalle || (infOpc.detalle === 'nivel' && nivelFila !== Math.min(n, 8))) return '';
+  const acc = {};
+  for (const m of infCtx.ms) if (m.cuenta.startsWith(codigo) && m.fecha <= infCtx.hasta && (!infCtx.desde || m.fecha >= infCtx.desde)) { const k = m.tercero_id || ''; acc[k] = r2((acc[k] || 0) + signo * (m.debito - m.credito)); }
+  const nom = id => id ? (terc(id)?.nombre || 'Tercero borrado') : 'Sin tercero';
+  return Object.entries(acc).filter(([, v]) => v).sort(([a], [b]) => nom(a).localeCompare(nom(b)))
+    .map(([id, v]) => `<div class="inf-c ter n${nivelFila}"><span>${esc(nom(id))}${id ? ` <span class="mono">${esc(fmtNit(terc(id)?.numero || ''))}</span>` : ''}</span><span class="mono">${money(v)}</span></div>`).join('');
+}
 // Suma las cuentas auxiliares de un rubro en cada nivel del PUC hasta n dígitos (grupo, cuenta, subcuenta, auxiliar).
 function cuentasPorNivel(cuentas, n) {
   const idx = idxCuentas(), acc = {};
@@ -1227,34 +1251,34 @@ function cuentasPorNivel(cuentas, n) {
 function lineaInforme(x) {
   const n = Number(infOpc.nivel);
   if (n && x.cuentas?.length) return `<div class="inf-l plain head"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>
-    ${cuentasPorNivel(x.cuentas, n).map(c => `<a class="inf-c n${c.codigo.length}" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>`).join('')}`;
-  return x.cuentas?.length ? `<details class="inf-l"><summary><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></summary>
-    ${x.cuentas.map(c => `<a class="inf-c" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>`).join('')}</details>`
+    ${cuentasPorNivel(x.cuentas, n).map(c => `<a class="inf-c n${c.codigo.length}" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>${tercerosInf(c.codigo, x.signo, c.codigo.length)}`).join('')}`;
+  return x.cuentas?.length ? `<details class="inf-l" ${infOpc.detalle ? 'open' : ''}><summary><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></summary>
+    ${x.cuentas.map(c => `<a class="inf-c" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>${tercerosInf(c.codigo, x.signo, 8)}`).join('')}</details>`
     : `<div class="inf-l plain"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>`;
 }
 function vEsf(m) {
   m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
   const pintar = () => {
-    const e = situacionFinanciera(movs(), S.d.cuentas, F.hasta);
-    $('out').innerHTML = cabInforme('Estado de situación financiera', `A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. ${infOpc.nivel === '0' ? 'Toca un rubro para ver las cuentas del PUC que lo forman.' : 'Cada rubro muestra sus cuentas del PUC hasta el nivel escogido. Toca una cuenta para ver su libro auxiliar.'}</p>
+    const e = situacionFinanciera(movsInf(null, F.hasta), S.d.cuentas, F.hasta);
+    $('out').innerHTML = cabInforme('Estado de situación financiera', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. ${infOpc.nivel === '0' ? 'Toca un rubro para ver las cuentas del PUC que lo forman.' : 'Cada rubro muestra sus cuentas del PUC hasta el nivel escogido. Toca una cuenta para ver su libro auxiliar.'}</p>
       <div class="inf">${e.grupos.map(g => `<section class="inf-g"><h3>${g.titulo}</h3>${g.secciones.map(sx => sx.lineas.length ? `${sx.titulo ? `<h4>${sx.titulo}</h4>` : ''}${sx.lineas.map(lineaInforme).join('')}<div class="inf-l sub"><span>Total ${(sx.titulo || g.titulo).toLowerCase()}</span><span class="mono">${money(sx.lineas.reduce((s, x) => s + x.valor, 0))}</span></div>` : '').join('') || '<p class="muted">Sin saldos.</p>'}
         <div class="inf-l tot"><span>Total ${g.titulo.toLowerCase()}</span><span class="mono">${money(g.total)}</span></div></section>`).join('')}
         <div class="inf-l tot big"><span>Total pasivo y patrimonio</span><span class="mono">${money(e.pasivo + e.patrimonio)}</span></div></div>
       ${e.cuadra ? '<p class="okmsg">El activo es igual al pasivo más el patrimonio.</p>' : `<p class="err">No cuadra: diferencia de ${money(e.activo - e.pasivo - e.patrimonio)}. Revisa la homologación de las cuentas.</p>`}
       <p class="hint">El resultado del ejercicio incluye los ingresos, costos y gastos que aún no se han cerrado contra la cuenta 36.</p>`;
   };
-  $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
+  filtrosInf(pintar);
   pintar();
 }
 function vEr(m) {
   m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
   const pintar = () => {
-    const r = estadoResultados(movs(), S.d.cuentas, F.desde, F.hasta);
-    $('out').innerHTML = cabInforme('Estado de resultados', `Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
+    const r = estadoResultados(movsInf(F.desde, F.hasta), S.d.cuentas, F.desde, F.hasta);
+    $('out').innerHTML = cabInforme('Estado de resultados', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
       <div class="inf">${r.secciones.map(sx => sx.total ? `<div class="inf-l tot ${sx.final ? 'big' : ''}"><span>${sx.total}</span><span class="mono">${money(sx.valor)}</span></div>`
         : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
   };
-  $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
+  filtrosInf(pintar);
   pintar();
 }
 

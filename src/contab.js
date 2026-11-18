@@ -190,7 +190,7 @@ function porRubro(movs, cuentas, desde, hasta) {
   return r;
 }
 function lineas(r, ids, signo, idx) {
-  return ids.filter(id => r[id] && r[id].dc).map(id => ({ id, nombre: RUBRO[id].nombre, valor: r2(signo * r[id].dc),
+  return ids.filter(id => r[id] && r[id].dc).map(id => ({ id, signo, nombre: RUBRO[id].nombre, valor: r2(signo * r[id].dc),
     cuentas: Object.entries(r[id].cuentas).filter(([, v]) => v).map(([c, v]) => ({ codigo: c, nombre: idx[c]?.nombre || c, valor: r2(signo * v) })).sort((a, b) => a.codigo.localeCompare(b.codigo)) }));
 }
 const suma = l => r2(l.reduce((s, x) => s + x.valor, 0));
