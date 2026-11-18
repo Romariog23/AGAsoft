@@ -148,6 +148,20 @@ function balancePrueba(movs, cuentas, desde, hasta) {
   return { filas, debitos: r2(hojas.reduce((s, f) => s + f.debito, 0)), creditos: r2(hojas.reduce((s, f) => s + f.credito, 0)) };
 }
 
+/* ---------- Balance de prueba por tercero ---------- */
+// Saldos de una cuenta (o de todas las que empiezan por ese código) separados por tercero.
+function saldosPorTercero(movs, cuentas, prefijo, desde, hasta) {
+  const idx = indexar(cuentas), nat = natDe(prefijo, idx), acc = {};
+  for (const m of movs) {
+    if (!m.cuenta.startsWith(prefijo) || m.fecha > hasta) continue;
+    const k = m.tercero_id || '', x = (acc[k] = acc[k] || { tercero_id: k || null, id: 0, ic: 0, d: 0, c: 0 });
+    if (desde && m.fecha < desde) { x.id += m.debito; x.ic += m.credito; } else { x.d += m.debito; x.c += m.credito; }
+  }
+  const sal = (d, c) => r2(nat === 'D' ? d - c : c - d);
+  return Object.values(acc).map(x => ({ tercero_id: x.tercero_id, inicial: sal(x.id, x.ic), debito: r2(x.d), credito: r2(x.c), final: sal(x.id + x.d, x.ic + x.c) }))
+    .filter(x => x.inicial || x.debito || x.credito || x.final);
+}
+
 /* ---------- Libro auxiliar ---------- */
 // Movimientos de una cuenta (o de todas las que empiezan por ese código), con saldo corrido.
 function libroAuxiliar(movs, cuentas, prefijo, desde, hasta, terceroId) {
@@ -226,4 +240,4 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };

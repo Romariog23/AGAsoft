@@ -269,3 +269,4 @@ dialog::backdrop{background:rgb(8 22 29 / .45)}
 .puc .tg{display:inline-block;width:14px;color:var(--muted)}
 .puc tr.lv8 td:first-child{color:var(--fg)}
 .filters .grow{min-width:0}
+.bal tr.ter td{font-size:.86rem;color:var(--muted);padding-top:4px;padding-bottom:4px}.bal tr.ter td:nth-child(2){padding-left:52px}
