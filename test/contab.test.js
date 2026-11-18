@@ -101,3 +101,26 @@ test('plan por niveles: auxiliares de 8 dígitos y parámetros', async () => {
   assert.equal(parametrosDe({ clientes: '130505' }).clientes, '13050501');
   assert.equal(a8('3105'), '31050501');
 });
+
+test('compras: factura de proveedor, egreso y cuentas por pagar', async () => {
+  const { totalesCompra, asientoCompra, cuentasPorPagar, erroresCompra } = await import('../src/compras.js');
+  const plan = planInicial();
+  const lineas = [{ cuenta: '51353501', descripcion: 'Internet', base: 1000000, iva_pct: 19 }];
+  const ret = { retefuente_pct: 4, reteiva_pct: 15, reteica_milaje: 9.66 };
+  const t = totalesCompra(lineas, ret);
+  assert.equal(t.iva, 190000); assert.equal(t.retefuente, 40000); assert.equal(t.reteiva, 28500); assert.equal(t.reteica, 9660); assert.equal(t.neto, 1111840);
+  const fc = { id: 'k1', tipo: 'FC', numero: 1, num_proveedor: 'FE-88', fecha: '2026-11-01', vence: '2026-11-10', tercero_id: 'p1', lineas, ...ret, ...t, estado: 'contabilizado' };
+  const a = asientoCompra(fc, {});
+  assert.ok(cuadra(a));
+  const c = Object.fromEntries(a.map(m => [m.cuenta, m]));
+  assert.equal(c['24080201'].debito, 190000); assert.equal(c['23650501'].credito, 40000); assert.equal(c['22050501'].credito, 1111840);
+  const ce = { id: 'k2', tipo: 'CE', numero: 1, fecha: '2026-11-15', tercero_id: 'p1', cuenta_pago: '11100501', aplicaciones: [{ compra_id: 'k1', valor: 1000000 }], anticipo: 50000, estado: 'contabilizado' };
+  const e = asientoCompra(ce, {}); assert.ok(cuadra(e));
+  assert.equal(e.find(m => m.cuenta === '11100501').credito, 1050000); assert.equal(e.find(m => m.cuenta === '13300501').debito, 50000);
+  const cxp = cuentasPorPagar([fc, ce, { ...ce, id: 'k3', estado: 'anulado' }], '2026-11-20');
+  assert.equal(cxp[0].saldo, 111840); assert.equal(cxp[0].diasVencida, 10);
+  assert.deepEqual(erroresCompra(fc, plan.concat([{ codigo: '51353501' }])), []);
+  assert.match(erroresCompra({ ...fc, lineas: [{ cuenta: '5135', base: 0 }] }, plan).join(' '), /no es auxiliar/);
+  const ms = movimientos({ ...S, compras: [fc, ce] });
+  const b = balancePrueba(ms, plan, '2026-01-01', '2026-12-31'); assert.equal(b.debitos, b.creditos);
+});
