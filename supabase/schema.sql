@@ -1220,3 +1220,6 @@ drop policy if exists nominas_editar on public.nominas;
 create policy nominas_editar on public.nominas for update to authenticated using (public.puede_editar(empresa_id)) with check (public.puede_editar(empresa_id));
 
 notify pgrst, 'reload schema';
+
+-- 020: empleado pensionado (no cotiza pensión ni fondo de solidaridad; salud completa).
+alter table public.empleados add column if not exists pensionado boolean not null default false;

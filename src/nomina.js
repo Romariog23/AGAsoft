@@ -97,12 +97,15 @@ export function liquidar(emp, nov, P) {
   const salarial = r2(salario + v('horas_extra') + v('comisiones'));
   const ibc = dias ? r2(Math.max(salarial, P.smmlv * dias / 30)) : 0, ibcMes = dias ? ibc * 30 / dias : 0;
   out.ibc = ibc;
-  add('salud', ibc * 0.04); add('pension', ibc * 0.04); add('solidaridad', ibc * pctSolidaridad(ibcMes, P.smmlv) / 100);
+  // Pensionado: no cotiza pensión (ni empleado, ni empresa, ni solidaridad); salud sí, completa.
+  const pensionado = emp.pensionado === true;
+  add('salud', ibc * 0.04);
+  if (!pensionado) { add('pension', ibc * 0.04); add('solidaridad', ibc * pctSolidaridad(ibcMes, P.smmlv) / 100); }
   add('retencion', v('retencion')); add('prestamo', v('prestamo')); add('otros_desc', v('otros_desc'));
   // Aportes de la empresa. Exonerada (art. 114-1 E.T.): sin salud 8,5 %, ICBF ni SENA por quien gana menos de 10 mínimos.
   const exon = P.exonerada && ibcMes < 10 * P.smmlv;
   if (!exon) add('salud_emp', ibc * 0.085);
-  add('pension_emp', ibc * 0.12);
+  if (!pensionado) add('pension_emp', ibc * 0.12);
   add('arl', ibc * ((RIESGOS.find(r => r[0] === String(emp.riesgo || '1')) || RIESGOS[0])[2]) / 100);
   add('caja', ibc * 0.04);
   if (!exon) { add('icbf', ibc * 0.03); add('sena', ibc * 0.02); }
