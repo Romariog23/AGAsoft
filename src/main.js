@@ -575,6 +575,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase" ${editando ? 'disabled' : ''}>${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
       ${tipo === 'FV' ? `<div><label for="fp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="fp">${fVenta().map(f => `<option value="${f.id}" ${f.id === formaDe(fVenta(), doc.forma_pago === 'credito', doc.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
+      ${esRC ? `<div><label for="rfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="rfp">${optsContado(fVenta(), doc.cuenta_pago || (doc.id ? (doc.medio_pago === 'efectivo' ? param().caja : param().bancos) : ''))}</select></div>` : ''}
       ${tipo === 'FV' || esRC ? `<div><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
       ${esNota ? `<div class="span2"><label for="ref">Factura que corrige</label><select id="ref" required></select></div>
         <div class="span2"><label for="con">Concepto de la ${T.corto.toLowerCase()}</label><select id="con">${opts(tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND, doc.concepto)}</select></div>` : ''}
@@ -609,6 +610,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if ($('clase')) doc.electronica = $('clase').value === 'electronica';
     if ($('fp')) { const f = fVenta().find(x => x.id === $('fp').value) || fVenta()[0]; doc.forma_pago = f.credito ? 'credito' : 'contado'; doc.cuenta_pago = f.credito ? '' : f.cuenta; doc.vence = doc.forma_pago === 'credito' ? $('vence').value : doc.fecha; }
     if ($('mp')) doc.medio_pago = $('mp').value;
+    if ($('rfp')) doc.cuenta_pago = $('rfp').value;
     if ($('ref')) { doc.ref_id = $('ref').value; doc.concepto = $('con').value; }
     doc.observaciones = $('obs').value;
     if ($('rf')) Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) });
@@ -848,6 +850,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       <div><dl class="kv">
         <dt>Fecha</dt><dd>${fFecha(d.fecha)}</dd>
         ${d.tipo === 'FV' ? `<dt>Forma de pago</dt><dd>${esc(nomForma(fVenta(), d.forma_pago === 'credito', d.cuenta_pago))}</dd>${d.forma_pago === 'credito' ? `<dt>Vence</dt><dd>${fFecha(d.vence)}</dd>` : ''}` : ''}
+        ${d.tipo === 'RC' ? `<dt>Forma de pago</dt><dd>${esc(nomForma(fVenta(), false, d.cuenta_pago || (d.medio_pago === 'efectivo' ? param().caja : param().bancos)))}</dd>` : ''}
         ${d.tipo === 'FV' || d.tipo === 'RC' ? `<dt>Medio de pago</dt><dd>${esc(MEDIOS_PAGO.find(x => x[0] === d.medio_pago)?.[1] || '')}</dd>` : ''}
         ${f ? `<dt>Factura afectada</dt><dd class="mono">${esc(numDoc(f))} del ${fFecha(f.fecha)}</dd><dt>Concepto</dt><dd>${esc(conc.find(c => c[0] === d.concepto)?.[1] || '')}</dd>` : ''}
       </dl></div>
@@ -1159,6 +1162,9 @@ const esCredFP = () => !!fVenta().find(f => f.id === $('fp')?.value)?.credito;
 const fVenta = () => formasPago(emp()?.contabilidad, param(), 'venta');
 const fCompra = () => formasPago(emp()?.contabilidad, param(), 'compra');
 const nomForma = (formas, credito, cuenta) => { if (credito) return formas.find(f => f.credito)?.nombre || 'Crédito'; if (!cuenta) return 'Contado (a clientes)'; const f = formas.find(x => !x.credito && x.cuenta === cuenta); return f ? f.nombre : `Contado · ${cuenta} ${nomCta(cuenta)}`; };
+// Opciones de las formas de pago de contado (recibos y egresos); conserva la cuenta guardada aunque ya no esté en la lista.
+const optsContado = (formas, cuenta) => { const fs = formas.filter(f => !f.credito); const sel = fs.find(f => f.cuenta === cuenta) || (cuenta ? null : fs[0]);
+  return (cuenta && !sel ? `<option value="${esc(cuenta)}" selected>${esc(cuenta)} ${esc(nomCta(cuenta))}</option>` : '') + fs.map(f => `<option value="${esc(f.cuenta)}" ${f === sel ? 'selected' : ''}>${esc(f.nombre)} · ${esc(f.cuenta)}</option>`).join(''); };
 const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos });
 const movs = () => movimientos({ ...S.d, param: param() });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
@@ -1674,7 +1680,6 @@ const proveedores = (incluir) => [...S.d.terceros].filter(t => t.es_proveedor ||
 const cxp = () => cuentasPorPagar(compras(), hoy());
 const ctasDe = re => cuentasAux().filter(c => re.test(c.codigo));
 const optsCta = (lista, sel) => lista.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('');
-const ctasPago = () => ctasDe(/^11/);
 
 function vCompras(m, tipo) {
   const T = TIPOS_COMPRA[tipo]; if (!T) { location.replace('#/compras/FC'); return; }
@@ -1721,7 +1726,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       <div class="span2"><label for="prv">Proveedor</label><div class="row nowrap"><select id="prv" required><option value="">Escoge el proveedor…</option>${proveedores(c.tercero_id).map(t => `<option value="${t.id}" ${t.id === c.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
         <button type="button" id="newPrv">+ Nuevo</button></div></div>
       <div><label for="kf">Fecha</label><input id="kf" type="date" value="${c.fecha}" required></div>
-      ${esCE ? `<div><label for="kp">Pagado desde</label><select id="kp">${optsCta(ctasPago(), c.cuenta_pago)}</select></div>` :
+      ${esCE ? `<div><label for="kp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kp">${optsContado(fCompra(), id ? c.cuenta_pago : '')}</select></div>` :
         `<div><label for="kfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kfp">${fCompra().map(f => `<option value="${f.id}" ${f.id === formaDe(fCompra(), !c.cuenta_pago, c.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
         ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}`}
@@ -1849,7 +1854,7 @@ function hojaCompra(c, imprimir) {
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === c.id);
   return `${cabInforme(T.nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
-    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Pagado desde:</b> ${esc(c.cuenta_pago)} ${esc(nomCta(c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
+    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), false, c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
     ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
         ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
         <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`

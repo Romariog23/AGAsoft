@@ -158,3 +158,8 @@ test('auxiliar por rango de cuentas', async () => {
   const r2 = auxiliarRango(ms, plan, '1', '2', null, '2026-12-31');
   assert.ok(r2.secciones.some(x => x.cuenta.startsWith('2')) && !r2.secciones.some(x => x.cuenta.startsWith('4')));
 });
+
+test('recibo de caja con forma de pago configurada', () => {
+  const r = asiento({ ...rc, cuenta_pago: '11200501' }, { ...S, docs: S.documentos });
+  assert.ok(cuadra(r)); assert.equal(r.find(m => m.cuenta === '11200501').debito, 600000); assert.ok(!r.some(m => m.cuenta === '11100501'));
+});
