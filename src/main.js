@@ -107,7 +107,20 @@ const MENU = [
 function renderNav(actual) {
   const items = [...MENU];
   if (store.mode === 'supabase' && S.perfil?.es_admin) items.push(['-', 'Administración'], ['usuarios', 'Usuarios']);
-  $('nav').innerHTML = items.map(([k, t]) => k === '-' ? `<h3>${t}</h3>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}</a>`).join('');
+  // Grupos desplegables: queda abierto el del módulo actual y los que la persona dejó abiertos.
+  let abiertos = []; try { abiertos = JSON.parse(localStorage.getItem('agasoft-menu') || '[]'); } catch (_) {}
+  const grupos = []; let g = null;
+  for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
+  $('nav').innerHTML = grupos.map(x => {
+    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}</a>`).join('');
+    if (!x.t) return links;
+    const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
+    return `<details class="nav-g" data-g="${x.t}" ${open ? 'open' : ''}><summary>${x.t}</summary>${links}</details>`;
+  }).join('');
+  $('nav').querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => {
+    const l = [...$('nav').querySelectorAll('details[open]')].map(x => x.dataset.g);
+    try { localStorage.setItem('agasoft-menu', JSON.stringify(l)); } catch (_) {}
+  }));
 }
 window.addEventListener('hashchange', route);
 function route() {
