@@ -3,7 +3,7 @@
 // (se guarda en empresas.contabilidad.exogena); si no ha configurado, se usan las reglas de fábrica.
 import { r2 } from './calc.js';
 
-// signo D = débitos menos créditos; C = créditos menos débitos.
+// signo D = débitos menos créditos; C = créditos menos débitos. saldo = los formatos de saldos (cálculo por defecto).
 export const FORMATOS = {
   1001: { nombre: 'Pagos o abonos en cuenta y retenciones practicadas', concepto: true, valores: [['pago', 'Pago o abono en cuenta', 'D'], ['retefuente', 'Retención en la fuente practicada', 'C'], ['reteiva', 'Retención de IVA practicada', 'C']] },
   1005: { nombre: 'IVA descontable', concepto: false, valores: [['iva', 'Impuesto descontable', 'D']] },
@@ -47,24 +47,33 @@ export function reglaDe(reglas, cod, cuenta) {
   return mejor && mejor.columna ? mejor : null;
 }
 
+// Cómo se calcula el valor de cada regla. El año sale del filtro del informe.
+// pago y saldo usan el signo de la columna (D = débitos menos créditos; C = créditos menos débitos);
+// saldo se acumula desde el inicio hasta el 31 de diciembre.
+export const CALCULOS = [['pago', 'Pago o abono en cuenta'], ['debito', 'Débito'], ['credito', 'Crédito'], ['saldo', 'Saldo']];
+export const calculoDe = (r, cod) => CALCULOS.some(([k]) => k === r?.calculo) ? r.calculo : FORMATOS[cod]?.saldo ? 'saldo' : 'pago';
+
 // Filas de un formato para el año, por tercero (y concepto cuando el formato lo usa).
 export function formato(cod, movs, anio, reglas = reglasExogena()) {
   const F = FORMATOS[cod], ini = `${anio}-01-01`, fin = `${anio}-12-31`, filas = {}, nombres = {};
   const signo = Object.fromEntries(F.valores.map(([k, , s]) => [k, s]));
-  const del = movs.filter(m => m.tipo !== 'CI' && m.tercero_id && m.fecha <= fin && (F.saldo || m.fecha >= ini));
+  const del = movs.filter(m => m.tipo !== 'CI' && m.tercero_id && m.fecha <= fin);
   const sumar = (tercero, conc, k, v) => { if (!v) return; const key = `${tercero}|${conc}`; const f = filas[key] || (filas[key] = { tercero_id: tercero, concepto: conc }); f[k] = r2((f[k] || 0) + v); };
-  const valor = (m, k) => signo[k] === 'C' ? m.credito - m.debito : m.debito - m.credito;
+  const valor = (m, k, calc) => calc === 'debito' ? m.debito : calc === 'credito' ? m.credito : signo[k] === 'C' ? m.credito - m.debito : m.debito - m.credito;
   const sinConcepto = [];
   for (const m of del) {
     const r = reglaDe(reglas, cod, m.cuenta);
     if (!r || !(r.columna in signo)) continue;
+    const calc = calculoDe(r, cod);
+    if (calc !== 'saldo' && m.fecha < ini) continue;
     if (r.nombre) nombres[r.concepto] = r.nombre;
-    if (F.concepto && !r.concepto) sinConcepto.push([m, r]); else sumar(m.tercero_id, F.concepto ? r.concepto : '', r.columna, valor(m, r.columna));
+    const v = valor(m, r.columna, calc);
+    if (F.concepto && !r.concepto) sinConcepto.push([m.tercero_id, r.columna, v]); else sumar(m.tercero_id, F.concepto ? r.concepto : '', r.columna, v);
   }
   // Sin concepto (p. ej. retenciones del 1001): al concepto con el mayor valor de la primera columna de ese tercero.
   const k0 = F.valores[0][0];
   const principal = t => Object.values(filas).filter(f => f.tercero_id === t).sort((a, b) => (b[k0] || 0) - (a[k0] || 0))[0]?.concepto || (CATALOGO[cod] || []).at(-1)?.[0] || '';
-  for (const [m, r] of sinConcepto) sumar(m.tercero_id, principal(m.tercero_id), r.columna, valor(m, r.columna));
+  for (const [t, k, v] of sinConcepto) sumar(t, principal(t), k, v);
   return Object.values(filas).filter(f => F.valores.some(([k]) => Math.abs(f[k] || 0) >= 0.5))
     .map(f => ({ ...f, nombre_concepto: nombres[f.concepto] || nombreConcepto(f.concepto) }))
     .sort((a, b) => a.concepto.localeCompare(b.concepto) || a.tercero_id.localeCompare(b.tercero_id));

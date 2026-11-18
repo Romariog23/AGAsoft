@@ -6,7 +6,7 @@ import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPaga
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
-import { FORMATOS, CATALOGO, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
+import { FORMATOS, CATALOGO, CALCULOS, calculoDe, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
@@ -1420,6 +1420,7 @@ function vExogenaCfg(m, fSel) {
   const lista = reglas.filter(r => String(r.formato) === cod).sort((a, b) => a.cuenta.localeCompare(b.cuenta));
   const col = k => k ? (F.valores.find(([x]) => x === k)?.[1] || k) : 'No se reporta';
   const nomCon = r => r.nombre || nombreConcepto(r.concepto);
+  const nomCalc = r => Object.fromEntries(CALCULOS)[calculoDe(r, cod)];
   const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort(), pasado = String(Number(hoy().slice(0, 4)) - 1);
   const anio = anios.includes(pasado) ? pasado : anios.at(-1) || pasado;
   const sinRegla = [...new Set(ms.filter(x => x.tipo !== 'CI' && x.fecha.startsWith(anio) && CLASES_EXO[cod].test(x.cuenta)).map(x => x.cuenta))]
@@ -1428,11 +1429,11 @@ function vExogenaCfg(m, fSel) {
       <div class="row"><a class="btn" href="#/exogena">Ver formatos</a><button class="primary" id="nx">Nueva regla</button></div></header>
     <section class="panel stack"><div class="row filters"><div class="grow"><label for="cf">Formato</label><select id="cf">${Object.entries(FORMATOS).map(([k, f]) => `<option value="${k}" ${k === cod ? 'selected' : ''}>${k} · ${esc(f.nombre)}</option>`).join('')}</select></div></div>
       <p class="hint">La cuenta puede ser de cualquier nivel (2, 4, 6 u 8 dígitos) y cubre todas las que empiezan así. Si una cuenta cabe en varias reglas, gana la más detallada; por ejemplo 5110 manda sobre 5. "No se reporta" sirve para sacar una cuenta de una regla más general.${F.concepto && cod === '1001' ? ' Las retenciones sin concepto van al concepto donde el tercero tenga el mayor pago.' : ''}</p>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th>${F.concepto ? '<th>Concepto</th>' : ''}<th>Columna</th><th></th></tr></thead><tbody>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th>${F.concepto ? '<th>Concepto</th>' : ''}<th>Columna</th><th>Cálculo</th><th></th></tr></thead><tbody>
       ${lista.map(r => `<tr><td><b class="mono">${esc(r.cuenta)}</b> <span class="muted">${esc(nomCta(r.cuenta))}</span></td>
         ${F.concepto ? `<td>${r.columna ? (r.concepto ? `<b class="mono">${esc(r.concepto)}</b> <span class="hint">${esc(nomCon(r))}</span>` : '<span class="hint">El principal del tercero</span>') : ''}</td>` : ''}
-        <td>${r.columna ? esc(col(r.columna)) : '<span class="tag">No se reporta</span>'}</td>
-        <td class="r nowrap"><button class="sm" data-ex="${esc(r.id)}">Editar</button><button class="sm ghost" data-bx="${esc(r.id)}">Quitar</button></td></tr>`).join('') || `<tr><td colspan="4" class="muted">Este formato no tiene reglas: no saldrá nada.</td></tr>`}</tbody></table></div></section>
+        <td>${r.columna ? esc(col(r.columna)) : '<span class="tag">No se reporta</span>'}</td><td>${r.columna ? esc(nomCalc(r)) : ''}</td>
+        <td class="r nowrap"><button class="sm" data-ex="${esc(r.id)}">Editar</button><button class="sm ghost" data-bx="${esc(r.id)}">Quitar</button></td></tr>`).join('') || `<tr><td colspan="5" class="muted">Este formato no tiene reglas: no saldrá nada.</td></tr>`}</tbody></table></div></section>
     ${sinRegla.length ? `<section class="panel stack"><h3>Cuentas con movimiento en ${anio} que no van a este formato</h3><p class="hint">Si alguna debe reportarse, créale una regla.</p>
       <div class="row wrap">${sinRegla.map(c => `<button class="sm" data-nc="${c}"><span class="mono">${c}</span> ${esc(nomCta(c))}</button>`).join('')}</div></section>` : ''}
     <section class="panel row"><p class="hint" style="flex:1 1 240px;margin:0">${propias ? 'Estás usando la configuración de la empresa.' : 'Estás usando la configuración de fábrica. Al guardar un cambio queda como configuración de la empresa.'}</p>
@@ -1442,7 +1443,9 @@ function vExogenaCfg(m, fSel) {
     dialogo(`<h2>${r.id ? 'Editar' : 'Nueva'} regla · formato ${cod}</h2>
       <div><label for="fx_c">Cuenta</label><input id="fx_c" name="cuenta" list="ctasX" class="mono" required value="${esc(r.cuenta || '')}" autocomplete="off" placeholder="Ej.: 5110 o 51101001">
         <datalist id="ctasX">${optsLista(S.d.cuentas.filter(x => x.codigo.length >= 2))}</datalist><p class="hint">Cualquier nivel; cubre todas las cuentas que empiezan así.</p></div>
-      <div><label for="fx_k">Columna</label><select id="fx_k" name="columna">${opts([...F.valores.map(([k, n]) => [k, n]), ['', 'No se reporta']], r.columna ?? F.valores[0][0])}</select></div>
+      <div class="grid2"><div><label for="fx_k">Columna</label><select id="fx_k" name="columna">${opts([...F.valores.map(([k, n]) => [k, n]), ['', 'No se reporta']], r.columna ?? F.valores[0][0])}</select></div>
+        <div><label for="fx_a">Cálculo</label><select id="fx_a" name="calculo">${opts(CALCULOS, calculoDe(r, cod))}</select></div></div>
+      <p class="hint">Débito o crédito: la suma de esos movimientos. Pago o abono en cuenta: el movimiento neto. Saldo: lo acumulado al 31 de diciembre. El año se escoge al sacar el informe.</p>
       ${F.concepto ? `<div class="grid2"><div><label for="fx_o">Concepto DIAN</label><input id="fx_o" name="concepto" list="conX" class="mono" inputmode="numeric" maxlength="4" value="${esc(r.concepto || '')}" autocomplete="off" placeholder="${cod === '1001' ? 'Vacío = el principal' : 'Ej.: ' + CATALOGO[cod][0][0]}">
           <datalist id="conX">${(CATALOGO[cod] || []).map(([c, n]) => `<option value="${c}">${esc(n)}</option>`).join('')}</datalist></div>
         <div><label for="fx_n">Nombre del concepto</label><input id="fx_n" name="nombre" maxlength="80" value="${esc(r.nombre || '')}" placeholder="Opcional"></div></div>
@@ -1451,11 +1454,11 @@ function vExogenaCfg(m, fSel) {
       if (!/^\d{1,8}$/.test(cuenta)) throw new Error('Escribe el código de la cuenta (solo números).');
       if (columna && F.concepto && !concepto && cod !== '1001') throw new Error('Escribe el concepto DIAN.');
       if (concepto && !/^\d{4}$/.test(concepto)) throw new Error('El concepto DIAN es un código de 4 dígitos.');
-      const nueva = { id: r.id || `x-${Date.now().toString(36)}`, formato: cod, cuenta, concepto: columna ? concepto : '', columna, ...(nombre && columna ? { nombre } : {}) };
+      const nueva = { id: r.id || `x-${Date.now().toString(36)}`, formato: cod, cuenta, concepto: columna ? concepto : '', columna, calculo: String(fd.get('calculo') || calculoDe({}, cod)), ...(nombre && columna ? { nombre } : {}) };
       const resto = reglas.filter(x => x.id !== r.id && !(String(x.formato) === cod && x.cuenta === cuenta));
       await guardar([...resto, nueva]); toast('Regla guardada.');
     });
-    const ver = () => { const sin = !$('fx_k').value; ['fx_o', 'fx_n'].forEach(id => { if ($(id)) $(id).disabled = sin; }); };
+    const ver = () => { const sin = !$('fx_k').value; ['fx_o', 'fx_n', 'fx_a'].forEach(id => { if ($(id)) $(id).disabled = sin; }); };
     $('fx_k').onchange = ver; ver();
   };
   $('cf').onchange = () => { location.hash = `#/exogenacfg?f=${$('cf').value}`; };
