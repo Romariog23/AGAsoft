@@ -240,7 +240,6 @@ function camposEmpresa(e = {}) {
     <div class="grid2">${campoSel('regimen', 'Régimen', REGIMENES, e.regimen)}
     ${campo('actividad', 'Actividad económica (CIIU)', e.actividad, 'maxlength="60" inputmode="numeric" placeholder="6920"')}</div>
     ${check('responsable_iva', 'Es responsable de IVA (cobra IVA en sus facturas)', e.id ? e.responsable_iva : true)}
-    ${campo('responsabilidades', 'Responsabilidades fiscales (casilla 53 del RUT)', e.responsabilidades, 'placeholder="O-13, O-15, R-99-PN"')}
     <div class="grid2">${campo('direccion', 'Dirección', e.direccion)}${campo('ciudad', 'Ciudad', e.ciudad)}</div>
     <div class="grid2">${campo('telefono', 'Teléfono', e.telefono, 'type="tel"')}${campo('correo', 'Correo de facturación', e.correo, 'type="email"')}</div>
     <div><label for="f_pie">Texto al pie de las facturas (opcional)</label><textarea id="f_pie" name="pie_factura" rows="2" maxlength="600">${esc(e.pie_factura)}</textarea></div>`;
@@ -254,7 +253,7 @@ async function guardarEmpresa(fd, e = {}) {
   const nit = parseNit(fd.get('nit'));
   if (nit.error) throw new Error(nit.error);
   const row = { nombre: fd.get('nombre').trim(), nit: nit.nit, dv: nit.dv, tipo_persona: fd.get('tipo_persona'), regimen: fd.get('regimen'), actividad: fd.get('actividad').trim(),
-    responsable_iva: fd.get('responsable_iva') === 'on', responsabilidades: fd.get('responsabilidades').trim(), direccion: fd.get('direccion').trim(),
+    responsable_iva: fd.get('responsable_iva') === 'on', direccion: fd.get('direccion').trim(),
     ciudad: fd.get('ciudad').trim(), telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
   if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
   if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y la ciudad: salen en las facturas.');
@@ -284,7 +283,6 @@ function vEmpresa(m) {
       <dt>NIT</dt><dd class="mono">${fmtNit(e.nit)}-${e.dv}</dd>
       <dt>Régimen</dt><dd>${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || e.regimen)}</dd>
       <dt>IVA</dt><dd>${e.responsable_iva ? 'Responsable de IVA' : 'No responsable de IVA'}</dd>
-      <dt>Responsabilidades</dt><dd>${esc(e.responsabilidades) || '—'}</dd>
       <dt>Dirección</dt><dd>${esc([e.direccion, e.ciudad].filter(Boolean).join(', ')) || '—'}</dd>
       <dt>Contacto</dt><dd>${esc([e.telefono, e.correo].filter(Boolean).join(' · ')) || '—'}</dd>
     </dl>
@@ -617,7 +615,7 @@ function representacion(d) {
     <header class="rep-head">
       <div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
         <p>${esc([e.direccion, e.ciudad].filter(Boolean).join(', '))}${e.telefono ? ' · Tel. ' + esc(e.telefono) : ''}${e.correo ? ' · ' + esc(e.correo) : ''}</p>
-        ${e.responsabilidades ? `<p>Responsabilidades: ${esc(e.responsabilidades)}</p>` : ''}${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
+${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}</span><b class="mono">${esc(numDoc(d))}</b></div>
     </header>
     ${d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? ', vigente hasta ' + fFecha(n.vigencia_hasta) : ''}.</p>` : ''}
