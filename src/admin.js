@@ -34,13 +34,16 @@ function apiDemo() {
       { id: 'p2', nombre: 'Profesional', precio_mensual: 119900, max_empresas: 5, max_documentos_mes: 1000, max_usuarios: 3, descripcion: 'Hasta 5 contabilidades y 3 personas con acceso.', activo: true, orden: 2 },
       { id: 'p3', nombre: 'Contador', precio_mensual: 249900, max_empresas: 30, max_documentos_mes: 5000, max_usuarios: 10, descripcion: 'Para contadores con varias empresas cliente.', activo: true, orden: 3 },
     ];
-    const c = (nombre, correo, x) => ({ id: id(), nombre, correo, es_admin: false, aprobado: true, suspendido: false, plan_id: null, plan_vence: null, notas: '', creado_en: new Date().toISOString(), empresas: 0, documentos_mes: 0, usuarios: 0, ultimo_documento: null, ...x });
+    const c = (nombre, correo, x) => ({ id: id(), nombre, correo, es_admin: false, aprobado: true, suspendido: false, plan_id: null, plan_vence: null, notas: '', creado_en: new Date().toISOString(), empresas: 0, documentos_mes: 0, usuarios: 0, ultimo_documento: null, prueba_hasta: null, plan_solicitado: null, solicitado_en: null, ...x });
+    const dias = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
     db = { planes, cuentas: [
       c('Administrador', 'admin@agasoft.co', { es_admin: true, empresas: 3, documentos_mes: 42 }),
       c('Contadores Asociados', 'contador@ejemplo.co', { plan_id: 'p3', plan_vence: '2027-01-31', empresas: 12, documentos_mes: 830, usuarios: 4, ultimo_documento: hoy() }),
       c('Ferretería La 30', 'gerencia@ferre30.co', { plan_id: 'p1', plan_vence: '2026-12-15', empresas: 1, documentos_mes: 97, usuarios: 1, ultimo_documento: hoy() }),
       c('Distribuidora Norte', 'admin@dnorte.co', { plan_id: 'p2', plan_vence: '2026-11-10', empresas: 2, documentos_mes: 120, usuarios: 2 }),
-      c('Nuevo cliente', 'nuevo@cliente.co', { aprobado: false }),
+      c('Panadería Doña Rosa', 'rosa@panaderia.co', { prueba_hasta: dias(9), empresas: 1, documentos_mes: 23, ultimo_documento: hoy() }),
+      c('Taller El Pistón', 'piston@taller.co', { prueba_hasta: dias(-2), plan_solicitado: 'p1', solicitado_en: new Date().toISOString(), empresas: 1, documentos_mes: 31 }),
+      c('Inversiones Caribe', 'info@icaribe.co', { prueba_hasta: dias(-5), empresas: 1, documentos_mes: 4 }),
     ] };
   }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) {} };
@@ -89,10 +92,19 @@ async function cargar() {
 
 /* ---------- Estado y uso de cada cuenta ---------- */
 const planDe = c => S.planes.find(p => p.id === c.plan_id);
+const pedidoDe = c => c.plan_solicitado && S.planes.find(p => p.id === c.plan_solicitado);
+const diasA = f => Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5));
+const enPrueba = c => !!c.prueba_hasta && c.prueba_hasta >= hoy();
+// Por aprobar: registros sin aprobar (cuentas antiguas) y pruebas vencidas.
+const porAprobar = c => !c.es_admin && (!c.aprobado || (!!c.prueba_hasta && c.prueba_hasta < hoy()));
 function estado(c) {
   if (c.es_admin) return ['Administrador', 'el'];
   if (!c.aprobado) return ['Pendiente', 'bad'];
   if (c.suspendido) return ['Suspendida', 'bad'];
+  if (c.prueba_hasta) {
+    if (c.prueba_hasta >= hoy()) { const n = diasA(c.prueba_hasta); return [n ? `Prueba: ${n} día${n === 1 ? '' : 's'}` : 'Prueba: último día', 'el']; }
+    return c.plan_solicitado ? ['Pidió plan', 'bad'] : ['Prueba vencida', 'bad'];
+  }
   if (c.plan_vence && c.plan_vence < hoy()) return ['Plan vencido', 'bad'];
   if (!c.plan_id) return ['Sin plan', ''];
   return ['Activa', 'ok'];
@@ -108,13 +120,14 @@ function pintar() {
   const clientes = S.cuentas.filter(c => !c.es_admin);
   const activas = clientes.filter(c => estado(c)[0] === 'Activa');
   const ingreso = activas.reduce((s, c) => s + Number(planDe(c)?.precio_mensual || 0), 0);
-  const pend = clientes.filter(c => !c.aprobado).length;
+  const pend = clientes.filter(porAprobar).length, prueba = clientes.filter(enPrueba).length;
   const vencen = clientes.filter(c => c.plan_vence && c.plan_vence >= hoy() && c.plan_vence <= new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10)).length;
   $('main').innerHTML = `${store.mode === 'local' ? '<p class="aviso">Modo demostración: datos de ejemplo guardados solo en este navegador. Con Supabase configurado, aquí ves las cuentas reales.</p>' : ''}
     <header class="vhead"><div><h2>Administración de AGAsoft</h2><p class="sub">Cuentas, planes y uso de cada contabilidad.</p></div></header>
     <section class="kpis">
       <div class="kpi"><span>Cuentas activas</span><b class="mono">${activas.length}</b></div>
       <div class="kpi"><span>Ingreso mensual de los planes</span><b class="mono">${money(ingreso)}</b></div>
+      <div class="kpi"><span>En prueba gratis</span><b class="mono">${prueba}</b></div>
       <div class="kpi ${pend ? 'warn' : ''}"><span>Por aprobar</span><b class="mono">${pend}</b></div>
       <div class="kpi ${vencen ? 'warn' : ''}"><span>Planes que vencen en 15 días</span><b class="mono">${vencen}</b></div>
     </section>
@@ -127,17 +140,17 @@ function pintar() {
 function pintarCuentas() {
   const q = S.filtro.toLowerCase();
   const l = S.cuentas.filter(c => !q || `${c.nombre} ${c.correo}`.toLowerCase().includes(q))
-    .sort((a, b) => (a.aprobado - b.aprobado) || (b.es_admin - a.es_admin) || a.nombre.localeCompare(b.nombre));
+    .sort((a, b) => (porAprobar(b) - porAprobar(a)) || (b.es_admin - a.es_admin) || a.nombre.localeCompare(b.nombre));
   $('tabC').innerHTML = `<div class="row filters"><input id="q" type="search" placeholder="Buscar por nombre o correo" value="${esc(S.filtro)}"></div>
-    <p class="hint">Cada cuenta es un usuario dueño de sus contabilidades (empresas). Las personas nuevas se registran en AGAsoft con "Solicitar acceso" y aparecen aquí como pendientes: apruébalas y asígnales un plan.</p>
+    <p class="hint">Cada cuenta es un usuario dueño de sus contabilidades (empresas). Quien se registra en AGAsoft entra de una vez con 15 días de prueba gratis. Al terminar la prueba no puede entrar hasta que escoja un plan y tú lo apruebes aquí.</p>
     <div class="tbl-wrap"><table class="tbl adm"><thead><tr><th>Cuenta</th><th>Plan</th><th>Vence</th><th>Contabilidades</th><th>Documentos del mes</th><th>Personas</th><th>Estado</th><th></th></tr></thead><tbody>
     ${l.map(c => { const p = planDe(c), [est, cls] = estado(c); return `<tr class="${c.suspendido ? 'muted' : ''}">
       <td><b>${esc(c.nombre || '(sin nombre)')}</b><br><small class="muted">${esc(c.correo)}</small>${c.notas ? `<br><small class="muted">${esc(c.notas)}</small>` : ''}</td>
-      <td>${c.es_admin ? '—' : p ? `${esc(p.nombre)}<br><small class="muted">${money(p.precio_mensual)}/mes</small>` : '<span class="muted">Sin plan</span>'}</td>
-      <td>${c.es_admin ? '—' : fFecha(c.plan_vence)}</td>
+      <td>${c.es_admin ? '—' : p ? `${esc(p.nombre)}<br><small class="muted">${money(p.precio_mensual)}/mes</small>` : c.prueba_hasta ? 'Prueba gratis' : '<span class="muted">Sin plan</span>'}${pedidoDe(c) ? `<br><small><b>Pidió:</b> ${esc(pedidoDe(c).nombre)}</small>` : ''}</td>
+      <td>${c.es_admin ? '—' : c.prueba_hasta && !p ? fFecha(c.prueba_hasta) : fFecha(c.plan_vence)}</td>
       <td>${uso(c.empresas, c.es_admin ? null : p?.max_empresas)}</td><td>${uso(c.documentos_mes, c.es_admin ? null : p?.max_documentos_mes)}</td><td>${uso(c.usuarios, c.es_admin ? null : p?.max_usuarios)}</td>
       <td><span class="tag ${cls}">${est}</span>${sobreLimite(c) ? ' <span class="tag bad">En el límite</span>' : ''}</td>
-      <td class="r nowrap">${c.es_admin ? '' : `${!c.aprobado ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}`}</td></tr>`; }).join('')}
+      <td class="r nowrap">${c.es_admin ? '' : `${porAprobar(c) ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}`}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   $('q').oninput = () => { S.filtro = $('q').value; const pos = $('q').selectionStart; pintarCuentas(); $('q').focus(); $('q').setSelectionRange(pos, pos); };
   $('tabC').onclick = async ev => {
@@ -160,12 +173,20 @@ function dialogo(html, onOk) {
 }
 function formCuenta(c, aprobar) {
   const sugerido = c.plan_vence || new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const sel = c.plan_id || (aprobar && c.plan_solicitado) || '', pedido = pedidoDe(c);
   dialogo(`<h2>${aprobar ? 'Aprobar cuenta' : 'Plan de la cuenta'}</h2><p><b>${esc(c.nombre)}</b> · ${esc(c.correo)}</p>
-    <div><label for="f_plan">Plan</label><select id="f_plan" name="plan_id"><option value="">Sin plan (sin límites)</option>${S.planes.filter(p => p.activo || p.id === c.plan_id).map(p => `<option value="${p.id}" ${p.id === c.plan_id ? 'selected' : ''}>${esc(p.nombre)} · ${money(p.precio_mensual)}/mes</option>`).join('')}</select></div>
+    ${pedido ? `<p class="okmsg">Pidió el plan ${esc(pedido.nombre)}${c.solicitado_en ? ' el ' + fFecha(c.solicitado_en.slice(0, 10)) : ''}.</p>` : ''}
+    ${c.prueba_hasta ? `<p class="hint">Prueba gratis ${c.prueba_hasta < hoy() ? 'vencida el' : 'hasta el'} ${fFecha(c.prueba_hasta)}. Al guardar con un plan, la prueba termina y la cuenta queda con ese plan.</p>` : ''}
+    <div><label for="f_plan">Plan</label><select id="f_plan" name="plan_id"><option value="">${c.prueba_hasta ? 'Seguir en prueba gratis' : 'Sin plan (sin límites)'}</option>${S.planes.filter(p => p.activo || p.id === sel).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.nombre)} · ${money(p.precio_mensual)}/mes</option>`).join('')}</select></div>
+    ${c.prueba_hasta ? `<div><label for="f_prueba">Prueba gratis hasta</label><input id="f_prueba" name="prueba_hasta" type="date" value="${c.prueba_hasta}"><p class="hint">Si sigue en prueba, puedes darle más días aquí.</p></div>` : ''}
     <div><label for="f_vence">Pagado hasta</label><input id="f_vence" name="plan_vence" type="date" value="${c.plan_id || aprobar ? sugerido : (c.plan_vence || '')}"><p class="hint">Después de esta fecha la cuenta puede ver sus datos pero no registrar documentos nuevos. Déjalo vacío si no vence.</p></div>
     <div><label for="f_notas">Notas internas</label><input id="f_notas" name="notas" maxlength="200" value="${esc(c.notas)}" placeholder="Forma de pago, contacto…"></div>`, async fd => {
     const campos = { plan_id: fd.get('plan_id') || null, plan_vence: fd.get('plan_vence') || null, notas: String(fd.get('notas') || '').trim() };
     if (aprobar) campos.aprobado = true;
+    if (c.prueba_hasta) {
+      if (campos.plan_id) Object.assign(campos, { prueba_hasta: null, plan_solicitado: null, solicitado_en: null });
+      else { campos.prueba_hasta = fd.get('prueba_hasta') || c.prueba_hasta; campos.plan_vence = null; if (aprobar && campos.prueba_hasta < hoy()) throw new Error('Escoge un plan, o dale más días de prueba.'); }
+    }
     await api.setCuenta(c.id, campos); toast(aprobar ? 'Cuenta aprobada.' : 'Plan guardado.'); await cargar();
   });
 }

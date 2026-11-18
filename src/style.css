@@ -281,3 +281,10 @@ dialog::backdrop{background:rgb(8 22 29 / .45)}
 .uso i{display:block;height:5px;border-radius:3px;background:var(--ok);max-width:100%}
 .uso.casi i{background:var(--warn)}.uso.lleno i{background:var(--bad)}
 .uso.lleno span{color:var(--bad);font-weight:600}
+
+/* Prueba gratis y escoger plan */
+.tag.prueba{text-decoration:none}
+.planes-op{display:grid;gap:8px}
+.plan-op{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-weight:400}
+.plan-op:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.plan-op input{width:auto;margin-top:3px}

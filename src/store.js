@@ -130,7 +130,7 @@ function supabaseStore(url, key) {
     async session() { const { data } = await sb.auth.getSession(); return data.session?.user || null; },
     async perfil() { const u = await api.session(); if (!u) return null; return ok(await sb.from('perfiles').select('*').eq('id', u.id).maybeSingle()); },
     async signIn(email, password) { ok(await sb.auth.signInWithPassword({ email, password })); },
-    async signUp(email, password, nombre) { ok(await sb.auth.signUp({ email, password, options: { data: { nombre } } })); },
+    async signUp(email, password, nombre) { return ok(await sb.auth.signUp({ email, password, options: { data: { nombre } } })); },
     async signOut() { await sb.auth.signOut(); },
     async listEmpresas() { return ok(await sb.from('empresas').select('*').order('nombre')); },
     async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
@@ -153,6 +153,8 @@ function supabaseStore(url, key) {
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async miPlan() { return ok(await sb.rpc('mi_plan')); },
+    async planesActivos() { return ok(await sb.from('planes').select('*').eq('activo', true).order('orden').order('nombre')); },
+    async solicitarPlan(id) { ok(await sb.rpc('solicitar_plan', { p_plan: id })); },
     async listPerfiles() { return ok(await sb.from('perfiles').select('*').order('creado_en', { ascending: false })); },
     async setPerfil(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
   };
