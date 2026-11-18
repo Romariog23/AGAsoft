@@ -1458,7 +1458,12 @@ function vCompEditor(m, { id, tipo }) {
     const l = c.lineas[Number(tr.dataset.i)];
     l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
     if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = nomDe(l.cuenta);
-    if (el.dataset.k === 'debito' || el.dataset.k === 'credito') totales_();
+    if (el.dataset.k === 'debito' || el.dataset.k === 'credito') {
+      // Cada línea lleva solo débito o solo crédito: al escribir en uno se borra el otro.
+      const otro = el.dataset.k === 'debito' ? 'credito' : 'debito';
+      if (num(el.value)) { l[otro] = ''; const o = tr.querySelector(`[data-k=${otro}]`); if (o) o.value = ''; }
+      totales_();
+    }
   });
   $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
   $('lns').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });

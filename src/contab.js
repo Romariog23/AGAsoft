@@ -75,7 +75,13 @@ function cuadrar(out, P) {
     const m = out.find(x => x.cuenta === P.ingresos || x.cuenta === P.devoluciones) || out[out.length - 1];
     if (dif > 0) m.credito = r2(m.credito + dif); else m.debito = r2(m.debito - dif);
   }
-  return out;
+  return out.map(unLado).filter(m => m.debito || m.credito);
+}
+// Cada línea del asiento lleva un solo valor: débito o crédito. Si quedaron los dos, se deja la diferencia.
+function unLado(m) {
+  if (!m.debito || !m.credito) return m;
+  const n = r2(m.debito - m.credito);
+  return { ...m, debito: n > 0 ? n : 0, credito: n < 0 ? -n : 0 };
 }
 /* ---------- Comprobantes contables manuales ---------- */
 const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', plural: 'Notas de contabilidad' }, SI: { nombre: 'Saldos iniciales', corto: 'Saldos ini.', plural: 'Saldos iniciales' } };
@@ -240,4 +246,4 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
