@@ -22,7 +22,7 @@ function asiento(d, ctx) {
   const prods = Object.fromEntries((ctx.productos || []).map(p => [p.id, p]));
 
   if (d.tipo === 'RC') {
-    const caja = d.medio_pago === 'efectivo' ? P.caja : P.bancos;
+    const caja = String(d.cuenta_pago || '').trim() || (d.medio_pago === 'efectivo' ? P.caja : P.bancos);
     mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`, false);
     const docs = Object.fromEntries((ctx.docs || []).map(x => [x.id, x]));
     for (const a of (ctx.aplicaciones || []).filter(a => a.recibo_id === d.id)) {
