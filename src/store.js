@@ -100,6 +100,12 @@ function localStore() {
       if (n && Number(n.siguiente) === Number(d.numero) + 1 && Number(d.numero) >= Number(n.desde)) n.siguiente = Number(d.numero);
       await api.remove('documentos', id);
     },
+    async importarDoc(doc, items) {
+      if (db.documentos.some(x => x.empresa_id === doc.empresa_id && x.tipo === 'FV' && (x.prefijo || '') === (doc.prefijo || '') && Number(x.numero) === Number(doc.numero))) throw new Error(`La factura ${doc.prefijo || ''} ${doc.numero} ya existe.`);
+      const d = await api.save('documentos', { ...doc, estado: 'emitido', emitido_en: ahora() });
+      db.items.push(...items.map((it, i) => ({ ...it, id: uid(), documento_id: d.id, empresa_id: d.empresa_id, orden: i })));
+      persist(); return d;
+    },
     async listPerfiles() { return []; },
     async setPerfil() {},
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
@@ -145,6 +151,7 @@ function supabaseStore(url, key) {
     async emitir(id) { ok(await sb.rpc('emitir_documento', { p_id: id })); return ok(await sb.from('documentos').select('*').eq('id', id).single()); },
     async anular(id, motivo) { ok(await sb.rpc('anular_recibo', { p_id: id, p_motivo: motivo })); return ok(await sb.from('documentos').select('*').eq('id', id).single()); },
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
+    async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async listPerfiles() { return ok(await sb.from('perfiles').select('*').order('creado_en', { ascending: false })); },
     async setPerfil(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
   };
