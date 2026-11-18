@@ -21,6 +21,8 @@ function apiNube(sb) {
     async planes() { return ok(await sb.from('planes').select('*').order('orden').order('nombre')); },
     async guardarPlan(p) { const { id, creado_en, ...c } = p; return id ? ok(await sb.from('planes').update(c).eq('id', id)) : ok(await sb.from('planes').insert(c)); },
     async borrarPlan(id) { ok(await sb.from('planes').delete().eq('id', id)); },
+    async empresas() { return ok(await sb.from('empresas').select('id, nombre, nit, dv, owner, creado_en').order('nombre')); },
+    async cambiarDueno(eid, owner) { ok(await sb.from('empresas').update({ owner }).eq('id', eid)); },
     async setCuenta(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
     async eliminarCuenta(id) { ok(await sb.rpc('admin_eliminar_cuenta', { p_id: id })); },
   };
@@ -55,6 +57,12 @@ function apiDemo() {
     async borrarPlan(pid) { db.planes = db.planes.filter(x => x.id !== pid); save(); },
     async setCuenta(cid, campos) { Object.assign(db.cuentas.find(x => x.id === cid), campos); save(); },
     async eliminarCuenta(cid) { db.cuentas = db.cuentas.filter(x => x.id !== cid); save(); },
+    async empresas() {
+      if (!db.empresas) { const a = db.cuentas.find(c => c.es_admin), f = db.cuentas.find(c => /ferre/i.test(c.correo)) || db.cuentas[1];
+        db.empresas = [{ id: id(), nombre: 'GMAQ S.A.S.', nit: '901234567', dv: '1', owner: a.id }, { id: id(), nombre: 'Comercializadora Ejemplo S.A.S.', nit: '900123456', dv: '8', owner: a.id }, { id: id(), nombre: 'Ferretería La 30', nit: '800765432', dv: '3', owner: f.id }]; save(); }
+      return db.empresas.map(x => ({ ...x }));
+    },
+    async cambiarDueno(eid, owner) { db.empresas.find(x => x.id === eid).owner = owner; save(); },
   };
 }
 const api = store.mode === 'supabase' ? apiNube(store.sb) : apiDemo();
@@ -80,7 +88,7 @@ $('authForm').onsubmit = async ev => {
 };
 $('salir').onclick = async () => { await store.signOut(); location.reload(); };
 
-let S = { tab: 'cuentas', filtro: '', cuentas: [], planes: [] };
+let S = { tab: 'cuentas', filtro: '', cuentas: [], planes: [], empresas: [] };
 async function entrar(p) {
   $('auth').hidden = true; $('app').hidden = false;
   $('who').textContent = p.nombre || p.correo || '';
@@ -88,7 +96,7 @@ async function entrar(p) {
   await cargar();
 }
 async function cargar() {
-  try { [S.cuentas, S.planes] = await Promise.all([api.cuentas(), api.planes()]); pintar(); }
+  try { [S.cuentas, S.planes, S.empresas] = await Promise.all([api.cuentas(), api.planes(), api.empresas()]); pintar(); }
   catch (e) { $('main').innerHTML = `<section class="panel"><p class="err">${esc(e.message)}</p></section>`; }
 }
 
@@ -134,10 +142,10 @@ function pintar() {
       <div class="kpi ${pend ? 'warn' : ''}"><span>Por aprobar</span><b class="mono">${pend}</b></div>
       <div class="kpi ${vencen ? 'warn' : ''}"><span>Planes que vencen en 15 días</span><b class="mono">${vencen}</b></div>
     </section>
-    <div class="row tabs" role="tablist"><button class="${S.tab === 'cuentas' ? 'primary' : ''}" data-tab="cuentas">Cuentas</button><button class="${S.tab === 'planes' ? 'primary' : ''}" data-tab="planes">Planes</button></div>
+    <div class="row tabs" role="tablist"><button class="${S.tab === 'cuentas' ? 'primary' : ''}" data-tab="cuentas">Cuentas</button><button class="${S.tab === 'empresas' ? 'primary' : ''}" data-tab="empresas">Contabilidades</button><button class="${S.tab === 'planes' ? 'primary' : ''}" data-tab="planes">Planes</button></div>
     <section class="panel stack" id="tabC"></section>`;
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; pintar(); });
-  S.tab === 'cuentas' ? pintarCuentas() : pintarPlanes();
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.filtro = ''; pintar(); });
+  S.tab === 'cuentas' ? pintarCuentas() : S.tab === 'empresas' ? pintarEmpresas() : pintarPlanes();
 }
 
 function pintarCuentas() {
@@ -206,6 +214,32 @@ function formEliminar(c) {
     await api.eliminarCuenta(c.id); toast('Cuenta eliminada.'); await cargar();
   });
   f.querySelector('#dOk').textContent = 'Eliminar cuenta'; f.querySelector('#dOk').classList.add('danger-btn');
+}
+
+/* ---------- Contabilidades: de quién es cada empresa ---------- */
+function pintarEmpresas() {
+  const q = S.filtro.toLowerCase(), cta = id => S.cuentas.find(c => c.id === id);
+  const l = S.empresas.filter(e => !q || `${e.nombre} ${e.nit} ${cta(e.owner)?.nombre || ''} ${cta(e.owner)?.correo || ''}`.toLowerCase().includes(q));
+  $('tabC').innerHTML = `<div class="row filters"><input id="q" type="search" placeholder="Buscar por empresa, NIT o dueño" value="${esc(S.filtro)}"></div>
+    <p class="hint">Cada contabilidad pertenece a una cuenta (su dueño), y cuenta en el plan de esa cuenta. Si creaste una empresa para un cliente, pásasela a su cuenta con <b>Cambiar dueño</b>: el cliente primero se registra en AGAsoft.</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empresa</th><th>NIT</th><th>Dueño</th><th></th></tr></thead><tbody>
+    ${l.map(e => { const c = cta(e.owner); return `<tr><td><b>${esc(e.nombre)}</b></td><td class="mono">${esc(e.nit)}${e.dv ? '-' + esc(e.dv) : ''}</td>
+      <td>${c ? `${esc(c.nombre || '(sin nombre)')}${c.es_admin ? ' <span class="tag el">Tú</span>' : ''}<br><small class="muted">${esc(c.correo)}</small>` : '<span class="muted">—</span>'}</td>
+      <td class="r"><button class="sm" data-own="${e.id}">Cambiar dueño</button></td></tr>`; }).join('') || '<tr><td colspan="4" class="muted">No hay contabilidades.</td></tr>'}
+    </tbody></table></div>`;
+  $('q').oninput = () => { S.filtro = $('q').value; const pos = $('q').selectionStart; pintarEmpresas(); $('q').focus(); $('q').setSelectionRange(pos, pos); };
+  $('tabC').querySelectorAll('[data-own]').forEach(b => b.onclick = () => formDueno(S.empresas.find(e => e.id === b.dataset.own)));
+}
+function formDueno(e) {
+  const otras = S.cuentas.filter(c => c.id !== e.owner && !c.suspendido).sort((a, b) => (a.nombre || a.correo).localeCompare(b.nombre || b.correo));
+  dialogo(`<h2>Cambiar dueño</h2><p><b>${esc(e.nombre)}</b> · NIT ${esc(e.nit)}</p>
+    <div><label for="f_own">Nueva cuenta dueña</label><select id="f_own" name="owner" required><option value="">Escoge la cuenta del cliente</option>${otras.map(c => `<option value="${c.id}">${esc(c.nombre || '(sin nombre)')} · ${esc(c.correo)}</option>`).join('')}</select></div>
+    <p class="hint">La empresa pasa con todos sus datos (documentos, terceros, cuentas). El nuevo dueño la ve al volver a entrar, y cuenta en su plan. Tú la sigues viendo como administrador. Las personas a las que se les dio acceso lo conservan.</p>`, async fd => {
+    const owner = fd.get('owner'); if (!owner) throw new Error('Escoge la cuenta del cliente.');
+    const c = S.cuentas.find(x => x.id === owner), pl = planDe(c), n = S.empresas.filter(x => x.owner === owner).length;
+    if (pl && pl.max_empresas !== null && n >= pl.max_empresas) throw new Error(`El plan ${pl.nombre} de esa cuenta permite ${pl.max_empresas} contabilidad(es) y ya tiene ${n}. Cámbiale el plan primero.`);
+    await api.cambiarDueno(e.id, owner); toast(`${e.nombre} ahora es de ${c.nombre || c.correo}.`); await cargar();
+  });
 }
 
 function pintarPlanes() {
