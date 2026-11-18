@@ -195,3 +195,17 @@ test('medios magnéticos: 1007 ingresos y 1008 saldos por tercero', async () => 
   const f8 = formato('1008', ms, '2026');
   assert.equal(f8.find(f => f.concepto === '1315').tercero_id, 't1');
 });
+test('medios magnéticos: reglas configuradas por la empresa', async () => {
+  const { formato, reglasExogena, reglaDe } = await import('../src/exogena.js');
+  const mv = (cuenta, debito, credito, tercero_id = 't9') => ({ cuenta, debito, credito, tercero_id, fecha: '2026-05-01', tipo: 'FC' });
+  const ms = [mv('51101001', 1000, 0), mv('23651501', 0, 110), mv('51350501', 300, 0), mv('52100101', 50, 0)];
+  // De fábrica: honorarios 5002 y la retención va al concepto principal del tercero.
+  const f = formato('1001', ms, '2026');
+  assert.deepEqual(f.map(x => [x.concepto, x.pago, x.retefuente || 0]), [['5002', 1000, 110], ['5004', 300, 0], ['5016', 50, 0]]);
+  // La empresa manda 5210 a otro concepto (el prefijo más largo gana) y deja de reportar 5135.
+  const reglas = [...reglasExogena(), { id: 'a', formato: '1001', cuenta: '5210', concepto: '5003', nombre: 'Comisiones', columna: 'pago' }, { id: 'b', formato: '1001', cuenta: '5135', concepto: '', columna: '' }];
+  assert.equal(reglaDe(reglas, '1001', '52100101').concepto, '5003');
+  assert.equal(reglaDe(reglas, '1001', '51350501'), null);
+  const g = formato('1001', ms, '2026', reglas);
+  assert.deepEqual(g.map(x => x.concepto), ['5002', '5003']);
+});

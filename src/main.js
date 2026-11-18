@@ -6,7 +6,7 @@ import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPaga
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
-import { FORMATOS, formato, csvFormato } from './exogena.js';
+import { FORMATOS, CATALOGO, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
@@ -192,7 +192,7 @@ const MENU = [
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'],
+  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
@@ -237,6 +237,7 @@ function route() {
     if (v === 'tarifasiva') return vTarifasIva(m);
     if (v === 'cierre') return vCierre(m);
     if (v === 'exogena') return vExogena(m);
+    if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
@@ -1389,12 +1390,14 @@ function vExogena(m) {
     <section class="panel stack"><div class="row filters">
       <div><label for="xa">Año gravable</label><select id="xa">${(anios.length ? anios : [def]).map(a => `<option ${a === (anios.includes(def) ? def : anios[0]) ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div class="grow"><label for="xf">Formato</label><select id="xf">${Object.entries(FORMATOS).map(([k, f]) => `<option value="${k}">${k} · ${esc(f.nombre)}</option>`).join('')}</select></div>
-      <div class="end"><button class="primary" id="xd">Descargar para Excel</button></div></div>
-      <p class="hint">Los conceptos salen de la cuenta contable (por ejemplo 5110 honorarios = 5002). Revísalos antes de pasarlos al prevalidador de la DIAN. Para persona natural se usan los nombres y apellidos del tercero; para jurídica, la razón social. Los terceros sin nombres separados o sin dirección hay que completarlos en Clientes o Proveedores.</p></section>
+      <div class="end row"><a class="btn" id="xc" href="#/exogenacfg">Configurar</a><button class="primary" id="xd">Descargar para Excel</button></div></div>
+      <p class="hint">Cada cuenta va al formato, concepto y columna que tengas en Configurar medios magnéticos (por ejemplo 5110 honorarios = 5002). Revísalos antes de pasarlos al prevalidador de la DIAN. Para persona natural se usan los nombres y apellidos del tercero; para jurídica, la razón social. Los terceros sin nombres separados o sin dirección hay que completarlos en Clientes o Proveedores.</p></section>
     <section class="panel" id="xOut"></section>`;
-  const datos = () => ({ anio: $('xa').value, cod: $('xf').value, filas: formato($('xf').value, ms, $('xa').value) });
+  const reglas = reglasExogena(emp()?.contabilidad);
+  const datos = () => ({ anio: $('xa').value, cod: $('xf').value, filas: formato($('xf').value, ms, $('xa').value, reglas) });
   const pintar = () => {
-    const { cod, filas } = datos(), F = FORMATOS[cod], con = ['1001', '1007', '1008', '1009'].includes(cod);
+    const { cod, filas } = datos(), F = FORMATOS[cod], con = F.concepto;
+    $('xc').href = `#/exogenacfg?f=${cod}`;
     const falta = t => !t ? true : (t.tipo_persona === 'natural' ? !(t.primer_nombre && t.primer_apellido) : false) || !t.direccion;
     $('xOut').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr>${con ? '<th>Concepto</th>' : ''}<th>Tercero</th><th>Identificación</th>${F.valores.map(([, n]) => `<th class="r">${esc(n)}</th>`).join('')}</tr></thead><tbody>
       ${filas.map(f => { const t = terc(f.tercero_id); return `<tr>${con ? `<td class="nowrap"><b class="mono">${f.concepto}</b> <span class="hint">${esc(f.nombre_concepto)}</span></td>` : ''}<td>${esc(t?.nombre || '')}${falta(t) ? ' <span class="tag bad">Datos incompletos</span>' : ''}</td><td class="mono nowrap">${esc(fmtNit(t?.numero || ''))}</td>${F.valores.map(([k]) => `<td class="r mono">${money(f[k] || 0)}</td>`).join('')}</tr>`; }).join('') || `<tr><td colspan="${3 + F.valores.length}" class="muted">Sin información para este formato en el año.</td></tr>`}
@@ -1407,6 +1410,60 @@ function vExogena(m) {
     const a = document.createElement('a'); a.href = url; a.download = `formato-${cod}-${anio}-${(emp()?.nit || 'empresa')}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   pintar();
+}
+
+// Qué cuentas se revisan en cada formato para avisar las que tienen movimiento y no tienen regla.
+const CLASES_EXO = { 1001: /^(14|15|5|6|7)/, 1005: /^2408/, 1006: /^2408/, 1007: /^4/, 1008: /^13/, 1009: /^2/ };
+function vExogenaCfg(m, fSel) {
+  const cod = FORMATOS[fSel] ? fSel : '1001', F = FORMATOS[cod];
+  const reglas = reglasExogena(emp()?.contabilidad), propias = Array.isArray(emp()?.contabilidad?.exogena);
+  const lista = reglas.filter(r => String(r.formato) === cod).sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+  const col = k => k ? (F.valores.find(([x]) => x === k)?.[1] || k) : 'No se reporta';
+  const nomCon = r => r.nombre || nombreConcepto(r.concepto);
+  const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort(), pasado = String(Number(hoy().slice(0, 4)) - 1);
+  const anio = anios.includes(pasado) ? pasado : anios.at(-1) || pasado;
+  const sinRegla = [...new Set(ms.filter(x => x.tipo !== 'CI' && x.fecha.startsWith(anio) && CLASES_EXO[cod].test(x.cuenta)).map(x => x.cuenta))]
+    .filter(c => !reglas.some(r => String(r.formato) === cod && r.cuenta && c.startsWith(r.cuenta))).sort();
+  m.innerHTML = `<header class="vhead"><div><h2>Configurar medios magnéticos</h2><p class="sub">Qué cuentas van a cada formato, con qué concepto y en qué columna.</p></div>
+      <div class="row"><a class="btn" href="#/exogena">Ver formatos</a><button class="primary" id="nx">Nueva regla</button></div></header>
+    <section class="panel stack"><div class="row filters"><div class="grow"><label for="cf">Formato</label><select id="cf">${Object.entries(FORMATOS).map(([k, f]) => `<option value="${k}" ${k === cod ? 'selected' : ''}>${k} · ${esc(f.nombre)}</option>`).join('')}</select></div></div>
+      <p class="hint">La cuenta puede ser de cualquier nivel (2, 4, 6 u 8 dígitos) y cubre todas las que empiezan así. Si una cuenta cabe en varias reglas, gana la más detallada; por ejemplo 5110 manda sobre 5. "No se reporta" sirve para sacar una cuenta de una regla más general.${F.concepto && cod === '1001' ? ' Las retenciones sin concepto van al concepto donde el tercero tenga el mayor pago.' : ''}</p>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th>${F.concepto ? '<th>Concepto</th>' : ''}<th>Columna</th><th></th></tr></thead><tbody>
+      ${lista.map(r => `<tr><td><b class="mono">${esc(r.cuenta)}</b> <span class="muted">${esc(nomCta(r.cuenta))}</span></td>
+        ${F.concepto ? `<td>${r.columna ? (r.concepto ? `<b class="mono">${esc(r.concepto)}</b> <span class="hint">${esc(nomCon(r))}</span>` : '<span class="hint">El principal del tercero</span>') : ''}</td>` : ''}
+        <td>${r.columna ? esc(col(r.columna)) : '<span class="tag">No se reporta</span>'}</td>
+        <td class="r nowrap"><button class="sm" data-ex="${esc(r.id)}">Editar</button><button class="sm ghost" data-bx="${esc(r.id)}">Quitar</button></td></tr>`).join('') || `<tr><td colspan="4" class="muted">Este formato no tiene reglas: no saldrá nada.</td></tr>`}</tbody></table></div></section>
+    ${sinRegla.length ? `<section class="panel stack"><h3>Cuentas con movimiento en ${anio} que no van a este formato</h3><p class="hint">Si alguna debe reportarse, créale una regla.</p>
+      <div class="row wrap">${sinRegla.map(c => `<button class="sm" data-nc="${c}"><span class="mono">${c}</span> ${esc(nomCta(c))}</button>`).join('')}</div></section>` : ''}
+    <section class="panel row"><p class="hint" style="flex:1 1 240px;margin:0">${propias ? 'Estás usando la configuración de la empresa.' : 'Estás usando la configuración de fábrica. Al guardar un cambio queda como configuración de la empresa.'}</p>
+      ${propias ? '<button class="ghost" id="rx">Volver a la de fábrica</button>' : ''}</section>`;
+  const guardar = async l => { await guardarContab('exogena', l); vExogenaCfg(m, cod); };
+  const form = r => {
+    dialogo(`<h2>${r.id ? 'Editar' : 'Nueva'} regla · formato ${cod}</h2>
+      <div><label for="fx_c">Cuenta</label><input id="fx_c" name="cuenta" list="ctasX" class="mono" required value="${esc(r.cuenta || '')}" autocomplete="off" placeholder="Ej.: 5110 o 51101001">
+        <datalist id="ctasX">${optsLista(S.d.cuentas.filter(x => x.codigo.length >= 2))}</datalist><p class="hint">Cualquier nivel; cubre todas las cuentas que empiezan así.</p></div>
+      <div><label for="fx_k">Columna</label><select id="fx_k" name="columna">${opts([...F.valores.map(([k, n]) => [k, n]), ['', 'No se reporta']], r.columna ?? F.valores[0][0])}</select></div>
+      ${F.concepto ? `<div class="grid2"><div><label for="fx_o">Concepto DIAN</label><input id="fx_o" name="concepto" list="conX" class="mono" inputmode="numeric" maxlength="4" value="${esc(r.concepto || '')}" autocomplete="off" placeholder="${cod === '1001' ? 'Vacío = el principal' : 'Ej.: ' + CATALOGO[cod][0][0]}">
+          <datalist id="conX">${(CATALOGO[cod] || []).map(([c, n]) => `<option value="${c}">${esc(n)}</option>`).join('')}</datalist></div>
+        <div><label for="fx_n">Nombre del concepto</label><input id="fx_n" name="nombre" maxlength="80" value="${esc(r.nombre || '')}" placeholder="Opcional"></div></div>
+        <p class="hint">Escoge un concepto de la lista o escribe el código que pida la resolución de la DIAN.</p>` : ''}${pie()}`, async fd => {
+      const cuenta = String(fd.get('cuenta') || '').trim().split(' ')[0], columna = String(fd.get('columna') || ''), concepto = String(fd.get('concepto') || '').trim(), nombre = String(fd.get('nombre') || '').trim();
+      if (!/^\d{1,8}$/.test(cuenta)) throw new Error('Escribe el código de la cuenta (solo números).');
+      if (columna && F.concepto && !concepto && cod !== '1001') throw new Error('Escribe el concepto DIAN.');
+      if (concepto && !/^\d{4}$/.test(concepto)) throw new Error('El concepto DIAN es un código de 4 dígitos.');
+      const nueva = { id: r.id || `x-${Date.now().toString(36)}`, formato: cod, cuenta, concepto: columna ? concepto : '', columna, ...(nombre && columna ? { nombre } : {}) };
+      const resto = reglas.filter(x => x.id !== r.id && !(String(x.formato) === cod && x.cuenta === cuenta));
+      await guardar([...resto, nueva]); toast('Regla guardada.');
+    });
+    const ver = () => { const sin = !$('fx_k').value; ['fx_o', 'fx_n'].forEach(id => { if ($(id)) $(id).disabled = sin; }); };
+    $('fx_k').onchange = ver; ver();
+  };
+  $('cf').onchange = () => { location.hash = `#/exogenacfg?f=${$('cf').value}`; };
+  $('nx').onclick = () => form({});
+  m.querySelectorAll('[data-nc]').forEach(b => b.onclick = () => form({ cuenta: b.dataset.nc }));
+  m.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => form(reglas.find(r => r.id === b.dataset.ex)));
+  m.querySelectorAll('[data-bx]').forEach(b => b.onclick = async () => { try { await guardar(reglas.filter(r => r.id !== b.dataset.bx)); toast('Regla quitada.'); } catch (e) { fail(e); } });
+  if ($('rx')) $('rx').onclick = async () => { try { await guardarContab('exogena', null); vExogenaCfg(m, cod); toast('Volviste a la configuración de fábrica.'); } catch (e) { fail(e); } };
 }
 
 /* ---------- Impuestos ---------- */
