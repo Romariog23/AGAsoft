@@ -38,7 +38,7 @@ function asientoCompra(c, param) {
   mov(c.cuenta_retefuente || P.retefuente_pagar, 0, t.retefuente, 'Retención en la fuente practicada');
   mov(P.reteiva_pagar, 0, t.reteiva, 'ReteIVA practicado');
   mov(P.reteica_pagar, 0, t.reteica, 'ReteICA practicado');
-  mov(P.proveedores, 0, t.neto, det);
+  mov(String(c.cuenta_pago || '').trim() || P.proveedores, 0, t.neto, det);
   // Redondeo: la diferencia de centavos va a la primera línea.
   const dif = r2(out.reduce((s, m) => s + m.debito - m.credito, 0));
   if (dif && Math.abs(dif) < 1 && out.length) { const m = out[0]; m.debito = r2(m.debito - dif); }
@@ -49,7 +49,7 @@ function asientoCompra(c, param) {
 function cuentasPorPagar(compras, hoy) {
   const pagos = {};
   for (const e of compras.filter(x => x.tipo === 'CE' && x.estado !== 'anulado')) for (const a of e.aplicaciones || []) pagos[a.compra_id] = r2((pagos[a.compra_id] || 0) + num(a.valor));
-  return compras.filter(x => (x.tipo === 'FC' || x.tipo === 'DS') && x.estado !== 'anulado').map(f => {
+  return compras.filter(x => (x.tipo === 'FC' || x.tipo === 'DS') && x.estado !== 'anulado' && !String(x.cuenta_pago || '').trim()).map(f => {
     const neto = num(f.neto ?? totalesCompra(f.lineas, f).neto), pagado = pagos[f.id] || 0, saldo = r2(neto - pagado);
     const diasVencida = f.vence && hoy && f.vence < hoy ? Math.round((new Date(hoy + 'T12:00:00') - new Date(f.vence + 'T12:00:00')) / 864e5) : 0;
     return { compra: f, neto, pagado, saldo, diasVencida };

@@ -71,7 +71,7 @@ function cartera(docs, apl, hoy = new Date()) {
   const vivos = docs.filter(d => d.estado === 'emitido');
   const byId = Object.fromEntries(vivos.map(d => [d.id, d]));
   const res = {};
-  for (const f of vivos.filter(d => d.tipo === 'FV')) res[f.id] = { factura: f, neto: num(f.neto), nc: 0, nd: 0, pagos: 0 };
+  for (const f of vivos.filter(d => d.tipo === 'FV' && !String(d.cuenta_pago || '').trim())) res[f.id] = { factura: f, neto: num(f.neto), nc: 0, nd: 0, pagos: 0 };
   for (const d of vivos) {
     if ((d.tipo === 'NC' || d.tipo === 'ND') && res[d.ref_id]) res[d.ref_id][d.tipo === 'NC' ? 'nc' : 'nd'] += num(d.neto);
   }

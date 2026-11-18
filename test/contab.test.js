@@ -134,3 +134,17 @@ test('saldos por tercero', async () => {
   const b = balancePrueba(ms, plan, '2026-11-01', '2026-11-30');
   assert.equal(l[0].final, b.filas.find(f => f.codigo === '13050501').final);
 });
+
+test('forma de pago de contado: la factura va a bancos y no a cartera', async () => {
+  const { cartera } = await import('../src/calc.js');
+  const fvc = { ...fv, cuenta_pago: '11100501' };
+  const a = asiento(fvc, { ...S, docs: [fvc] });
+  assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '11100501').debito, t.neto); assert.ok(!a.some(m => m.cuenta === '13050501'));
+  assert.equal(Object.keys(cartera([fvc], [], []) || {}).length, 0);
+});
+test('forma de pago de compra a un pasivo', async () => {
+  const { asientoCompra, cuentasPorPagar } = await import('../src/compras.js');
+  const fc = { id: 'c1', tipo: 'FC', numero: 1, num_proveedor: 'A1', fecha: '2026-11-18', tercero_id: 't', estado: 'emitido', lineas: [{ cuenta: '51350501', base: 100000, iva_pct: 19 }], cuenta_pago: '21050501' };
+  const a = asientoCompra(fc, {}); assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '21050501').credito, 119000);
+  assert.equal(cuentasPorPagar([fc], '2026-11-18').length, 0);
+});

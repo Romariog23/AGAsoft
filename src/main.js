@@ -4,6 +4,7 @@ import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, e
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
+import { formasPago, formaDe } from './formas.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
@@ -188,7 +189,7 @@ const MENU = [
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -228,6 +229,7 @@ function route() {
     if (v === 'clientes') return vClientes(m);
     if (v === 'productos') return vProductos(m);
     if (v === 'numeraciones') return vNumeraciones(m);
+    if (v === 'formaspago') return vFormasPago(m);
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
@@ -566,7 +568,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
         <button type="button" id="newCli" title="Crear cliente">+ Nuevo</button></div></div>
       <div><label for="fecha">Fecha</label><input id="fecha" type="date" value="${doc.fecha}" required></div>
       ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase">${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
-      ${tipo === 'FV' ? `<div><label for="fp">Forma de pago</label><select id="fp">${opts(FORMAS_PAGO, doc.forma_pago)}</select></div>
+      ${tipo === 'FV' ? `<div><label for="fp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="fp">${fVenta().map(f => `<option value="${f.id}" ${f.id === formaDe(fVenta(), doc.forma_pago === 'credito', doc.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
       ${tipo === 'FV' || esRC ? `<div><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
       ${esNota ? `<div class="span2"><label for="ref">Factura que corrige</label><select id="ref" required></select></div>
@@ -600,7 +602,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   const leerCab = () => {
     doc.tercero_id = $('cli').value; doc.fecha = $('fecha').value;
     if ($('clase')) doc.electronica = $('clase').value === 'electronica';
-    if ($('fp')) { doc.forma_pago = $('fp').value; doc.vence = doc.forma_pago === 'credito' ? $('vence').value : doc.fecha; }
+    if ($('fp')) { const f = fVenta().find(x => x.id === $('fp').value) || fVenta()[0]; doc.forma_pago = f.credito ? 'credito' : 'contado'; doc.cuenta_pago = f.credito ? '' : f.cuenta; doc.vence = doc.forma_pago === 'credito' ? $('vence').value : doc.fecha; }
     if ($('mp')) doc.medio_pago = $('mp').value;
     if ($('ref')) { doc.ref_id = $('ref').value; doc.concepto = $('con').value; }
     doc.observaciones = $('obs').value;
@@ -683,12 +685,12 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   $('cli').onchange = () => {
     const t = terc($('cli').value);
     if (!id && t && !esRC && !doc.ref_id) { Object.assign(doc, retDe(t)); $('rf').value = num(t.retefuente_pct) || ''; $('ri').value = num(t.reteiva_pct) || ''; $('rica').value = num(t.reteica_milaje) || ''; }
-    if ($('fp') && t) { $('fp').value = t.plazo_dias > 0 ? 'credito' : 'contado'; $('vence').value = t.plazo_dias > 0 ? sumarDias($('fecha').value, t.plazo_dias) : ''; $('wVence').hidden = $('fp').value !== 'credito'; }
+    if ($('fp') && t) { $('fp').value = formaDe(fVenta(), t.plazo_dias > 0, t.plazo_dias > 0 ? '' : (fVenta().find(f => !f.credito)?.cuenta || '')).id; $('vence').value = t.plazo_dias > 0 ? sumarDias($('fecha').value, t.plazo_dias) : ''; $('wVence').hidden = !esCredFP(); }
     if ($('ref') && doc.ref_id && docById(doc.ref_id)?.tercero_id !== $('cli').value) doc.ref_id = '';
     pintarRef(); pintarApl(); calcular();
   };
   $('newCli').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('cli'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.onchange(); });
-  if ($('fp')) { $('wVence').hidden = $('fp').value !== 'credito'; $('fp').onchange = () => { $('wVence').hidden = $('fp').value !== 'credito'; const t = terc($('cli').value); if ($('fp').value === 'credito' && !$('vence').value) $('vence').value = sumarDias($('fecha').value, t?.plazo_dias || 30); calcular(); }; }
+  if ($('fp')) { $('wVence').hidden = !esCredFP(); $('fp').onchange = () => { $('wVence').hidden = !esCredFP(); const t = terc($('cli').value); if (esCredFP() && !$('vence').value) $('vence').value = sumarDias($('fecha').value, t?.plazo_dias || 30); calcular(); }; }
   if ($('ref')) {
     $('ref').onchange = () => {
       const f = docById($('ref').value); doc.ref_id = f?.id || '';
@@ -734,7 +736,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if (b.dataset.todo) { const inp = m.querySelector(`[data-apl="${b.dataset.todo}"]`); inp.value = num(b.dataset.saldo); inp.dispatchEvent(new Event('input', { bubbles: true })); }
   });
   if ($('addIt')) $('addIt').onclick = () => { items.push(nuevoItem()); pintarItems(); calcular(); m.querySelector(`tr[data-i="${items.length - 1}"] [data-k=codigo]`)?.focus(); };
-  $('fecha').onchange = () => { const t = terc($('cli').value); if ($('fp')?.value === 'credito' && t?.plazo_dias) $('vence').value = sumarDias($('fecha').value, t.plazo_dias); calcular(); };
+  $('fecha').onchange = () => { const t = terc($('cli').value); if ($('fp') && esCredFP() && t?.plazo_dias) $('vence').value = sumarDias($('fecha').value, t.plazo_dias); calcular(); };
 
   const errEd = msg => { $('edErr').textContent = msg; $('edErr').hidden = !msg; if (msg) $('edErr').scrollIntoView({ block: 'center', behavior: 'smooth' }); };
   const limpiarItems = () => items.filter(it => String(it.descripcion).trim() || num(it.precio)).map(({ id: _i, documento_id: _d, empresa_id: _e, ...it }) => ({ ...it, cuenta: String(it.cuenta || '').trim().split(' ')[0], cantidad: num(it.cantidad), precio: num(it.precio), descuento_pct: num(it.descuento_pct), iva_pct: num(it.iva_pct) }));
@@ -820,7 +822,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       <div><h3>${d.tipo === 'RC' ? 'Recibimos de' : 'Adquiriente'}</h3><p><b>${esc(t.nombre)}</b><br>${esc(docId(t))}<br>${esc(ubic(t))}${t.telefono ? '<br>Tel. ' + esc(t.telefono) : ''}${t.correo ? '<br>' + esc(t.correo) : ''}</p></div>
       <div><dl class="kv">
         <dt>Fecha</dt><dd>${fFecha(d.fecha)}</dd>
-        ${d.tipo === 'FV' ? `<dt>Forma de pago</dt><dd>${d.forma_pago === 'credito' ? 'Crédito' : 'Contado'}</dd>${d.forma_pago === 'credito' ? `<dt>Vence</dt><dd>${fFecha(d.vence)}</dd>` : ''}` : ''}
+        ${d.tipo === 'FV' ? `<dt>Forma de pago</dt><dd>${esc(nomForma(fVenta(), d.forma_pago === 'credito', d.cuenta_pago))}</dd>${d.forma_pago === 'credito' ? `<dt>Vence</dt><dd>${fFecha(d.vence)}</dd>` : ''}` : ''}
         ${d.tipo === 'FV' || d.tipo === 'RC' ? `<dt>Medio de pago</dt><dd>${esc(MEDIOS_PAGO.find(x => x[0] === d.medio_pago)?.[1] || '')}</dd>` : ''}
         ${f ? `<dt>Factura afectada</dt><dd class="mono">${esc(numDoc(f))} del ${fFecha(f.fecha)}</dd><dt>Concepto</dt><dd>${esc(conc.find(c => c[0] === d.concepto)?.[1] || '')}</dd>` : ''}
       </dl></div>
@@ -1114,6 +1116,10 @@ async function vUsuarios(m) {
 
 /* ---------- Contabilidad ---------- */
 const param = () => parametrosDe(emp()?.contabilidad);
+const esCredFP = () => !!fVenta().find(f => f.id === $('fp')?.value)?.credito;
+const fVenta = () => formasPago(emp()?.contabilidad, param(), 'venta');
+const fCompra = () => formasPago(emp()?.contabilidad, param(), 'compra');
+const nomForma = (formas, credito, cuenta) => { if (credito) return formas.find(f => f.credito)?.nombre || 'Crédito'; if (!cuenta) return 'Contado (a clientes)'; const f = formas.find(x => !x.credito && x.cuenta === cuenta); return f ? f.nombre : `Contado · ${cuenta} ${nomCta(cuenta)}`; };
 const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos });
 const movs = () => movimientos({ ...S.d, param: param() });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
@@ -1193,9 +1199,52 @@ function vPuc(m) {
     ev.preventDefault();
     const fd = new FormData($('parF')); const idx = idxCuentas(); const nuevo = {};
     for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!esAuxiliar(v)) return toast(`La cuenta ${v} no es auxiliar: usa una cuenta de 8 dígitos.`, true); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); nuevo[k] = v; }
-    try { await store.save('empresas', { id: S.eid, contabilidad: nuevo }); await recargar(); toast('Cuentas guardadas. Los informes ya usan estas cuentas.'); } catch (e) { fail(e); }
+    try { await store.save('empresas', { id: S.eid, contabilidad: { ...(emp()?.contabilidad || {}), ...nuevo } }); await recargar(); toast('Cuentas guardadas. Los informes ya usan estas cuentas.'); } catch (e) { fail(e); }
   };
   pintar();
+}
+/* ---------- Formas de pago (ventas y compras) ---------- */
+function vFormasPago(m) {
+  const P = param(), todas = formasPago(emp()?.contabilidad, P);
+  const fila = f => `<tr><td><b>${esc(f.nombre)}</b></td><td>${f.credito ? '<span class="tag">Crédito</span>' : '<span class="tag ok">Contado</span>'}</td>
+    <td class="mono">${f.credito ? (f.uso === 'venta' ? P.clientes : P.proveedores) : esc(f.cuenta)} <span class="muted">${esc(nomCta(f.credito ? (f.uso === 'venta' ? P.clientes : P.proveedores) : f.cuenta))}</span></td>
+    <td>${f.credito ? (f.uso === 'venta' ? 'Queda en cartera' : 'Queda en cuentas por pagar') : 'Queda pagada'}</td>
+    <td class="r nowrap"><button class="sm" data-ef="${f.id}">Editar</button><button class="sm ghost" data-bf="${f.id}">Quitar</button></td></tr>`;
+  const tabla = (uso, titulo) => `<section class="panel stack"><header class="vhead"><h3>${titulo}</h3><button class="primary" data-nf="${uso}">Nueva forma de pago</button></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Forma de pago</th><th>Tipo</th><th>Cuenta</th><th>Efecto</th><th></th></tr></thead><tbody>
+    ${todas.filter(f => f.uso === uso).map(fila).join('') || '<tr><td colspan="5" class="muted">Sin formas de pago.</td></tr>'}</tbody></table></div></section>`;
+  m.innerHTML = `<header class="vhead"><div><h2>Formas de pago</h2><p class="sub">Las que aparecen al hacer una factura de venta o de compra, y la cuenta a la que va cada una.</p></div></header>
+    ${tabla('venta', 'Facturas de venta')}${tabla('compra', 'Facturas de compra y documentos soporte')}
+    <p class="hint">A <b>crédito</b>: usa la cuenta de clientes o de proveedores de la empresa (Plan de cuentas › Cuentas de la empresa) y queda pendiente hasta el recibo o el egreso. De <b>contado</b>: el valor va directo a la cuenta que escojas (caja, bancos, o en compras un pasivo como una tarjeta de crédito) y no queda pendiente.</p>`;
+  const guardar = async lista => { await store.save('empresas', { id: S.eid, contabilidad: { ...(emp()?.contabilidad || {}), formas_pago: lista } }); await recargar(); vFormasPago(m); };
+  m.querySelectorAll('[data-nf]').forEach(b => b.onclick = () => formFormaPago({ uso: b.dataset.nf, credito: false }, todas, guardar));
+  m.querySelectorAll('[data-ef]').forEach(b => b.onclick = () => formFormaPago(todas.find(f => f.id === b.dataset.ef), todas, guardar));
+  m.querySelectorAll('[data-bf]').forEach(b => b.onclick = async () => {
+    const f = todas.find(x => x.id === b.dataset.bf);
+    if (todas.filter(x => x.uso === f.uso).length < 2) return toast('Debe quedar al menos una forma de pago.', true);
+    try { await guardar(todas.filter(x => x.id !== f.id)); toast('Forma de pago quitada.'); } catch (e) { fail(e); }
+  });
+}
+function formFormaPago(f, todas, guardar) {
+  const ctas = cuentasAux().filter(c => f.uso === 'venta' ? /^1[1-3]/.test(c.codigo) : /^(1[1-3]|2)/.test(c.codigo));
+  dialogo(`<h2>${f.id ? 'Editar' : 'Nueva'} forma de pago · ${f.uso === 'venta' ? 'ventas' : 'compras'}</h2>
+    <div><label for="ff_n">Nombre</label><input id="ff_n" name="nombre" required maxlength="50" value="${esc(f.nombre || '')}" placeholder="${f.uso === 'venta' ? 'Ej.: Transferencia Bancolombia' : 'Ej.: Tarjeta de crédito empresarial'}"></div>
+    <div><label for="ff_t">Tipo</label><select id="ff_t" name="credito">${opts([['no', 'Contado (queda pagada)'], ['si', f.uso === 'venta' ? 'Crédito (queda en cartera)' : 'Crédito (queda en cuentas por pagar)']], f.credito ? 'si' : 'no')}</select></div>
+    <div id="ff_w"><label for="ff_c">Cuenta</label><input id="ff_c" name="cuenta" list="ctasFP" class="mono" value="${esc(f.cuenta || '')}" autocomplete="off" placeholder="Código o nombre">
+      <datalist id="ctasFP">${optsLista(ctas)}</datalist>
+      <p class="hint">${f.uso === 'venta' ? 'Caja, bancos u otra cuenta del activo (11, 12 o 13).' : 'Caja o bancos, o un pasivo (clase 2) como una tarjeta de crédito u obligación financiera.'}</p></div>${pie()}`, async fd => {
+    const credito = fd.get('credito') === 'si', nombre = String(fd.get('nombre') || '').trim(), cuenta = String(fd.get('cuenta') || '').trim().split(' ')[0];
+    if (!nombre) throw new Error('Escribe el nombre de la forma de pago.');
+    if (!credito) {
+      if (!esAuxiliar(cuenta)) throw new Error('Escoge una cuenta auxiliar de 8 dígitos.');
+      if (!idxCuentas()[cuenta]) throw new Error(`La cuenta ${cuenta} no existe en el plan de cuentas.`);
+    }
+    const nueva = { id: f.id || `${f.uso[0]}-${Date.now().toString(36)}`, uso: f.uso, nombre, credito, cuenta: credito ? '' : cuenta };
+    await guardar(f.id ? todas.map(x => x.id === f.id ? nueva : x) : [...todas, nueva]);
+    toast('Forma de pago guardada.');
+  });
+  const ver = () => { $('ff_w').hidden = $('ff_t').value === 'si'; };
+  $('ff_t').onchange = ver; ver();
 }
 function formCuenta(c = {}, padre = '') {
   const nueva = !c.id;
@@ -1281,7 +1330,9 @@ function vAuxiliar(m, q) {
   let cuenta = q.get('cuenta') || param().clientes, tercero = '';
   const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
   m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
-    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><select id="cta" class="mono" style="width:100%;max-width:100%">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo}" ${c.codigo === cuenta ? 'selected' : ''}>${'&nbsp;'.repeat(Math.max(0, c.codigo.length - 1) * 2)}${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' ·'}</option>`).join('')}</select><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Las marcadas con · no tienen movimientos.</p></div>
+    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAuxL" class="mono" style="width:100%;max-width:100%" value="${esc(cuenta)}" autocomplete="off" placeholder="Escribe el código o el nombre de la cuenta">
+      <datalist id="ctasAuxL">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' (sin movimientos)'}"></option>`).join('')}</datalist>
+      <p class="hint" id="ctaNom">${esc(cuenta)} ${esc(nomCta(cuenta))}</p><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Escribe el código (por ejemplo 1105 o 11050501) o parte del nombre.</p></div>
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
     
     ${filtroFechas('fa', true, () => pintar())}
@@ -1293,7 +1344,15 @@ function vAuxiliar(m, q) {
       ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 8 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
       <tr class="strong"><td colspan="${cuenta.length < 8 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
   };
-  $('cta').onchange = () => { cuenta = $('cta').value; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
+  const irCuenta = () => {
+    const v = $('cta').value.trim().split(' ')[0];
+    if (!v) return;
+    if (!S.d.cuentas.some(c => c.codigo === v)) { $('ctaNom').textContent = `La cuenta ${v} no existe en el plan de cuentas.`; return; }
+    cuenta = v; $('cta').value = v; $('ctaNom').textContent = `${v} ${nomCta(v)}`;
+    history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar();
+  };
+  $('cta').onchange = irCuenta;
+  $('cta').onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); irCuenta(); } };
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   pintar();
 }
@@ -1617,7 +1676,8 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         <button type="button" id="newPrv">+ Nuevo</button></div></div>
       <div><label for="kf">Fecha</label><input id="kf" type="date" value="${c.fecha}" required></div>
       ${esCE ? `<div><label for="kp">Pagado desde</label><select id="kp">${optsCta(ctasPago(), c.cuenta_pago)}</select></div>` :
-        `<div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
+        `<div><label for="kfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kfp">${fCompra().map(f => `<option value="${f.id}" ${f.id === formaDe(fCompra(), !c.cuenta_pago, c.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
+        <div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
         ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}`}
       <div><label>Número interno</label><p class="mono">${id ? c.numero : `${siguienteCompra(tipo)} (al guardar)`}</p></div>
     </section>
@@ -1645,6 +1705,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
     else {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
+      if ($('kfp')) { const f = fCompra().find(x => x.id === $('kfp').value) || fCompra()[0]; c.cuenta_pago = f.credito ? '' : f.cuenta; }
       Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value), cuenta_retefuente: $('krc').value });
       Object.assign(c, totalesCompra(c.lineas, c));
     }
@@ -1722,7 +1783,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       const t = esCE ? { base: 0, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: totalEgreso(c), neto: totalEgreso(c) } : totalesCompra(c.lineas, c);
       const row = { empresa_id: S.eid, tipo, fecha: c.fecha, vence: esCE ? null : (c.vence || null), tercero_id: c.tercero_id, num_proveedor: c.num_proveedor || '', observaciones: c.observaciones || '',
         lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '',
-        cuenta_pago: esCE ? c.cuenta_pago : '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t };
+        cuenta_pago: c.cuenta_pago || '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t };
       let g;
       if (id) g = await store.save('compras', { ...row, id });
       else {
@@ -1742,7 +1803,7 @@ function hojaCompra(c, imprimir) {
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === c.id);
   return `${cabInforme(T.nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
-    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Pagado desde:</b> ${esc(c.cuenta_pago)} ${esc(nomCta(c.cuenta_pago))}` : ''}</div></div>
+    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Pagado desde:</b> ${esc(c.cuenta_pago)} ${esc(nomCta(c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
     ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
         ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
         <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`
