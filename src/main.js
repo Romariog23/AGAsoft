@@ -576,7 +576,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       ${tipo === 'FV' ? `<div><label for="fp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="fp">${fVenta().map(f => `<option value="${f.id}" ${f.id === formaDe(fVenta(), doc.forma_pago === 'credito', doc.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
       ${esRC ? `<div><label for="rfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="rfp">${optsContado(fVenta(), doc.cuenta_pago || (doc.id ? (doc.medio_pago === 'efectivo' ? param().caja : param().bancos) : ''))}</select></div>` : ''}
-      ${tipo === 'FV' || esRC ? `<div><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
+      ${tipo === 'FV' || esRC ? `<div id="wMp"><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
       ${esNota ? `<div class="span2"><label for="ref">Factura que corrige</label><select id="ref" required></select></div>
         <div class="span2"><label for="con">Concepto de la ${T.corto.toLowerCase()}</label><select id="con">${opts(tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND, doc.concepto)}</select></div>` : ''}
     </section>
@@ -584,6 +584,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       <div class="grid2"><div><label for="ant">Anticipo o pago sin factura</label><input id="ant" type="number" min="0" step="0.01" class="mono" value="${num(doc.anticipo) || ''}"></div></div></section>` :
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
+      <datalist id="prodsN">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.nombre)}">${esc(p.codigo)} · ${money(p.precio)}</option>`).join('')}</datalist>
       <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
       <datalist id="ctasIt">${optsLista(cuentasAux())}</datalist>
       ${!emp().responsable_iva ? '<p class="hint">La empresa no es responsable de IVA, por eso el IVA va en 0.</p>' : ''}</section>`}
@@ -660,7 +661,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     const bloqueado = esNota && doc.concepto === '2';
     $('its').innerHTML = items.map((it, i) => `<tr data-i="${i}">
       <td data-l="Código"><input data-k="codigo" list="prods" value="${esc(it.codigo)}" class="mono w-cod" aria-label="Código" ${bloqueado ? 'readonly' : ''}></td>
-      <td data-l="Descripción" class="c-desc"><input data-k="descripcion" value="${esc(it.descripcion)}" aria-label="Descripción" ${bloqueado ? 'readonly' : ''}></td>
+      <td data-l="Descripción" class="c-desc"><input data-k="descripcion" list="prodsN" autocomplete="off" value="${esc(it.descripcion)}" aria-label="Descripción" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasIt" autocomplete="off" value="${esc(it.cuenta || '')}" placeholder="${esc(ctaDefecto(it))}" class="mono w-cta" aria-label="Cuenta contable" title="${esc(it.cuenta ? nomCta(it.cuenta) : 'Cuenta por defecto: ' + ctaDefecto(it) + ' ' + nomCta(ctaDefecto(it)))}"></td>
       <td data-l="Cantidad"><input data-k="cantidad" type="number" step="any" min="0" value="${it.cantidad}" class="r mono w-num" aria-label="Cantidad" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Precio unit."><input data-k="precio" type="number" step="0.01" min="0" value="${it.precio}" class="r mono w-val" aria-label="Precio unitario" ${bloqueado ? 'readonly' : ''}></td>
@@ -700,12 +701,14 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   $('cli').onchange = () => {
     const t = terc($('cli').value);
     if (!id && t && !esRC && !doc.ref_id) { Object.assign(doc, retDe(t)); $('rf').value = num(t.retefuente_pct) || ''; $('ri').value = num(t.reteiva_pct) || ''; $('rica').value = num(t.reteica_milaje) || ''; }
-    if ($('fp') && t) { $('fp').value = formaDe(fVenta(), t.plazo_dias > 0, t.plazo_dias > 0 ? '' : (fVenta().find(f => !f.credito)?.cuenta || '')).id; $('vence').value = t.plazo_dias > 0 ? sumarDias($('fecha').value, t.plazo_dias) : ''; $('wVence').hidden = !esCredFP(); }
+    if ($('fp') && t) { $('fp').value = formaDe(fVenta(), t.plazo_dias > 0, t.plazo_dias > 0 ? '' : (fVenta().find(f => !f.credito)?.cuenta || '')).id; $('vence').value = t.plazo_dias > 0 ? sumarDias($('fecha').value, t.plazo_dias) : ''; $('wVence').hidden = !esCredFP(); if ($('wMp')) $('wMp').hidden = esCredFP(); }
     if ($('ref') && doc.ref_id && docById(doc.ref_id)?.tercero_id !== $('cli').value) doc.ref_id = '';
     pintarRef(); pintarApl(); calcular();
   };
   $('newCli').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('cli'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.onchange(); });
-  if ($('fp')) { $('wVence').hidden = !esCredFP(); $('fp').onchange = () => { $('wVence').hidden = !esCredFP(); const t = terc($('cli').value); if (esCredFP() && !$('vence').value) $('vence').value = sumarDias($('fecha').value, t?.plazo_dias || 30); calcular(); }; }
+  // A crédito no hay medio de pago: se paga después con el recibo de caja.
+  const verMp = () => { if ($('fp') && $('wMp')) $('wMp').hidden = esCredFP(); };
+  if ($('fp')) { $('wVence').hidden = !esCredFP(); verMp(); $('fp').onchange = () => { $('wVence').hidden = !esCredFP(); verMp(); const t = terc($('cli').value); if (esCredFP() && !$('vence').value) $('vence').value = sumarDias($('fecha').value, t?.plazo_dias || 30); calcular(); }; }
   if ($('ref')) {
     $('ref').onchange = () => {
       const f = docById($('ref').value); doc.ref_id = f?.id || '';
@@ -733,8 +736,10 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       const it = items[Number(tr.dataset.i)];
       const k = el.dataset.k;
       it[k] = ['cantidad', 'precio', 'descuento_pct', 'iva_pct'].includes(k) ? el.value : el.value;
-      if (k === 'codigo') {
-        const p = S.d.productos.find(x => x.codigo.toLowerCase() === el.value.trim().toLowerCase());
+      if (k === 'codigo' || k === 'descripcion') {
+        const v = el.value.trim().toLowerCase();
+        const p = S.d.productos.find(x => x.activo !== false && (k === 'codigo' ? x.codigo : x.nombre).toLowerCase() === v);
+        if (p && k === 'descripcion' && it.producto_id === p.id) { calcular(); return; }
         if (p) { Object.assign(it, nuevoItem(p), { cantidad: it.cantidad || 1 }); it.cuenta = ctaDefecto(it); pintarItems(); m.querySelector(`tr[data-i="${tr.dataset.i}"] [data-k=cantidad]`)?.focus(); }
       }
     }
@@ -857,7 +862,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
         <dt>Fecha</dt><dd>${fFecha(d.fecha)}</dd>
         ${d.tipo === 'FV' ? `<dt>Forma de pago</dt><dd>${esc(nomForma(fVenta(), d.forma_pago === 'credito', d.cuenta_pago))}</dd>${d.forma_pago === 'credito' ? `<dt>Vence</dt><dd>${fFecha(d.vence)}</dd>` : ''}` : ''}
         ${d.tipo === 'RC' ? `<dt>Forma de pago</dt><dd>${esc(nomForma(fVenta(), false, d.cuenta_pago || (d.medio_pago === 'efectivo' ? param().caja : param().bancos)))}</dd>` : ''}
-        ${d.tipo === 'FV' || d.tipo === 'RC' ? `<dt>Medio de pago</dt><dd>${esc(MEDIOS_PAGO.find(x => x[0] === d.medio_pago)?.[1] || '')}</dd>` : ''}
+        ${(d.tipo === 'FV' && d.forma_pago !== 'credito') || d.tipo === 'RC' ? `<dt>Medio de pago</dt><dd>${esc(MEDIOS_PAGO.find(x => x[0] === d.medio_pago)?.[1] || '')}</dd>` : ''}
         ${f ? `<dt>Factura afectada</dt><dd class="mono">${esc(numDoc(f))} del ${fFecha(f.fecha)}</dd><dt>Concepto</dt><dd>${esc(conc.find(c => c[0] === d.concepto)?.[1] || '')}</dd>` : ''}
       </dl></div>
     </section>
