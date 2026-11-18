@@ -3,7 +3,7 @@ import { crearStore, numeracionPara } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { COLOMBIA } from './colombia.js';
-import { planInicial, RUBROS, RUBRO, PARAMETROS, parametrosPorDefecto, nivelDe } from './puc.js';
+import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 const $ = id => document.getElementById(id);
@@ -83,6 +83,11 @@ async function cargarEmpresa() {
   S.d = S.eid ? await store.loadEmpresa(S.eid) : null;
   if (S.d && !S.d.cuentas.length) {
     try { await store.saveMany('cuentas', planInicial().map(c => ({ ...c, empresa_id: S.eid }))); S.d.cuentas = (await store.loadEmpresa(S.eid)).cuentas; } catch (_) { /* sin permiso para crear el plan */ }
+  }
+  // Empresas creadas antes de las auxiliares de 8 dígitos: se completan las subcuentas y auxiliares que falten.
+  if (S.d && S.d.cuentas.length) {
+    const faltan = completarPlan(S.d.cuentas);
+    if (faltan.length) try { await store.saveMany('cuentas', faltan.map(c => ({ ...c, empresa_id: S.eid }))); S.d.cuentas = (await store.loadEmpresa(S.eid)).cuentas; } catch (_) { /* sin permiso para crear cuentas */ }
   }
   $('empSel').innerHTML = S.empresas.map(e => `<option value="${e.id}" ${e.id === S.eid ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva empresa</option>';
   $('empSel').hidden = !S.empresas.length;
@@ -468,7 +473,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
       <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
-      <datalist id="ctasIt">${cuentasAux().filter(c => c.codigo.length >= 6).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
+      <datalist id="ctasIt">${cuentasAux().map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
       ${!emp().responsable_iva ? '<p class="hint">La empresa no es responsable de IVA, por eso el IVA va en 0.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="obs">Observaciones</label><textarea id="obs" rows="3" maxlength="1000">${esc(doc.observaciones)}</textarea></div>
@@ -500,15 +505,15 @@ function vEditor(m, { id, tipo, ref, tercero }) {
   // Cuenta que usará la línea si no se escoge otra: la del producto o la de la empresa.
   const ctaDefecto = it => {
     const P = param(), pr = S.d.productos.find(p => p.id === it.producto_id) || {};
-    if (tipo === 'NC') return pr.cuenta_devolucion || P.devoluciones;
-    return pr.cuenta_ingreso || (tipo === 'ND' && doc.concepto === '1' ? P.intereses : P.ingresos);
+    if (tipo === 'NC') return a8(pr.cuenta_devolucion || P.devoluciones);
+    return a8(pr.cuenta_ingreso || (tipo === 'ND' && doc.concepto === '1' ? P.intereses : P.ingresos));
   };
   // Cuadro de la contabilización mientras se edita el borrador.
   const vistaAsiento = () => {
     const box = $('asi'); if (!box) return;
     if (!doc.tercero_id) { box.innerHTML = '<p class="muted">Escoge el cliente para ver la contabilización.</p>'; return; }
     const tmp = { ...doc, id: '__tmp', tipo, estado: 'emitido', prefijo: '', numero: 'borrador' };
-    const its = (esRC ? [] : items).map(it => ({ ...it, cuenta: String(it.cuenta || '').trim().split(' ')[0], documento_id: '__tmp' }));
+    const its = (esRC ? [] : items).map(it => ({ ...it, cuenta: a8(String(it.cuenta || '').trim().split(' ')[0]), documento_id: '__tmp' }));
     const ap = (apl || []).map(a => ({ ...a, recibo_id: '__tmp' }));
     box.innerHTML = tablaAsiento(asiento(tmp, { items: its, aplicaciones: ap, productos: S.d.productos, param: param(), docs: S.d.documentos }));
   };
@@ -638,8 +643,8 @@ function vEditor(m, { id, tipo, ref, tercero }) {
       if (num(it.cantidad) <= 0) throw new Error(`La cantidad de "${it.descripcion}" debe ser mayor que cero.`);
       if (num(it.precio) < 0) throw new Error(`El precio de "${it.descripcion}" no puede ser negativo.`);
       if (it.cuenta) {
+        if (!esAuxiliar(it.cuenta)) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" no es auxiliar: escoge una cuenta de 8 dígitos.`);
         if (!idxCuentas()[it.cuenta]) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" no existe en el plan de cuentas.`);
-        if (!cuentasAux().some(c => c.codigo === it.cuenta)) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" tiene subcuentas: escoge una auxiliar.`);
       }
     }
     const { id: _id, ...campos } = doc;
@@ -833,8 +838,8 @@ function vClientes(m) {
 }
 
 /* ---------- Productos ---------- */
-// Lista de cuentas auxiliares (6 dígitos o más) que empiezan como indica el patrón.
-const selCuenta = (name, etiqueta, patron, valor, defecto) => `<div><label for="f_${name}">${etiqueta}</label><select id="f_${name}" name="${name}"><option value="">La de la empresa (${esc(defecto)})</option>${S.d.cuentas.filter(c => patron.test(c.codigo) && c.codigo.length >= 6).map(c => `<option value="${c.codigo}" ${c.codigo === valor ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>`;
+// Lista de cuentas auxiliares (8 dígitos) que empiezan como indica el patrón.
+const selCuenta = (name, etiqueta, patron, valor, defecto) => `<div><label for="f_${name}">${etiqueta}</label><select id="f_${name}" name="${name}"><option value="">La de la empresa (${esc(defecto)})</option>${cuentasAux().filter(c => patron.test(c.codigo)).map(c => `<option value="${c.codigo}" ${c.codigo === a8(valor) ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>`;
 function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
@@ -975,7 +980,7 @@ async function vUsuarios(m) {
 }
 
 /* ---------- Contabilidad ---------- */
-const param = () => ({ ...parametrosPorDefecto(), ...(emp()?.contabilidad || {}) });
+const param = () => parametrosDe(emp()?.contabilidad);
 const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos });
 const movs = () => movimientos({ ...S.d, param: param() });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
@@ -1006,66 +1011,95 @@ function filtroFechas(id, conDesde, onChange) {
 }
 const cabInforme = (titulo, sub) => `<header class="rep-head inf-head"><div><h2>${esc(emp().nombre)}</h2><p>NIT ${fmtNit(emp().nit)}-${emp().dv}</p></div><div class="rep-num"><span>${esc(titulo.toUpperCase())}</span><b class="inf-per">${sub}</b></div></header>`;
 
+// Padre de una cuenta: los niveles son clase (1), grupo (2), cuenta (4), subcuenta (6) y auxiliar (8).
+const padreDe = cod => cod.length <= 1 ? '' : cod.length === 2 ? cod[0] : cod.slice(0, cod.length - 2);
+let pucAbiertas = null;
 function vPuc(m) {
   let q = '', soloMov = false;
   const P = param();
-  m.innerHTML = `<header class="vhead"><div><h2>Plan de cuentas PUC y NIIF</h2><p class="sub">PUC para comerciantes (Decreto 2650 de 1993). Cada cuenta se homologa a un rubro de los estados financieros NIIF para Pymes.</p></div><button class="primary" id="nueva">Nueva cuenta auxiliar</button></header>
+  if (!pucAbiertas) { try { pucAbiertas = new Set(JSON.parse(localStorage.getItem('agasoft-puc') || '[]')); } catch (_) { pucAbiertas = new Set(); } }
+  const recordar = () => { try { localStorage.setItem('agasoft-puc', JSON.stringify([...pucAbiertas])); } catch (_) {} };
+  m.innerHTML = `<header class="vhead"><div><h2>Plan de cuentas PUC y NIIF</h2><p class="sub">PUC para comerciantes (Decreto 2650 de 1993), por niveles: clase, grupo (2 dígitos), cuenta (4), subcuenta (6) y auxiliar (8). Solo las auxiliares de 8 dígitos reciben movimientos.</p></div><button class="primary" id="nueva">Nueva cuenta</button></header>
   <details class="panel"><summary><b>Cuentas de la contabilización automática</b> <span class="muted">· a dónde van facturas, notas y recibos</span></summary>
-    <form id="parF" class="grid2 par">${Object.entries(PARAMETROS).map(([k, [, label]]) => `<div><label for="par_${k}">${label}</label><input id="par_${k}" name="${k}" list="ctasAux" class="mono" value="${esc(P[k])}"><p class="hint" data-n="${k}">${esc(nomCta(P[k]))}</p></div>`).join('')}
+    <form id="parF" class="grid2 par">${Object.entries(PARAMETROS).map(([k, [, label]]) => `<div><label for="par_${k}">${label}</label><input id="par_${k}" name="${k}" list="ctasAux" class="mono" inputmode="numeric" maxlength="8" value="${esc(P[k])}"><p class="hint" data-n="${k}">${esc(nomCta(P[k]))}</p></div>`).join('')}
       <div class="row end span-all"><button class="primary">Guardar cuentas</button></div></form>
-    <datalist id="ctasAux">${S.d.cuentas.filter(c => c.codigo.length >= 6).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist></details>
-  <div class="row filters"><input id="q" type="search" placeholder="Buscar por código o nombre"><label class="check"><input type="checkbox" id="sm"> Solo cuentas con movimiento</label></div>
+    <datalist id="ctasAux">${cuentasAux().map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist></details>
+  <div class="row filters"><input id="q" type="search" placeholder="Buscar por código o nombre"><label class="check"><input type="checkbox" id="sm"> Solo cuentas con movimiento</label>
+    <span class="spacer"></span><button class="sm" id="expT">Abrir todo</button><button class="sm" id="conT">Cerrar todo</button></div>
   <section class="panel" id="lst"></section>`;
   const conMov = new Set(movs().flatMap(x => [1, 2, 4, 6, 8].map(n => x.cuenta.slice(0, n))));
   const pintar = () => {
     const idx = idxCuentas();
-    const l = [...S.d.cuentas].filter(c => (!q || c.codigo.startsWith(q) || c.nombre.toLowerCase().includes(q)) && (!soloMov || conMov.has(c.codigo))).sort((a, b) => a.codigo.localeCompare(b.codigo));
-    $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl puc"><thead><tr><th>Código</th><th>Nombre</th><th>Nat.</th><th>Rubro NIIF</th><th>Código NIIF</th><th></th></tr></thead><tbody>
-      ${l.slice(0, 600).map(c => { const r = rubroDe(c.codigo, idx); const propio = !!c.niif_rubro; return `<tr class="lv${c.codigo.length}"><td class="mono">${c.codigo}</td><td>${esc(c.nombre)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
-        <td class="${propio ? '' : 'muted'}">${r ? esc(RUBRO[r]?.nombre) : '—'}${r && RUBRO[r]?.estado !== '—' ? ` <span class="tag">${RUBRO[r].estado}</span>` : ''}</td><td class="mono">${esc(c.niif_codigo)}</td>
-        <td class="r nowrap">${conMov.has(c.codigo) ? `<a class="btn ghost sm" href="#/auxiliar?cuenta=${c.codigo}">Auxiliar</a>` : ''}<button class="ghost sm" data-ed="${c.id}">Editar</button></td></tr>`; }).join('')}
-      </tbody></table></div>${l.length > 600 ? '<p class="hint">Se muestran las primeras 600 cuentas. Usa el buscador.</p>' : ''}`;
+    const todas = [...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo));
+    const conHijas = new Set(todas.map(c => padreDe(c.codigo)).filter(Boolean));
+    const filtrando = !!q || soloMov;
+    // Sin filtro: árbol desplegable (cada cuenta se ve si todas sus cuentas padre están abiertas). Con filtro: lista plana.
+    const visible = c => { for (let p = padreDe(c.codigo); p; p = padreDe(p)) if (idx[p] && !pucAbiertas.has(p)) return false; return true; };
+    const l = todas.filter(c => filtrando ? (!q || c.codigo.startsWith(q) || c.nombre.toLowerCase().includes(q)) && (!soloMov || conMov.has(c.codigo)) : visible(c));
+    $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl puc"><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Nat.</th><th>Rubro NIIF</th><th></th></tr></thead><tbody>
+      ${l.slice(0, 800).map(c => { const r = rubroDe(c.codigo, idx); const propio = !!c.niif_rubro; const hijas = conHijas.has(c.codigo); const ab = pucAbiertas.has(c.codigo);
+        return `<tr class="lv${c.codigo.length} ${hijas && !filtrando ? 'click' : ''}" ${hijas && !filtrando ? `data-tg="${c.codigo}"` : ''}>
+        <td class="mono nowrap">${!filtrando ? `<span class="tg" aria-hidden="true">${hijas ? (ab ? '▾' : '▸') : ''}</span>` : ''}${c.codigo}</td><td>${esc(c.nombre)}</td><td class="muted">${nivelDe(c.codigo)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
+        <td class="${propio ? '' : 'muted'}">${r ? esc(RUBRO[r]?.nombre) : '—'}${r && RUBRO[r]?.estado !== '—' ? ` <span class="tag">${RUBRO[r].estado}</span>` : ''}</td>
+        <td class="r nowrap">${conMov.has(c.codigo) ? `<a class="btn ghost sm" href="#/auxiliar?cuenta=${c.codigo}">Auxiliar</a>` : ''}${c.codigo.length < 8 ? `<button class="ghost sm" data-sub="${c.codigo}" title="Crear una cuenta dentro de ${c.codigo}">+ Crear</button>` : ''}<button class="ghost sm" data-ed="${c.id}">Editar</button></td></tr>`; }).join('')}
+      </tbody></table></div>${l.length > 800 ? '<p class="hint">Se muestran las primeras 800 cuentas. Usa el buscador.</p>' : ''}`;
   };
   $('q').oninput = () => { q = $('q').value.trim().toLowerCase(); pintar(); };
   $('sm').onchange = () => { soloMov = $('sm').checked; pintar(); };
-  $('lst').onclick = ev => { const b = ev.target.closest('[data-ed]'); if (b) formCuenta(S.d.cuentas.find(c => c.id === b.dataset.ed)); };
+  $('expT').onclick = () => { pucAbiertas = new Set(S.d.cuentas.filter(c => c.codigo.length < 8).map(c => c.codigo)); recordar(); pintar(); };
+  $('conT').onclick = () => { pucAbiertas = new Set(); recordar(); pintar(); };
+  $('lst').onclick = ev => {
+    const b = ev.target.closest('[data-ed]'); if (b) return formCuenta(S.d.cuentas.find(c => c.id === b.dataset.ed));
+    const sub = ev.target.closest('[data-sub]'); if (sub) return formCuenta({}, sub.dataset.sub);
+    const tr = ev.target.closest('[data-tg]'); if (!tr || ev.target.closest('a,button')) return;
+    const cod = tr.dataset.tg; if (pucAbiertas.has(cod)) pucAbiertas.delete(cod); else pucAbiertas.add(cod); recordar(); pintar();
+  };
   $('nueva').onclick = () => formCuenta();
   $('parF').oninput = ev => { const k = ev.target.name; const h = m.querySelector(`[data-n="${k}"]`); if (h) h.textContent = nomCta(ev.target.value.trim()); };
   $('parF').onsubmit = async ev => {
     ev.preventDefault();
     const fd = new FormData($('parF')); const idx = idxCuentas(); const nuevo = {};
-    for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); nuevo[k] = v; }
+    for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!esAuxiliar(v)) return toast(`La cuenta ${v} no es auxiliar: usa una cuenta de 8 dígitos.`, true); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); nuevo[k] = v; }
     try { await store.save('empresas', { id: S.eid, contabilidad: nuevo }); await recargar(); toast('Cuentas guardadas. Los informes ya usan estas cuentas.'); } catch (e) { fail(e); }
   };
   pintar();
 }
-function formCuenta(c = {}) {
+function formCuenta(c = {}, padre = '') {
   const nueva = !c.id;
   const usada = c.codigo && movs().some(x => x.cuenta.startsWith(c.codigo));
-  const f = dialogo(`<h2>${nueva ? 'Nueva cuenta' : `Cuenta ${esc(c.codigo)}`}</h2>
-    ${nueva ? `${campo('codigo', 'Código', '', 'required inputmode="numeric" class="mono" pattern="[0-9]{6,12}" placeholder="11100501"')}<p class="hint" id="ctaPadre">Debe empezar por una cuenta que ya exista. Ej.: 111005 + 01 para una cuenta bancaria.</p>` : ''}
+  const tieneHijas = c.codigo && S.d.cuentas.some(x => x.codigo !== c.codigo && x.codigo.startsWith(c.codigo));
+  const ejemplo = padre ? padre + (padre.length === 1 ? '9' : '95') : '11100502';
+  const f = dialogo(`<h2>${nueva ? 'Nueva cuenta' : `Cuenta ${esc(c.codigo)} · ${esc(nivelDe(c.codigo))}`}</h2>
+    ${nueva ? `${campo('codigo', 'Código', padre, 'required inputmode="numeric" class="mono" maxlength="8" pattern="[0-9]{2}|[0-9]{4}|[0-9]{6}|[0-9]{8}" placeholder="' + ejemplo + '"')}<p class="hint" id="ctaPadre">Grupo de 2 dígitos, cuenta de 4, subcuenta de 6 o auxiliar de 8. La cuenta padre debe existir. Solo las auxiliares de 8 dígitos reciben movimientos.</p>` : ''}
     ${campo('nombre', 'Nombre', c.nombre, 'required maxlength="120"')}
-    <div class="grid2">${campoSel('naturaleza', 'Naturaleza', [['D', 'Débito'], ['C', 'Crédito']], c.naturaleza || 'D')}
+    <div class="grid2">${campoSel('naturaleza', 'Naturaleza', [['D', 'Débito'], ['C', 'Crédito']], c.naturaleza || (padre && idxCuentas()[padre]?.naturaleza) || 'D')}
     ${campo('niif_codigo', 'Código en el plan NIIF (opcional)', c.niif_codigo, 'class="mono" maxlength="20"')}</div>
     <div><label for="f_rub">Rubro NIIF (línea del estado financiero)</label><select id="f_rub" name="niif_rubro"><option value="">Igual que la cuenta padre</option>
       ${['ESF', 'ER', '—'].map(e => `<optgroup label="${e === 'ESF' ? 'Estado de situación financiera' : e === 'ER' ? 'Estado de resultados' : 'Otros'}">${RUBROS.filter(r => r.estado === e).map(r => `<option value="${r.id}" ${r.id === c.niif_rubro ? 'selected' : ''}>${esc(r.seccion)} · ${esc(r.nombre)}</option>`).join('')}</optgroup>`).join('')}</select></div>
-    ${!nueva && !usada && c.codigo.length > 4 ? '<div class="row"><button value="del" class="ghost">Borrar cuenta</button></div>' : ''}
+    ${!nueva && !usada && !tieneHijas && c.codigo.length > 4 ? '<div class="row"><button value="del" class="ghost">Borrar cuenta</button></div>' : ''}
     ${pie()}`, async (fd, btn) => {
     if (btn === 'del') { await store.remove('cuentas', c.id); await cargarEmpresa(); toast('Cuenta borrada.'); route(); return; }
     const row = { empresa_id: S.eid, nombre: String(fd.get('nombre')).trim(), naturaleza: fd.get('naturaleza'), niif_rubro: fd.get('niif_rubro') || null, niif_codigo: String(fd.get('niif_codigo') || '').trim() };
     if (!row.nombre) throw new Error('Escribe el nombre de la cuenta.');
     if (nueva) {
       const cod = String(fd.get('codigo')).trim();
-      if (!/^\d{6,12}$/.test(cod) || cod.length % 2) throw new Error('El código lleva 6, 8, 10 o 12 dígitos.');
+      if (!/^(\d{2}|\d{4}|\d{6}|\d{8})$/.test(cod)) throw new Error('El código lleva 2, 4, 6 u 8 dígitos (grupo, cuenta, subcuenta o auxiliar).');
       if (idxCuentas()[cod]) throw new Error('Ya existe una cuenta con ese código.');
-      if (!idxCuentas()[cod.slice(0, cod.length - 2)]) throw new Error(`Primero debe existir la cuenta ${cod.slice(0, cod.length - 2)}.`);
+      if (!idxCuentas()[padreDe(cod)]) throw new Error(`Primero debe existir la cuenta ${padreDe(cod)}.`);
       row.codigo = cod; row.activa = true;
     }
-    await store.save('cuentas', nueva ? row : { ...row, id: c.id }); await cargarEmpresa(); toast('Cuenta guardada.'); route();
+    await store.save('cuentas', nueva ? row : { ...row, id: c.id });
+    if (nueva) { for (let p = padreDe(row.codigo); p; p = padreDe(p)) pucAbiertas?.add(p); try { localStorage.setItem('agasoft-puc', JSON.stringify([...(pucAbiertas || [])])); } catch (_) {} }
+    await cargarEmpresa(); toast('Cuenta guardada.'); route();
   });
   if (nueva) {
     const i = f.querySelector('[name=codigo]');
-    i.oninput = () => { const cod = i.value.trim(); const p = idxCuentas()[cod.slice(0, cod.length - 2)]; $('ctaPadre').textContent = cod.length >= 6 ? (p ? `Queda dentro de ${p.codigo} ${p.nombre}.` : `No existe la cuenta ${cod.slice(0, cod.length - 2)}.`) : 'Debe empezar por una cuenta que ya exista.'; if (p) f.querySelector('[name=naturaleza]').value = p.naturaleza; };
+    i.oninput = () => {
+      const cod = i.value.trim(), p = idxCuentas()[padreDe(cod)];
+      $('ctaPadre').textContent = /^(\d{2}|\d{4}|\d{6}|\d{8})$/.test(cod) ? (p ? `${nivelDe(cod)} dentro de ${p.codigo} ${p.nombre}.${cod.length === 8 ? ' Recibe movimientos.' : ' Para registrar movimientos crea luego una auxiliar de 8 dígitos.'}` : `No existe la cuenta ${padreDe(cod)}.`) : 'Grupo de 2 dígitos, cuenta de 4, subcuenta de 6 o auxiliar de 8.';
+      if (p) f.querySelector('[name=naturaleza]').value = p.naturaleza;
+    };
+    if (padre) { i.focus(); i.setSelectionRange(padre.length, padre.length); }
   }
 }
 
@@ -1073,7 +1107,7 @@ function vBalance(m) {
   let nivel = '4';
   m.innerHTML = `<header class="vhead"><h2>Balance de prueba</h2><button id="csv">Descargar CSV</button></header>
     ${filtroFechas('fb', true, () => pintar())}
-    <div class="row filters"><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['99', 'Auxiliar (todo)']], nivel)}</select></div>
+    <div class="row filters"><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']], nivel)}</select></div>
     <section class="panel" id="out"></section>`;
   let b;
   const pintar = () => {
@@ -1093,19 +1127,19 @@ function vAuxiliar(m, q) {
   let cuenta = q.get('cuenta') || param().clientes, tercero = '';
   const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
   m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
-    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAll" class="mono" value="${esc(cuenta)}"></div>
+    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><select id="cta" class="mono" style="width:100%;max-width:100%">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo}" ${c.codigo === cuenta ? 'selected' : ''}>${'&nbsp;'.repeat(Math.max(0, c.codigo.length - 1) * 2)}${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' ·'}</option>`).join('')}</select><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Las marcadas con · no tienen movimientos.</p></div>
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
-    <datalist id="ctasAll">${S.d.cuentas.filter(c => conMov.some(x => x.startsWith(c.codigo))).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
+    
     ${filtroFechas('fa', true, () => pintar())}
     <section class="panel" id="out"></section>`;
   const pintar = () => {
     const a = libroAuxiliar(movs(), S.d.cuentas, cuenta, F.desde, F.hasta, tercero);
-    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 6 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
-      <tr class="muted"><td colspan="${cuenta.length < 6 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
-      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 6 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
-      <tr class="strong"><td colspan="${cuenta.length < 6 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 8 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+      <tr class="muted"><td colspan="${cuenta.length < 8 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 8 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
+      <tr class="strong"><td colspan="${cuenta.length < 8 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
   };
-  $('cta').onchange = () => { cuenta = $('cta').value.trim().split(' ')[0]; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
+  $('cta').onchange = () => { cuenta = $('cta').value; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   pintar();
 }
@@ -1148,10 +1182,9 @@ const compById = id => comps().find(c => c.id === id);
 const nomComp = c => `${TIPOS_COMP[c.tipo].nombre} ${c.numero}`;
 const valorComp = c => r2((c.lineas || []).reduce((s, l) => s + num(l.debito), 0));
 const siguienteComp = tipo => Math.max(0, ...comps().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
-// Cuentas auxiliares: las que no tienen subcuentas en el plan.
+// Cuentas auxiliares: las de 8 dígitos, las únicas que reciben movimientos.
 function cuentasAux() {
-  const l = [...S.d.cuentas].filter(c => c.activa !== false).sort((a, b) => a.codigo.localeCompare(b.codigo));
-  return l.filter((c, i) => c.codigo.length >= 4 && !(l[i + 1] && l[i + 1].codigo.startsWith(c.codigo)));
+  return S.d.cuentas.filter(c => c.activa !== false && esAuxiliar(c.codigo)).sort((a, b) => a.codigo.localeCompare(b.codigo));
 }
 // Valores como vienen de Excel en Colombia: "1.234.567,89", "$ 1,234,567.89", "-850000".
 function parseValor(v) {
@@ -1190,7 +1223,7 @@ function vCompEditor(m, { id, tipo }) {
     const x = compById(id);
     if (!x) { m.innerHTML = '<p>No se encontró el comprobante.</p>'; return; }
     if (x.estado === 'anulado') { location.replace('#/comp/' + id); return; }
-    c = { ...x, lineas: (x.lineas || []).map(l => ({ ...l })) };
+    c = { ...x, lineas: (x.lineas || []).map(l => ({ ...l, cuenta: a8(l.cuenta) })) };
   } else {
     if (!TIPOS_COMP[tipo]) tipo = 'CC';
     const linea0 = () => ({ cuenta: '', tercero_id: '', detalle: '', debito: '', credito: '' });
@@ -1293,7 +1326,7 @@ function importarLineas(c, alTerminar) {
       const nit = String(x.tercero || '').split('-')[0].replace(/\D/g, '');
       const t = nit ? S.d.terceros.find(y => y.numero === nit) : null;
       if (nit && !t) sinTercero++;
-      return { cuenta: x.cuenta, tercero_id: t?.id || '', detalle: [x.detalle, nit && !t ? `NIT ${nit}` : ''].filter(Boolean).join(' · ') || c.descripcion || '', debito: d || '', credito: k || '' };
+      return { cuenta: a8(x.cuenta), tercero_id: t?.id || '', detalle: [x.detalle, nit && !t ? `NIT ${nit}` : ''].filter(Boolean).join(' · ') || c.descripcion || '', debito: d || '', credito: k || '' };
     }).filter(l => l.debito || l.credito);
     c.lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito)).concat(nuevas);
     alTerminar();
