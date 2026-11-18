@@ -5,7 +5,7 @@ import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1124,23 +1124,42 @@ function formCuenta(c = {}, padre = '') {
   }
 }
 
+let balOpc = { nivel: '4', tercero: '', detalle: false };
 function vBalance(m) {
-  let nivel = '4';
+  const terceros = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead"><h2>Balance de prueba</h2><button id="csv">Descargar CSV</button></header>
     ${filtroFechas('fb', true, () => pintar())}
-    <div class="row filters"><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']], nivel)}</select></div>
+    <div class="row filters"><div><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']], balOpc.nivel)}</select></div>
+      <div class="grow"><label for="bter">Tercero</label><select id="bter"><option value="">Todos los terceros</option>${terceros.map(t => `<option value="${t.id}" ${t.id === balOpc.tercero ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select></div>
+      <label class="check"><input type="checkbox" id="bdet" ${balOpc.detalle ? 'checked' : ''}> Detallar por tercero</label></div>
     <section class="panel" id="out"></section>`;
-  let b;
+  let b, ms;
+  const nomT = id => id ? (terc(id)?.nombre || 'Tercero borrado') : 'Sin tercero';
+  const detalle = f => saldosPorTercero(ms, S.d.cuentas, f.codigo, F.desde, F.hasta).sort((a, c) => nomT(a.tercero_id).localeCompare(nomT(c.tercero_id)));
   const pintar = () => {
-    b = balancePrueba(movs(), S.d.cuentas, F.desde, F.hasta);
-    const l = b.filas.filter(f => f.codigo.length <= Number(nivel));
-    $('out').innerHTML = cabInforme('Balance de prueba', `${fFecha(F.desde)} a ${fFecha(F.hasta)}`) + (l.length ? `<div class="tbl-wrap"><table class="tbl bal"><thead><tr><th>Código</th><th>Cuenta</th><th class="r">Saldo anterior</th><th class="r">Débitos</th><th class="r">Créditos</th><th class="r">Saldo final</th></tr></thead><tbody>
-      ${l.map(f => `<tr class="lv${f.codigo.length} click" data-go="#/auxiliar?cuenta=${f.codigo}"><td class="mono">${f.codigo}</td><td>${esc(f.nombre)}</td><td class="r mono">${valor(f.inicial)}</td><td class="r mono">${valor(f.debito)}</td><td class="r mono">${valor(f.credito)}</td><td class="r mono">${valor(f.final)}</td></tr>`).join('')}
+    ms = movs().filter(x => !balOpc.tercero || x.tercero_id === balOpc.tercero);
+    b = balancePrueba(ms, S.d.cuentas, F.desde, F.hasta);
+    const n = Number(balOpc.nivel);
+    const l = b.filas.filter(f => f.codigo.length <= n);
+    const sub = balOpc.tercero ? `${esc(nomT(balOpc.tercero))} · ${esc(docId(terc(balOpc.tercero)))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>` : `${fFecha(F.desde)} a ${fFecha(F.hasta)}`;
+    $('out').innerHTML = cabInforme(balOpc.tercero ? 'Balance de prueba por tercero' : 'Balance de prueba', sub) + (l.length ? `<div class="tbl-wrap"><table class="tbl bal"><thead><tr><th>Código</th><th>Cuenta</th><th class="r">Saldo anterior</th><th class="r">Débitos</th><th class="r">Créditos</th><th class="r">Saldo final</th></tr></thead><tbody>
+      ${l.map(f => `<tr class="lv${f.codigo.length} click" data-go="#/auxiliar?cuenta=${f.codigo}"><td class="mono">${f.codigo}</td><td>${esc(f.nombre)}</td><td class="r mono">${valor(f.inicial)}</td><td class="r mono">${valor(f.debito)}</td><td class="r mono">${valor(f.credito)}</td><td class="r mono">${valor(f.final)}</td></tr>
+        ${balOpc.detalle && f.codigo.length === Math.min(n, 8) ? detalle(f).map(x => `<tr class="ter"><td></td><td>${esc(nomT(x.tercero_id))}${x.tercero_id ? ` <span class="muted mono">${esc(fmtNit(terc(x.tercero_id)?.numero || ''))}</span>` : ''}</td><td class="r mono">${valor(x.inicial)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${valor(x.final)}</td></tr>`).join('') : ''}`).join('')}
       <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(b.debitos)}</td><td class="r mono">${money(b.creditos)}</td><td></td></tr></tbody></table></div>
-      ${Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.</p>` : '<p class="muted">No hay movimientos en este periodo. Los movimientos salen de las facturas, notas y recibos emitidos.</p>');
+      ${!balOpc.tercero && Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.${balOpc.tercero ? ' Al filtrar por un tercero, las sumas no tienen que ser iguales.' : ''}</p>` : '<p class="muted">No hay movimientos en este periodo con ese filtro.</p>');
   };
-  $('niv').onchange = () => { nivel = $('niv').value; pintar(); };
-  $('csv').onclick = () => descargar(`balance-${emp().nit}-${F.hasta}.csv`, '﻿' + [['Código', 'Cuenta', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']].concat(b.filas.filter(f => f.codigo.length <= Number(nivel)).map(f => [f.codigo, f.nombre, f.inicial, f.debito, f.credito, f.final].map(v => typeof v === 'number' ? String(v).replace('.', ',') : v))).map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  $('niv').onchange = () => { balOpc.nivel = $('niv').value; pintar(); };
+  $('bter').onchange = () => { balOpc.tercero = $('bter').value; pintar(); };
+  $('bdet').onchange = () => { balOpc.detalle = $('bdet').checked; pintar(); };
+  $('csv').onclick = () => {
+    const n = Number(balOpc.nivel), filas = [['Código', 'Cuenta', 'Tercero', 'Identificación', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']];
+    const v = x => String(x).replace('.', ',');
+    for (const f of b.filas.filter(f => f.codigo.length <= n)) {
+      filas.push([f.codigo, f.nombre, balOpc.tercero ? nomT(balOpc.tercero) : '', balOpc.tercero ? terc(balOpc.tercero)?.numero || '' : '', v(f.inicial), v(f.debito), v(f.credito), v(f.final)]);
+      if (balOpc.detalle && f.codigo.length === Math.min(n, 8)) for (const x of detalle(f)) filas.push([f.codigo, f.nombre, nomT(x.tercero_id), terc(x.tercero_id)?.numero || '', v(x.inicial), v(x.debito), v(x.credito), v(x.final)]);
+    }
+    descargar(`balance${balOpc.detalle || balOpc.tercero ? '-terceros' : ''}-${emp().nit}-${F.hasta}.csv`, '﻿' + filas.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  };
   pintar();
 }
 

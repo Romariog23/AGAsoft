@@ -124,3 +124,13 @@ test('compras: factura de proveedor, egreso y cuentas por pagar', async () => {
   const ms = movimientos({ ...S, compras: [fc, ce] });
   const b = balancePrueba(ms, plan, '2026-01-01', '2026-12-31'); assert.equal(b.debitos, b.creditos);
 });
+
+test('saldos por tercero', async () => {
+  const { saldosPorTercero } = await import('../src/contab.js');
+  const plan = planInicial();
+  const ms = movimientos(S);
+  const l = saldosPorTercero(ms, plan, '13050501', '2026-11-01', '2026-11-30');
+  assert.equal(l.length, 1); assert.equal(l[0].tercero_id, 't1');
+  const b = balancePrueba(ms, plan, '2026-11-01', '2026-11-30');
+  assert.equal(l[0].final, b.filas.find(f => f.codigo === '13050501').final);
+});
