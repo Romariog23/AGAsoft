@@ -240,8 +240,10 @@ create table if not exists public.items (
   cantidad numeric(16,4) not null default 1,
   precio numeric(16,2) not null default 0,
   descuento_pct numeric(5,2) not null default 0,
-  iva_pct numeric(5,2) not null default 0
+  iva_pct numeric(5,2) not null default 0,
+  cuenta text not null default ''
 );
+alter table public.items add column if not exists cuenta text not null default '';
 create index if not exists items_doc on public.items (documento_id);
 
 -- Pagos de un recibo de caja aplicados a facturas.
@@ -272,6 +274,9 @@ declare
   did uuid := nullif(p_doc->>'id', '')::uuid;
   d record;
 begin
+  -- Fechas o referencias vacías llegan como '' y no se pueden convertir: se quitan.
+  p_doc := p_doc - array['vence', 'ref_id', 'fecha', 'id']::text[] || jsonb_strip_nulls(jsonb_build_object(
+    'vence', nullif(p_doc->>'vence', ''), 'ref_id', nullif(p_doc->>'ref_id', ''), 'fecha', nullif(p_doc->>'fecha', ''), 'id', nullif(p_doc->>'id', '')));
   if not public.puede_editar(eid) then raise exception 'No tienes permiso para registrar documentos en esta empresa.'; end if;
   if not exists (select 1 from terceros where id = (p_doc->>'tercero_id')::uuid and empresa_id = eid) then raise exception 'El cliente no pertenece a esta empresa.'; end if;
   if did is not null then
@@ -298,9 +303,10 @@ begin
     where id = did;
   end if;
   delete from items where documento_id = did;
-  insert into items (documento_id, empresa_id, orden, producto_id, codigo, descripcion, unidad, cantidad, precio, descuento_pct, iva_pct)
+  insert into items (documento_id, empresa_id, orden, producto_id, codigo, descripcion, unidad, cantidad, precio, descuento_pct, iva_pct, cuenta)
   select did, eid, (o - 1)::int, nullif(x->>'producto_id', '')::uuid, coalesce(x->>'codigo', ''), coalesce(x->>'descripcion', ''), coalesce(x->>'unidad', 'UND'),
-    coalesce((x->>'cantidad')::numeric, 0), coalesce((x->>'precio')::numeric, 0), coalesce((x->>'descuento_pct')::numeric, 0), coalesce((x->>'iva_pct')::numeric, 0)
+    coalesce((x->>'cantidad')::numeric, 0), coalesce((x->>'precio')::numeric, 0), coalesce((x->>'descuento_pct')::numeric, 0), coalesce((x->>'iva_pct')::numeric, 0),
+    coalesce(trim(x->>'cuenta'), '')
   from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) with ordinality as a(x, o);
   delete from aplicaciones where recibo_id = did;
   insert into aplicaciones (recibo_id, empresa_id, factura_id, valor)

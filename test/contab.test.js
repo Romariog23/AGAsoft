@@ -80,3 +80,10 @@ test('comprobantes manuales: asiento, validación e informes', () => {
   assert.equal(b.filas.find(f => f.codigo === '3105').final, 15000000);
 });
 
+test('la cuenta escogida en la línea manda sobre la del producto', () => {
+  const items = [{ ...its[0], cuenta: '414005' }, { ...its[1], cuenta: ' ' }];
+  const a = asiento(fv, { ...S, items, docs: S.documentos });
+  assert.ok(cuadra(a));
+  const c = Object.fromEntries(a.map(m => [m.cuenta, m]));
+  assert.equal(c['414005'].credito, 1000000); assert.equal(c['415501'], undefined); assert.equal(c['413501'].credito, 100000);
+});

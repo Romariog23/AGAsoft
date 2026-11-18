@@ -42,7 +42,9 @@ function asiento(d, ctx) {
     // Si no la tiene, se usa la de los parámetros de la empresa.
     const pr = prods[it.producto_id] || {};
     let cta;
-    if (d.tipo === 'NC') cta = pr.cuenta_devolucion || P.devoluciones;
+    // La cuenta escogida en la línea manda sobre la del producto y la de la empresa.
+    if (String(it.cuenta || '').trim()) cta = String(it.cuenta).trim();
+    else if (d.tipo === 'NC') cta = pr.cuenta_devolucion || P.devoluciones;
     else if (pr.cuenta_ingreso) cta = pr.cuenta_ingreso;
     else cta = d.tipo === 'ND' && d.concepto === '1' ? P.intereses : P.ingresos;
     porCuenta[cta] = r2((porCuenta[cta] || 0) + l.base);

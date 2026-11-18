@@ -467,7 +467,8 @@ function vEditor(m, { id, tipo, ref, tercero }) {
       <div class="grid2"><div><label for="ant">Anticipo o pago sin factura</label><input id="ant" type="number" min="0" step="0.01" class="mono" value="${num(doc.anticipo) || ''}"></div></div></section>` :
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
-      <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
+      <datalist id="ctasIt">${cuentasAux().filter(c => c.codigo.length >= 6).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
       ${!emp().responsable_iva ? '<p class="hint">La empresa no es responsable de IVA, por eso el IVA va en 0.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="obs">Observaciones</label><textarea id="obs" rows="3" maxlength="1000">${esc(doc.observaciones)}</textarea></div>
@@ -477,6 +478,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
         <div><label for="rica">ReteICA (por mil)</label><input id="rica" type="number" min="0" max="100" step="0.001" class="mono" value="${num(doc.reteica_milaje) || ''}"></div></div></div>`}
       <div class="span2 totbox" id="tot"></div>
     </section>
+    <section class="panel stack"><div class="vhead"><h3>Contabilización</h3><span class="hint">Vista previa. Se registra al emitir.</span></div><div id="asi"></div></section>
     <p class="err" id="edErr" hidden></p>
     <div class="row end sticky-actions">
       ${id ? '<button type="button" class="ghost" id="delB">Borrar borrador</button>' : ''}<span class="spacer"></span>
@@ -495,13 +497,28 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     if ($('rf')) Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) });
     if ($('ant')) doc.anticipo = num($('ant').value);
   };
+  // Cuenta que usará la línea si no se escoge otra: la del producto o la de la empresa.
+  const ctaDefecto = it => {
+    const P = param(), pr = S.d.productos.find(p => p.id === it.producto_id) || {};
+    if (tipo === 'NC') return pr.cuenta_devolucion || P.devoluciones;
+    return pr.cuenta_ingreso || (tipo === 'ND' && doc.concepto === '1' ? P.intereses : P.ingresos);
+  };
+  // Cuadro de la contabilización mientras se edita el borrador.
+  const vistaAsiento = () => {
+    const box = $('asi'); if (!box) return;
+    if (!doc.tercero_id) { box.innerHTML = '<p class="muted">Escoge el cliente para ver la contabilización.</p>'; return; }
+    const tmp = { ...doc, id: '__tmp', tipo, estado: 'emitido', prefijo: '', numero: 'borrador' };
+    const its = (esRC ? [] : items).map(it => ({ ...it, cuenta: String(it.cuenta || '').trim().split(' ')[0], documento_id: '__tmp' }));
+    const ap = (apl || []).map(a => ({ ...a, recibo_id: '__tmp' }));
+    box.innerHTML = tablaAsiento(asiento(tmp, { items: its, aplicaciones: ap, productos: S.d.productos, param: param(), docs: S.d.documentos }));
+  };
   const calcular = () => {
     leerCab();
     if (esRC) {
       const t = r2(apl.reduce((s, a) => s + num(a.valor), 0) + num(doc.anticipo));
       Object.assign(doc, { bruto: t, descuento: 0, base: t, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: t, neto: t });
       $('tot').innerHTML = `<dl class="tot"><dt>Total recibido</dt><dd class="big mono">${money(t)}</dd></dl><p class="hint letras">${enLetras(t)}</p>`;
-      return;
+      vistaAsiento(); return;
     }
     const t = totales(items, doc);
     Object.assign(doc, { bruto: t.bruto, descuento: t.descuento, base: t.base, iva: t.iva, retefuente: t.retefuente, reteiva: t.reteiva, reteica: t.reteica, total: t.total, neto: t.neto });
@@ -517,6 +534,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
       ${t.neto !== t.total ? `<dt class="strong">Neto a pagar</dt><dd class="mono big">${money(t.neto)}</dd>` : ''}
     </dl><p class="hint letras">${enLetras(t.neto)}</p>`;
     items.forEach((it, i) => { const c = m.querySelector(`[data-lt="${i}"]`); if (c) c.textContent = money(linea(it).total); });
+    vistaAsiento();
   };
   const pintarItems = () => {
     if (esRC) return;
@@ -524,12 +542,13 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     $('its').innerHTML = items.map((it, i) => `<tr data-i="${i}">
       <td data-l="Código"><input data-k="codigo" list="prods" value="${esc(it.codigo)}" class="mono w-cod" aria-label="Código" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" value="${esc(it.descripcion)}" aria-label="Descripción" ${bloqueado ? 'readonly' : ''}></td>
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasIt" value="${esc(it.cuenta || '')}" placeholder="${esc(ctaDefecto(it))}" class="mono w-cta" aria-label="Cuenta contable" title="${esc(it.cuenta ? nomCta(it.cuenta) : 'Cuenta por defecto: ' + ctaDefecto(it) + ' ' + nomCta(ctaDefecto(it)))}"></td>
       <td data-l="Cantidad"><input data-k="cantidad" type="number" step="any" min="0" value="${it.cantidad}" class="r mono w-num" aria-label="Cantidad" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Precio unit."><input data-k="precio" type="number" step="0.01" min="0" value="${it.precio}" class="r mono w-val" aria-label="Precio unitario" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Desc. %"><input data-k="descuento_pct" type="number" step="0.01" min="0" max="100" value="${num(it.descuento_pct) || ''}" class="r mono w-num" aria-label="Descuento %" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %" ${bloqueado || !emp().responsable_iva ? 'disabled' : ''}>${opts([['0', '0'], ['5', '5'], ['19', '19']], String(num(it.iva_pct)))}</select></td>
       <td class="r mono c-tot" data-l="Total" data-lt="${i}">${money(linea(it).total)}</td>
-      <td class="c-del">${bloqueado ? '' : `<button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button>`}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Sin líneas.</td></tr>';
+      <td class="c-del">${bloqueado ? '' : `<button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button>`}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Sin líneas.</td></tr>';
     if ($('addIt')) $('addIt').hidden = bloqueado;
   };
   const pintarApl = () => {
@@ -589,7 +608,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
       it[k] = ['cantidad', 'precio', 'descuento_pct', 'iva_pct'].includes(k) ? el.value : el.value;
       if (k === 'codigo') {
         const p = S.d.productos.find(x => x.codigo.toLowerCase() === el.value.trim().toLowerCase());
-        if (p) { Object.assign(it, nuevoItem(p), { cantidad: it.cantidad || 1 }); pintarItems(); m.querySelector(`tr[data-i="${tr.dataset.i}"] [data-k=cantidad]`)?.focus(); }
+        if (p) { Object.assign(it, nuevoItem(p), { cantidad: it.cantidad || 1 }); it.cuenta = ctaDefecto(it); pintarItems(); m.querySelector(`tr[data-i="${tr.dataset.i}"] [data-k=cantidad]`)?.focus(); }
       }
     }
     if (el.dataset.apl) {
@@ -608,7 +627,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
   $('fecha').onchange = () => { const t = terc($('cli').value); if ($('fp')?.value === 'credito' && t?.plazo_dias) $('vence').value = sumarDias($('fecha').value, t.plazo_dias); calcular(); };
 
   const errEd = msg => { $('edErr').textContent = msg; $('edErr').hidden = !msg; if (msg) $('edErr').scrollIntoView({ block: 'center', behavior: 'smooth' }); };
-  const limpiarItems = () => items.filter(it => String(it.descripcion).trim() || num(it.precio)).map(({ id: _i, documento_id: _d, empresa_id: _e, ...it }) => ({ ...it, cantidad: num(it.cantidad), precio: num(it.precio), descuento_pct: num(it.descuento_pct), iva_pct: num(it.iva_pct) }));
+  const limpiarItems = () => items.filter(it => String(it.descripcion).trim() || num(it.precio)).map(({ id: _i, documento_id: _d, empresa_id: _e, ...it }) => ({ ...it, cuenta: String(it.cuenta || '').trim().split(' ')[0], cantidad: num(it.cantidad), precio: num(it.precio), descuento_pct: num(it.descuento_pct), iva_pct: num(it.iva_pct) }));
   const guardar = async () => {
     calcular();
     if (!doc.tercero_id) throw new Error('Escoge el cliente.');
@@ -618,9 +637,14 @@ function vEditor(m, { id, tipo, ref, tercero }) {
       if (!String(it.descripcion).trim()) throw new Error('Cada línea necesita una descripción.');
       if (num(it.cantidad) <= 0) throw new Error(`La cantidad de "${it.descripcion}" debe ser mayor que cero.`);
       if (num(it.precio) < 0) throw new Error(`El precio de "${it.descripcion}" no puede ser negativo.`);
+      if (it.cuenta) {
+        if (!idxCuentas()[it.cuenta]) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" no existe en el plan de cuentas.`);
+        if (!cuentasAux().some(c => c.codigo === it.cuenta)) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" tiene subcuentas: escoge una auxiliar.`);
+      }
     }
     const { id: _id, ...campos } = doc;
-    const g = await store.saveDoc({ ...campos, id: doc.id || id || undefined, empresa_id: S.eid, tipo }, its, esRC ? apl.map(a => ({ factura_id: a.factura_id, valor: num(a.valor) })) : []);
+    // Fechas y referencias vacías van como null: la base de datos no acepta texto vacío en esos campos.
+    const g = await store.saveDoc({ ...campos, vence: campos.vence || null, ref_id: campos.ref_id || null, id: doc.id || id || undefined, empresa_id: S.eid, tipo }, its, esRC ? apl.map(a => ({ factura_id: a.factura_id, valor: num(a.valor) })) : []);
     doc.id = g.id; id = g.id;
     await cargarEmpresa();
     return g;
