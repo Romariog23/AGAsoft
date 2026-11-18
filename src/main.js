@@ -493,7 +493,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
       <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
-      <datalist id="ctasIt">${cuentasAux().map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
+      <datalist id="ctasIt">${optsLista(cuentasAux())}</datalist>
       ${!emp().responsable_iva ? '<p class="hint">La empresa no es responsable de IVA, por eso el IVA va en 0.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="obs">Observaciones</label><textarea id="obs" rows="3" maxlength="1000">${esc(doc.observaciones)}</textarea></div>
@@ -568,7 +568,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     $('its').innerHTML = items.map((it, i) => `<tr data-i="${i}">
       <td data-l="Código"><input data-k="codigo" list="prods" value="${esc(it.codigo)}" class="mono w-cod" aria-label="Código" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" value="${esc(it.descripcion)}" aria-label="Descripción" ${bloqueado ? 'readonly' : ''}></td>
-      <td data-l="Cuenta"><input data-k="cuenta" list="ctasIt" value="${esc(it.cuenta || '')}" placeholder="${esc(ctaDefecto(it))}" class="mono w-cta" aria-label="Cuenta contable" title="${esc(it.cuenta ? nomCta(it.cuenta) : 'Cuenta por defecto: ' + ctaDefecto(it) + ' ' + nomCta(ctaDefecto(it)))}"></td>
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasIt" autocomplete="off" value="${esc(it.cuenta || '')}" placeholder="${esc(ctaDefecto(it))}" class="mono w-cta" aria-label="Cuenta contable" title="${esc(it.cuenta ? nomCta(it.cuenta) : 'Cuenta por defecto: ' + ctaDefecto(it) + ' ' + nomCta(ctaDefecto(it)))}"></td>
       <td data-l="Cantidad"><input data-k="cantidad" type="number" step="any" min="0" value="${it.cantidad}" class="r mono w-num" aria-label="Cantidad" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Precio unit."><input data-k="precio" type="number" step="0.01" min="0" value="${it.precio}" class="r mono w-val" aria-label="Precio unitario" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Desc. %"><input data-k="descuento_pct" type="number" step="0.01" min="0" max="100" value="${num(it.descuento_pct) || ''}" class="r mono w-num" aria-label="Descuento %" ${bloqueado ? 'readonly' : ''}></td>
@@ -1070,9 +1070,9 @@ function vPuc(m) {
   const recordar = () => { try { localStorage.setItem('agasoft-puc', JSON.stringify([...pucAbiertas])); } catch (_) {} };
   m.innerHTML = `<header class="vhead"><div><h2>Plan de cuentas PUC y NIIF</h2><p class="sub">PUC para comerciantes (Decreto 2650 de 1993), por niveles: clase, grupo (2 dígitos), cuenta (4), subcuenta (6) y auxiliar (8). Solo las auxiliares de 8 dígitos reciben movimientos.</p></div><button class="primary" id="nueva">Nueva cuenta</button></header>
   <details class="panel"><summary><b>Cuentas de la contabilización automática</b> <span class="muted">· a dónde van facturas, notas y recibos</span></summary>
-    <form id="parF" class="grid2 par">${Object.entries(PARAMETROS).map(([k, [, label]]) => `<div><label for="par_${k}">${label}</label><input id="par_${k}" name="${k}" list="ctasAux" class="mono" inputmode="numeric" maxlength="8" value="${esc(P[k])}"><p class="hint" data-n="${k}">${esc(nomCta(P[k]))}</p></div>`).join('')}
+    <form id="parF" class="grid2 par">${Object.entries(PARAMETROS).map(([k, [, label]]) => `<div><label for="par_${k}">${label}</label><input id="par_${k}" name="${k}" list="ctasAux" class="mono" autocomplete="off" value="${esc(P[k])}"><p class="hint" data-n="${k}">${esc(nomCta(P[k]))}</p></div>`).join('')}
       <div class="row end span-all"><button class="primary">Guardar cuentas</button></div></form>
-    <datalist id="ctasAux">${cuentasAux().map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist></details>
+    <datalist id="ctasAux">${optsLista(cuentasAux())}</datalist></details>
   <div class="row filters"><input id="q" type="search" placeholder="Buscar por código o nombre"><label class="check"><input type="checkbox" id="sm"> Solo cuentas con movimiento</label>
     <span class="spacer"></span><button class="sm" id="expT">Abrir todo</button><button class="sm" id="conT">Cerrar todo</button></div>
   <section class="panel" id="lst"></section>`;
@@ -1292,6 +1292,12 @@ const nomComp = c => `${TIPOS_COMP[c.tipo].nombre} ${c.numero}`;
 const valorComp = c => r2((c.lineas || []).reduce((s, l) => s + num(l.debito), 0));
 const siguienteComp = tipo => Math.max(0, ...comps().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
 // Cuentas auxiliares: las de 8 dígitos, las únicas que reciben movimientos.
+// Cuentas que se usan en compras y gastos: inventarios, activos fijos e intangibles, diferidos, gastos y costos.
+const CLASES_COMPRA = ['14', '15', '16', '17', '18', '5', '6', '7'];
+// Opciones de lista con código y nombre: así se puede buscar escribiendo cualquiera de los dos.
+const optsLista = l => l.map(x => `<option value="${x.codigo} ${esc(x.nombre)}"></option>`).join('');
+// Al escoger de la lista queda solo el código en la casilla.
+document.addEventListener('change', ev => { const el = ev.target; if (el.matches?.('input[list^="ctas"]') && el.value.includes(' ')) { el.value = el.value.trim().split(' ')[0]; el.dispatchEvent(new Event('input', { bubbles: true })); } });
 function cuentasAux() {
   return S.d.cuentas.filter(c => c.activa !== false && esAuxiliar(c.codigo)).sort((a, b) => a.codigo.localeCompare(b.codigo));
 }
@@ -1351,7 +1357,7 @@ function vCompEditor(m, { id, tipo }) {
       <div class="span2"><label for="cd">Descripción</label><input id="cd" maxlength="300" value="${esc(c.descripcion)}" placeholder="${c.tipo === 'SI' ? 'Saldos iniciales' : 'Ej.: Depreciación de noviembre'}"></div>
     </section>
     <section class="panel stack"><div class="vhead"><h3>Movimientos</h3><div class="row"><button type="button" id="impL">Importar CSV</button><button type="button" id="addL">+ Agregar línea</button></div></div>
-      <datalist id="ctasComp">${aux.map(x => `<option value="${x.codigo}">${esc(x.nombre)}</option>`).join('')}</datalist>
+      <datalist id="ctasComp">${optsLista(aux)}</datalist>
       <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
       <div class="totbox" id="ctot"></div>
     </section>
@@ -1361,7 +1367,7 @@ function vCompEditor(m, { id, tipo }) {
   const nomDe = cod => cod ? (idx[cod]?.nombre || 'No existe en el plan') : '';
   const pintar = () => {
     $('lns').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
-      <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" inputmode="numeric"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" autocomplete="off" placeholder="Código o nombre"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
       <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero"><option value="">—</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
       <td data-l="Detalle" class="c-desc"><input data-k="detalle" value="${esc(l.detalle)}" maxlength="200" aria-label="Detalle"></td>
       <td data-l="Débito"><input data-k="debito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.debito) || ''}" aria-label="Débito"></td>
@@ -1540,7 +1546,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     ${esCE ? `<section class="panel stack"><h3>Facturas que paga</h3><div id="aplK"></div>
       <div class="grid2"><div><label for="kant">Anticipo o pago sin factura</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"></div></div></section>` :
     `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><button type="button" id="addK">+ Agregar línea</button></div>
-      <datalist id="ctasK">${cuentasAux().map(x => `<option value="${x.codigo}">${esc(x.nombre)}</option>`).join('')}</datalist>
+      <datalist id="ctasK">${optsLista(cuentasAux().filter(x => CLASES_COMPRA.some(p => x.codigo.startsWith(p))))}</datalist>
       <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta (gasto, costo, inventario o activo)</th><th>Descripción</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
       ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
     <section class="panel grid-doc">
@@ -1580,7 +1586,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   };
   const pintarLineas = () => {
     $('kl').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
-      <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" inputmode="numeric" maxlength="8" value="${esc(l.cuenta)}" placeholder="51350501" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="Código o nombre" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
       <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA"></td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${opts([['0', '0'], ['5', '5'], ['19', '19']], String(num(l.iva_pct)))}</select></td>
