@@ -1,6 +1,7 @@
 // Contabilización automática de los documentos de venta e informes contables.
 // Todo es derivado: los asientos se calculan desde los documentos emitidos, así siempre cuadran con ellos.
 import { r2, num, linea } from './calc.js';
+import { asientoCompra } from './compras.js';
 import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
 
 const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC: 'Recibo de caja' };
@@ -107,7 +108,7 @@ function erroresComprobante(c, cuentas) {
 
 function movimientos(S) {
   const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos };
-  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante))
+  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param)))
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }
 

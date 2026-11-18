@@ -2,6 +2,7 @@ import './style.css';
 import { crearStore, numeracionPara } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
+import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -105,8 +106,9 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
+  ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
-  ['-', 'Datos'], ['clientes', 'Clientes'], ['productos', 'Productos y servicios'],
+  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
 function renderNav(actual) {
@@ -133,7 +135,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v);
+  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' ? 'compras/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
   const m = $('main');
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
@@ -151,6 +153,12 @@ function route() {
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'comprobantes') return vComprobantes(m);
+    if (v === 'compras') return vCompras(m, arg);
+    if (v === 'compra') return vCompra(m, arg);
+    if (v === 'compranueva') return vCompraEditor(m, { tipo: q.get('tipo'), tercero: q.get('tercero'), ref: q.get('ref') });
+    if (v === 'compraeditar') return vCompraEditor(m, { id: arg });
+    if (v === 'cxp') return vCxp(m);
+    if (v === 'proveedores') return vProveedores(m);
     if (v === 'comp') return vComp(m, arg);
     if (v === 'compnuevo') return vCompEditor(m, { tipo: q.get('tipo') });
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
@@ -454,7 +462,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
-  const clientes = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const clientes = [...S.d.terceros].filter(t => t.es_cliente !== false || t.id === doc.tercero_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead"><div><h2>${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}</h2><p class="sub">Borrador: puedes cambiarlo hasta que lo emitas.</p></div></header>
   <form id="ed" class="stack" novalidate>
     <section class="panel grid-doc">
@@ -790,31 +798,44 @@ function vCartera(m) {
 function descargar(nombre, texto) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
 /* ---------- Clientes ---------- */
-function formTercero(t = {}, despues) {
-  const f = dialogo(`<h2>${t.id ? 'Editar cliente' : 'Nuevo cliente'}</h2>
+function formTercero(t = {}, despues, modo = 'cliente') {
+  const prov = modo === 'proveedor';
+  const quien = prov ? 'proveedor' : 'cliente';
+  const esProv = t.id ? !!t.es_proveedor : prov, esCli = t.id ? t.es_cliente !== false : !prov;
+  const f = dialogo(`<h2>${t.id ? `Editar ${quien}` : `Nuevo ${quien}`}</h2>
     <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
     ${campo('nombre', 'Nombre o razón social', t.nombre, 'required maxlength="200"')}
     ${campo('direccion', 'Dirección', t.direccion)}
     ${campoUbicacion(t)}
     <div class="grid2">${campo('telefono', 'Teléfono', t.telefono, 'type="tel"')}${campo('correo', 'Correo para enviar facturas', t.correo, 'type="email"')}</div>
     <div class="grid2">${campo('plazo_dias', 'Plazo de pago (días, 0 = contado)', t.plazo_dias ?? 0, 'type="number" min="0" max="365"')}<div class="checkcell">${check('responsable_iva', 'Responsable de IVA', t.responsable_iva)}</div></div>
-    <fieldset><legend>Retenciones que este cliente le practica a la empresa</legend><div class="grid3">
+    <div class="row">${check('es_cliente', 'Es cliente', esCli)}${check('es_proveedor', 'Es proveedor', esProv)}</div>
+    <fieldset data-fs="cli"><legend>Retenciones que este cliente le practica a la empresa</legend><div class="grid3">
       ${campo('retefuente_pct', 'Retefuente %', num(t.retefuente_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
       ${campo('reteiva_pct', 'ReteIVA % (del IVA)', num(t.reteiva_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
       ${campo('reteica_milaje', 'ReteICA por mil', num(t.reteica_milaje) || '', 'type="number" min="0" max="100" step="0.001"')}</div>
       <p class="hint">Se proponen en cada factura a este cliente y se pueden cambiar.</p></fieldset>
+    <fieldset data-fs="prov"><legend>Retenciones que la empresa le practica a este proveedor</legend><div class="grid3">
+      ${campo('ret_compra_fuente_pct', 'Retefuente %', num(t.ret_compra_fuente_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
+      ${campo('ret_compra_iva_pct', 'ReteIVA % (del IVA)', num(t.ret_compra_iva_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
+      ${campo('ret_compra_ica_milaje', 'ReteICA por mil', num(t.ret_compra_ica_milaje) || '', 'type="number" min="0" max="100" step="0.001"')}</div>
+      <p class="hint">Se proponen en cada factura de este proveedor y se pueden cambiar.</p></fieldset>
     ${pie()}`, async fd => {
     const tipo = fd.get('tipo_id'); let numero = String(fd.get('numero')).trim(), dv = null;
     if (tipo === '31') { const p = parseNit(numero); if (p.error) throw new Error(p.error); numero = p.nit; dv = p.dv; }
     else { numero = numero.replace(/[.\s]/g, ''); if (!/^[0-9A-Za-z-]{3,20}$/.test(numero)) throw new Error('Revisa el número de documento.'); }
-    const nombre = String(fd.get('nombre')).trim(); if (!nombre) throw new Error('Escribe el nombre del cliente.');
-    if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un cliente con ese documento.');
+    const nombre = String(fd.get('nombre')).trim(); if (!nombre) throw new Error(`Escribe el nombre del ${quien}.`);
+    if (fd.get('es_cliente') !== 'on' && fd.get('es_proveedor') !== 'on') throw new Error('Marca si es cliente, proveedor o ambos.');
+    if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un tercero con ese documento (búscalo en Clientes o Proveedores).');
     const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, nombre, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
-      plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')) };
+      plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')),
+      es_cliente: fd.get('es_cliente') === 'on', es_proveedor: fd.get('es_proveedor') === 'on', ret_compra_fuente_pct: num(fd.get('ret_compra_fuente_pct')), ret_compra_iva_pct: num(fd.get('ret_compra_iva_pct')), ret_compra_ica_milaje: num(fd.get('ret_compra_ica_milaje')) };
     const g = await store.save('terceros', t.id ? { ...row, id: t.id } : row);
-    toast('Cliente guardado.');
+    toast(prov ? 'Proveedor guardado.' : 'Cliente guardado.');
     if (despues) await despues(g); else { await cargarEmpresa(); route(); }
   }, { ancho: true });
+  const sync = () => { f.querySelector('[data-fs=cli]').hidden = !f.querySelector('[name=es_cliente]').checked; f.querySelector('[data-fs=prov]').hidden = !f.querySelector('[name=es_proveedor]').checked; };
+  f.querySelectorAll('[name=es_cliente],[name=es_proveedor]').forEach(x => x.onchange = sync); sync();
   const tsel = f.querySelector('[name=tipo_id]');
   const ver = ligarDv(f.querySelector('[name=numero]'), () => tsel.value === '31');
   tsel.onchange = ver;
@@ -825,7 +846,7 @@ function vClientes(m) {
     <div class="row filters"><input id="q" type="search" placeholder="Buscar por nombre o documento"></div><section class="panel" id="lst"></section>`;
   const cart = cartera(S.d.documentos, S.d.aplicaciones);
   const pintar = () => {
-    const l = S.d.terceros.filter(t => !q || `${t.nombre} ${t.numero}`.toLowerCase().includes(q)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const l = S.d.terceros.filter(t => t.es_cliente !== false).filter(t => !q || `${t.nombre} ${t.numero}`.toLowerCase().includes(q)).sort((a, b) => a.nombre.localeCompare(b.nombre));
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Documento</th><th>Ciudad</th><th class="r">Saldo</th><th></th></tr></thead><tbody>
       ${l.map(t => { const s = r2(cart.filter(c => c.factura.tercero_id === t.id).reduce((a, c) => a + c.saldo, 0)); return `<tr><td>${esc(t.nombre)}</td><td class="mono">${esc(docId(t))}</td><td>${esc(t.ciudad)}</td><td class="r mono">${s > 0.009 ? money(s) : ''}</td>
         <td class="r nowrap"><a class="btn ghost sm" href="#/nuevo/FV?tercero=${t.id}">Facturar</a><button class="ghost sm" data-ed="${t.id}">Editar</button></td></tr>`; }).join('')}</tbody></table></div>` : `<p class="muted">${q ? 'Ningún cliente coincide.' : 'Todavía no hay clientes.'}</p>`;
@@ -986,7 +1007,7 @@ const movs = () => movimientos({ ...S.d, param: param() });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
 const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
 const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: hoy() };
-const linkDoc = m => m.origen === 'comp' ? `<a class="mono" href="#/comp/${m.doc_id}">${esc(TIPOS_COMP[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
+const linkDoc = m => m.origen === 'compra' ? `<a class="mono" href="#/compra/${m.doc_id}">${esc(TIPOS_COMPRA[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : m.origen === 'comp' ? `<a class="mono" href="#/comp/${m.doc_id}">${esc(TIPOS_COMP[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
 const valor = v => v ? money(v) : '';
 function tablaAsiento(ms) {
   if (!ms.length) return '<p class="muted">Este documento no genera movimientos.</p>';
@@ -1365,4 +1386,257 @@ function hojaComp(c, ms, imprimir) {
   return `${cabInforme(TIPOS_COMP[c.tipo].nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     ${c.descripcion ? `<p><b>Descripción:</b> ${esc(c.descripcion)}</p>` : ''}${imprimir && c.estado === 'anulado' ? '<p><b>ANULADO</b></p>' : ''}
     ${tablaAsiento(ms)}${imprimir ? '<div class="firmas"><span>Elaboró</span><span>Aprobó</span></div><p class="rep-small">Elaborado con AGAsoft.</p>' : ''}`;
+}
+
+/* ---------- Compras y gastos ---------- */
+const compras = () => S.d?.compras || [];
+const compraById = id => compras().find(c => c.id === id);
+const nomCompra = c => `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero}`;
+const siguienteCompra = tipo => Math.max(0, ...compras().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
+const proveedores = (incluir) => [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+const cxp = () => cuentasPorPagar(compras(), hoy());
+const ctasDe = re => cuentasAux().filter(c => re.test(c.codigo));
+const optsCta = (lista, sel) => lista.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('');
+const ctasPago = () => ctasDe(/^11/);
+
+function vCompras(m, tipo) {
+  const T = TIPOS_COMPRA[tipo]; if (!T) { location.replace('#/compras/FC'); return; }
+  let q = '', anulados = false;
+  const saldos = Object.fromEntries(cxp().map(x => [x.compra.id, x]));
+  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2><a class="btn primary" href="#/compranueva?tipo=${tipo}">${T.nuevo}</a></header>
+    <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o proveedor"><label class="check"><input type="checkbox" id="anu"> Ver anulados</label></div>
+    ${tipo === 'DS' ? '<p class="hint">Para compras a personas no obligadas a facturar. La transmisión a la DIAN se hará cuando se conecte el proveedor tecnológico.</p>' : ''}
+    <section class="panel" id="lst"></section>`;
+  const pintar = () => {
+    const l = compras().filter(c => c.tipo === tipo && (anulados || c.estado !== 'anulado') && (!q || `${c.numero} ${c.num_proveedor} ${terc(c.tercero_id)?.nombre} ${terc(c.tercero_id)?.numero}`.toLowerCase().includes(q)))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
+    $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Número</th><th>Proveedor</th>${tipo === 'FC' ? '<th>Factura del proveedor</th>' : ''}<th class="r">${tipo === 'CE' ? 'Pagado' : 'Neto a pagar'}</th>${tipo === 'CE' ? '' : '<th class="r">Saldo</th>'}<th></th></tr></thead><tbody>
+      ${l.map(c => { const s = saldos[c.id]; return `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/compra/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="mono"><a href="#/compra/${c.id}">${c.numero}</a></td><td>${esc(terc(c.tercero_id)?.nombre)}</td>${tipo === 'FC' ? `<td class="mono">${esc(c.num_proveedor)}</td>` : ''}
+        <td class="r mono">${money(tipo === 'CE' ? totalEgreso(c) : c.neto)}</td>${tipo === 'CE' ? '' : `<td class="r mono">${s && s.saldo > 0.009 ? money(s.saldo) : ''}</td>`}
+        <td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : s && s.saldo > 0.009 && s.diasVencida ? `<span class="tag bad">Vencida ${s.diasVencida} d</span>` : s && s.saldo <= 0.009 ? '<span class="tag ok">Pagada</span>' : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+      : `<p class="muted">No hay ${T.plural.toLowerCase()}${q ? ' con ese filtro' : ' todavía'}.</p>`;
+  };
+  $('q').oninput = () => { q = $('q').value.trim().toLowerCase(); pintar(); };
+  $('anu').onchange = () => { anulados = $('anu').checked; pintar(); };
+  pintar();
+}
+
+function vCompraEditor(m, { id, tipo, tercero, ref }) {
+  let c;
+  if (id) {
+    const x = compraById(id); if (!x) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
+    if (x.estado === 'anulado') { location.replace('#/compra/' + id); return; }
+    c = JSON.parse(JSON.stringify(x)); tipo = x.tipo;
+  } else {
+    if (!TIPOS_COMPRA[tipo]) tipo = 'FC';
+    const f = ref && compraById(ref), t = terc(f?.tercero_id || tercero);
+    c = { empresa_id: S.eid, tipo, fecha: hoy(), vence: '', tercero_id: t?.id || '', num_proveedor: '', observaciones: '',
+      lineas: [{ cuenta: '', descripcion: '', base: '', iva_pct: '0' }], retefuente_pct: num(t?.ret_compra_fuente_pct), reteiva_pct: num(t?.ret_compra_iva_pct), reteica_milaje: num(t?.ret_compra_ica_milaje), cuenta_retefuente: '',
+      cuenta_pago: param().bancos, aplicaciones: f ? [{ compra_id: f.id, valor: Math.max(0, cxp().find(x => x.compra.id === f.id)?.saldo || 0) }] : [], anticipo: 0 };
+  }
+  const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
+  const pagado = !esCE && id && compras().some(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
+  const ctasRet = ctasDe(/^2365/);
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/compras/${tipo}">← ${T.plural}</a><h2>${id ? `Editar ${esc(nomCompra(c))}` : T.nuevo}</h2>
+    <p class="sub">${esCE ? 'Pago a un proveedor: escoge las facturas que se pagan o registra un anticipo.' : tipo === 'DS' ? 'Compra a una persona no obligada a facturar. Se contabiliza al guardar.' : 'Factura electrónica que te envió el proveedor. Se contabiliza al guardar.'}</p></div></header>
+  <form id="ke" class="stack" novalidate>
+    <section class="panel grid-doc">
+      <div class="span2"><label for="prv">Proveedor</label><div class="row nowrap"><select id="prv" required><option value="">Escoge el proveedor…</option>${proveedores(c.tercero_id).map(t => `<option value="${t.id}" ${t.id === c.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
+        <button type="button" id="newPrv">+ Nuevo</button></div></div>
+      <div><label for="kf">Fecha</label><input id="kf" type="date" value="${c.fecha}" required></div>
+      ${esCE ? `<div><label for="kp">Pagado desde</label><select id="kp">${optsCta(ctasPago(), c.cuenta_pago)}</select></div>` :
+        `<div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
+        ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}`}
+      <div><label>Número interno</label><p class="mono">${id ? c.numero : `${siguienteCompra(tipo)} (al guardar)`}</p></div>
+    </section>
+    ${esCE ? `<section class="panel stack"><h3>Facturas que paga</h3><div id="aplK"></div>
+      <div class="grid2"><div><label for="kant">Anticipo o pago sin factura</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"></div></div></section>` :
+    `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><button type="button" id="addK">+ Agregar línea</button></div>
+      <datalist id="ctasK">${cuentasAux().map(x => `<option value="${x.codigo}">${esc(x.nombre)}</option>`).join('')}</datalist>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta (gasto, costo, inventario o activo)</th><th>Descripción</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
+      ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
+    <section class="panel grid-doc">
+      <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
+      ${esCE ? '' : `<div class="span2 ret"><h3>Retenciones que la empresa practica</h3><div class="grid3">
+        <div><label for="krf">Retefuente %</label><input id="krf" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.retefuente_pct) || ''}"></div>
+        <div><label for="kri">ReteIVA % (del IVA)</label><input id="kri" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.reteiva_pct) || ''}"></div>
+        <div><label for="krica">ReteICA (por mil)</label><input id="krica" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.reteica_milaje) || ''}"></div></div>
+        <div><label for="krc">Cuenta de la retefuente</label><select id="krc"><option value="">La de la empresa (${esc(param().retefuente_pagar)})</option>${optsCta(ctasRet, c.cuenta_retefuente)}</select></div></div>`}
+      <div class="span2 totbox" id="ktot"></div>
+    </section>
+    <section class="panel stack"><h3>Contabilización</h3><div id="kas"></div></section>
+    <div class="err" id="kErr" hidden></div>
+    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/compra/' + id : '#/compras/' + tipo}">Cancelar</a><button type="submit" class="primary" id="kSave">Guardar y contabilizar</button></div>
+  </form>`;
+  const leer = () => {
+    c.tercero_id = $('prv').value; c.fecha = $('kf').value; c.observaciones = $('kob').value.trim();
+    if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
+    else {
+      c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
+      Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value), cuenta_retefuente: $('krc').value });
+      Object.assign(c, totalesCompra(c.lineas, c));
+    }
+  };
+  const resumen = () => {
+    leer();
+    if (esCE) {
+      const t = totalEgreso(c);
+      $('ktot').innerHTML = `<dl class="tot"><dt class="strong">Total pagado</dt><dd class="mono big">${money(t)}</dd></dl><p class="hint letras">${enLetras(t)}</p>`;
+    } else {
+      $('ktot').innerHTML = `<dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(c.base)}</dd>${c.iva ? `<dt>IVA</dt><dd class="mono">${money(c.iva)}</dd>` : ''}<dt class="strong">Total</dt><dd class="mono strong">${money(c.total)}</dd>
+        ${c.retefuente ? `<dt>Retefuente</dt><dd class="mono">−${money(c.retefuente)}</dd>` : ''}${c.reteiva ? `<dt>ReteIVA</dt><dd class="mono">−${money(c.reteiva)}</dd>` : ''}${c.reteica ? `<dt>ReteICA</dt><dd class="mono">−${money(c.reteica)}</dd>` : ''}
+        <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd></dl>`;
+      c.lineas.forEach((l, i) => { const x = m.querySelector(`[data-kt="${i}"]`); if (x) x.textContent = money(r2(num(l.base) * (1 + num(l.iva_pct) / 100))); });
+    }
+    $('kas').innerHTML = tablaAsiento(asientoCompra({ ...c, id: c.id || 'nuevo', numero: c.numero || siguienteCompra(tipo), estado: 'contabilizado', aplicaciones: (c.aplicaciones || []).filter(a => num(a.valor)).map(a => { const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; }) }, emp()?.contabilidad));
+  };
+  const pintarLineas = () => {
+    $('kl').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" inputmode="numeric" maxlength="8" value="${esc(l.cuenta)}" placeholder="51350501" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
+      <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
+      <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA"></td>
+      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${opts([['0', '0'], ['5', '5'], ['19', '19']], String(num(l.iva_pct)))}</select></td>
+      <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin líneas.</td></tr>';
+    resumen();
+  };
+  const pintarApl = () => {
+    const tid = $('prv').value;
+    const pend = cuentasPorPagar(compras().filter(x => x.id !== c.id), hoy()).filter(x => x.compra.tercero_id === tid && (x.saldo > 0.009 || c.aplicaciones.some(a => a.compra_id === x.compra.id)));
+    c.aplicaciones = c.aplicaciones.filter(a => pend.some(x => x.compra.id === a.compra_id));
+    $('aplK').innerHTML = !tid ? '<p class="muted">Escoge el proveedor para ver sus facturas pendientes.</p>' : !pend.length ? '<p class="muted">Este proveedor no tiene facturas pendientes. Puedes registrar el valor como anticipo.</p>' :
+      `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Valor que paga</th></tr></thead><tbody>
+      ${pend.map(x => { const a = c.aplicaciones.find(y => y.compra_id === x.compra.id); return `<tr><td class="mono">${esc(TIPOS_COMPRA[x.compra.tipo].corto)} ${x.compra.numero}${x.compra.num_proveedor ? ` · ${esc(x.compra.num_proveedor)}` : ''}</td><td>${fFecha(x.compra.fecha)}</td><td>${fFecha(x.compra.vence)}${x.diasVencida ? ` <span class="tag bad">${x.diasVencida} d</span>` : ''}</td><td class="r mono">${money(x.saldo)}</td>
+        <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-todo="${x.compra.id}" data-saldo="${x.saldo}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-apl="${x.compra.id}" value="${a ? num(a.valor) || '' : ''}" aria-label="Valor que paga"></div></td></tr>`; }).join('')}
+      </tbody></table></div>`;
+    resumen();
+  };
+  if (esCE) {
+    $('aplK').addEventListener('input', ev => { const i = ev.target.closest('[data-apl]'); if (!i) return; const id2 = i.dataset.apl; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== id2); if (num(i.value)) c.aplicaciones.push({ compra_id: id2, valor: num(i.value) }); resumen(); });
+    $('aplK').addEventListener('click', ev => { const b = ev.target.closest('[data-todo]'); if (!b) return; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== b.dataset.todo).concat([{ compra_id: b.dataset.todo, valor: num(b.dataset.saldo) }]); pintarApl(); });
+    $('prv').onchange = pintarApl;
+    pintarApl();
+  } else {
+    $('kl').addEventListener('input', ev => {
+      const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
+      const l = c.lineas[Number(tr.dataset.i)]; l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
+      if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = l.cuenta ? nomCta(l.cuenta) : '';
+      resumen();
+    });
+    $('kl').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') { c.lineas[Number(tr.dataset.i)].iva_pct = el.value; resumen(); } });
+    $('kl').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintarLineas(); });
+    $('addK').onclick = () => { const u = c.lineas.at(-1) || {}; c.lineas.push({ cuenta: u.cuenta || '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
+    $('prv').onchange = () => {
+      // Al escoger el proveedor se proponen sus retenciones y su plazo.
+      const t = terc($('prv').value); if (!t || id) return resumen();
+      $('krf').value = num(t.ret_compra_fuente_pct) || ''; $('kri').value = num(t.ret_compra_iva_pct) || ''; $('krica').value = num(t.ret_compra_ica_milaje) || '';
+      if (t.plazo_dias > 0 && !$('kv').value) $('kv').value = sumarDias($('kf').value || hoy(), t.plazo_dias);
+      resumen();
+    };
+    pintarLineas();
+  }
+  $('ke').addEventListener('input', ev => { if (!ev.target.closest('#kl,#aplK')) resumen(); });
+  $('ke').addEventListener('change', ev => { if (!ev.target.closest('#kl,#aplK') && ev.target.id !== 'prv') resumen(); });
+  $('newPrv').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('prv'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.onchange(); }, 'proveedor');
+  $('ke').onsubmit = async ev => {
+    ev.preventDefault(); leer();
+    if (!esCE) c.lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base)).map(l => ({ cuenta: String(l.cuenta).trim(), descripcion: String(l.descripcion || '').trim(), base: r2(num(l.base)), iva_pct: num(l.iva_pct) }));
+    else c.aplicaciones = c.aplicaciones.filter(a => num(a.valor) > 0).map(a => { const f = compraById(a.compra_id); return { compra_id: a.compra_id, valor: r2(num(a.valor)), ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; });
+    if (esCE) for (const a of c.aplicaciones) { const s = cuentasPorPagar(compras().filter(x => x.id !== c.id), hoy()).find(x => x.compra.id === a.compra_id); if (s && a.valor > s.saldo + 0.009) { $('kErr').textContent = `El pago a ${a.ref} supera su saldo (${money(s.saldo)}).`; $('kErr').hidden = false; return; } }
+    const errs = erroresCompra({ ...c, tipo }, S.d.cuentas);
+    if (errs.length) { $('kErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>'); $('kErr').hidden = false; if (!esCE) pintarLineas(); return; }
+    $('kErr').hidden = true; $('kSave').disabled = true;
+    try {
+      const t = esCE ? { base: 0, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: totalEgreso(c), neto: totalEgreso(c) } : totalesCompra(c.lineas, c);
+      const row = { empresa_id: S.eid, tipo, fecha: c.fecha, vence: esCE ? null : (c.vence || null), tercero_id: c.tercero_id, num_proveedor: c.num_proveedor || '', observaciones: c.observaciones || '',
+        lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '',
+        cuenta_pago: esCE ? c.cuenta_pago : '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t };
+      let g;
+      if (id) g = await store.save('compras', { ...row, id });
+      else {
+        try { g = await store.save('compras', { ...row, numero: siguienteCompra(tipo), estado: 'contabilizado' }); }
+        catch (e) { if (/compras/.test(e.message) && /exist|schema|relation/i.test(e.message)) throw e; await cargarEmpresa(); g = await store.save('compras', { ...row, numero: siguienteCompra(tipo), estado: 'contabilizado' }); }
+      }
+      // El proveedor queda marcado como tal.
+      const t2 = terc(c.tercero_id); if (t2 && !t2.es_proveedor) { try { await store.save('terceros', { id: t2.id, es_proveedor: true }); } catch (_) {} }
+      await cargarEmpresa(); toast('Guardado y contabilizado.'); location.hash = '#/compra/' + g.id;
+    } catch (e) { $('kErr').textContent = /compras|es_proveedor/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear la tabla de compras en Supabase (archivo supabase/006_compras.sql).' : e.message; $('kErr').hidden = false; }
+    finally { $('kSave').disabled = false; }
+  };
+}
+
+function hojaCompra(c, imprimir) {
+  const t = terc(c.tercero_id), T = TIPOS_COMPRA[c.tipo];
+  const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === c.id);
+  return `${cabInforme(T.nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
+    <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
+    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Pagado desde:</b> ${esc(c.cuenta_pago)} ${esc(nomCta(c.cuenta_pago))}` : ''}</div></div>
+    ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
+        ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
+        <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`
+    : `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Descripción</th><th class="r">Valor</th><th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
+        ${(c.lineas || []).map(l => { const iva = r2(num(l.base) * num(l.iva_pct) / 100); return `<tr><td class="mono">${esc(l.cuenta)}</td><td>${esc(l.descripcion)}</td><td class="r mono">${money(l.base)}</td><td class="r mono">${iva ? money(iva) : ''}</td><td class="r mono">${money(num(l.base) + iva)}</td></tr>`; }).join('')}</tbody></table></div>
+      <dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(c.base)}</dd>${num(c.iva) ? `<dt>IVA</dt><dd class="mono">${money(c.iva)}</dd>` : ''}<dt class="strong">Total</dt><dd class="mono strong">${money(c.total)}</dd>
+        ${num(c.retefuente) ? `<dt>Retefuente ${num(c.retefuente_pct)}%</dt><dd class="mono">−${money(c.retefuente)}</dd>` : ''}${num(c.reteiva) ? `<dt>ReteIVA ${num(c.reteiva_pct)}%</dt><dd class="mono">−${money(c.reteiva)}</dd>` : ''}${num(c.reteica) ? `<dt>ReteICA ${num(c.reteica_milaje)}‰</dt><dd class="mono">−${money(c.reteica)}</dd>` : ''}
+        <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd>${s ? `<dt>Pagado</dt><dd class="mono">${money(s.pagado)}</dd><dt class="strong">Saldo</dt><dd class="mono strong">${money(s.saldo)}</dd>` : ''}</dl>`}
+    ${c.observaciones ? `<p><b>Observaciones:</b> ${esc(c.observaciones)}</p>` : ''}${imprimir && c.estado === 'anulado' ? '<p><b>ANULADO</b></p>' : ''}
+    ${imprimir ? `<h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad))}<div class="firmas"><span>Elaboró</span><span>${c.tipo === 'CE' ? 'Recibí conforme' : 'Aprobó'}</span></div><p class="rep-small">Elaborado con AGAsoft.</p>` : ''}`;
+}
+function vCompra(m, id) {
+  const c = compraById(id); if (!c) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
+  const anulado = c.estado === 'anulado', T = TIPOS_COMPRA[c.tipo];
+  const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === id);
+  const pagos = compras().filter(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
+  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/compras/${c.tipo}">← ${T.plural}</a><h2>${esc(nomCompra(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
+    <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <section class="panel stack">${hojaCompra(c)}</section>
+    <section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad))}${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}</section>
+    ${pagos.length ? `<section class="panel stack noprint"><h3>Pagos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${pagos.map(e => `<tr class="click" data-go="#/compra/${e.id}"><td>${fFecha(e.fecha)}</td><td><a href="#/compra/${e.id}">Egreso ${e.numero}</a></td><td class="r mono">${money(e.aplicaciones.find(a => a.compra_id === id).valor)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
+  $('imprimir').onclick = () => { $('print').innerHTML = hojaCompra(c, true); const t = document.title; document.title = `${nomCompra(c)} - ${emp().nombre}`; window.print(); document.title = t; };
+  if ($('anular')) $('anular').onclick = () => {
+    if (pagos.length) return toast('Este documento tiene pagos. Anula primero el comprobante de egreso.', true);
+    dialogo(`<h2>Anular ${esc(nomCompra(c))}</h2><p>Sus movimientos dejan de sumar en los informes${c.tipo === 'CE' ? ' y las facturas que pagaba vuelven a quedar pendientes' : ''}. El número no se vuelve a usar.</p>
+    <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
+      const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
+      await store.save('compras', { id: c.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() });
+      await cargarEmpresa(); toast('Documento anulado.'); route();
+    });
+  };
+}
+
+function vCxp(m) {
+  const c = cxp().filter(x => x.saldo > 0.009);
+  const porP = {};
+  for (const x of c) { const k = x.compra.tercero_id; (porP[k] = porP[k] || { t: terc(k), l: [], b: [0, 0, 0, 0, 0] }).l.push(x); const dv = x.diasVencida; porP[k].b[dv <= 0 ? 0 : dv <= 30 ? 1 : dv <= 60 ? 2 : dv <= 90 ? 3 : 4] += x.saldo; }
+  const filas = Object.values(porP).sort((a, b) => b.b.reduce((s, v) => s + v, 0) - a.b.reduce((s, v) => s + v, 0));
+  const tot = [0, 0, 0, 0, 0]; filas.forEach(f => f.b.forEach((v, i) => tot[i] += v));
+  const H = ['Por vencer', '1–30 días', '31–60', '61–90', 'Más de 90'];
+  m.innerHTML = `<header class="vhead"><h2>Cuentas por pagar</h2><button id="csv">Descargar CSV</button></header>
+  <section class="kpis">${H.map((h, i) => `<div class="kpi ${i >= 1 && tot[i] > 0 ? 'warn' : ''}"><span>${h}</span><b class="mono">${money(tot[i])}</b></div>`).join('')}</section>
+  <section class="panel">${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th>${H.map(h => `<th class="r">${h}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
+    ${filas.map(f => `<tr class="grp"><td><b>${esc(f.t?.nombre)}</b><br><span class="muted mono">${esc(docId(f.t))}</span></td>${f.b.map(v => `<td class="r mono">${v ? money(v) : ''}</td>`).join('')}<td class="r mono strong">${money(f.b.reduce((s, v) => s + v, 0))}</td></tr>
+      ${f.l.map(x => `<tr class="click sub-row" data-go="#/compra/${x.compra.id}"><td><a class="mono" href="#/compra/${x.compra.id}">${esc(TIPOS_COMPRA[x.compra.tipo].corto)} ${x.compra.numero}${x.compra.num_proveedor ? ' · ' + esc(x.compra.num_proveedor) : ''}</a>${x.compra.vence ? ` · vence ${fFecha(x.compra.vence)}` : ''}</td><td colspan="5" class="muted">${x.diasVencida ? `Vencida hace ${x.diasVencida} días` : ''}</td><td class="r"><span class="mono">${money(x.saldo)}</span> <a class="btn ghost sm" href="#/compranueva?tipo=CE&ref=${x.compra.id}">Pagar</a></td></tr>`).join('')}`).join('')}
+    </tbody></table></div>` : '<p class="muted">No hay facturas de proveedor pendientes de pago.</p>'}</section>`;
+  $('csv').onclick = () => {
+    const rows = [['Proveedor', 'Identificación', 'Documento', 'Factura proveedor', 'Fecha', 'Vence', 'Días vencida', 'Saldo']].concat(c.map(x => { const t = terc(x.compra.tercero_id); return [t?.nombre, t?.numero, `${x.compra.tipo} ${x.compra.numero}`, x.compra.num_proveedor, x.compra.fecha, x.compra.vence || '', x.diasVencida, String(x.saldo).replace('.', ',')]; }));
+    descargar(`cuentas-por-pagar-${emp().nit}-${hoy()}.csv`, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  };
+}
+
+function vProveedores(m) {
+  let q = '';
+  m.innerHTML = `<header class="vhead"><h2>Proveedores</h2><button class="primary" id="nuevo">Nuevo proveedor</button></header>
+    <div class="row filters"><input id="q" type="search" placeholder="Buscar por nombre o documento"></div><section class="panel" id="lst"></section>`;
+  const saldos = {}; for (const x of cxp()) saldos[x.compra.tercero_id] = r2((saldos[x.compra.tercero_id] || 0) + x.saldo);
+  const pintar = () => {
+    const l = proveedores().filter(t => !q || `${t.nombre} ${t.numero}`.toLowerCase().includes(q));
+    $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Documento</th><th>Ciudad</th><th class="r">Por pagar</th><th></th></tr></thead><tbody>
+      ${l.map(t => `<tr><td>${esc(t.nombre)}</td><td class="mono">${esc(docId(t))}</td><td>${esc(t.ciudad)}</td><td class="r mono">${saldos[t.id] > 0.009 ? money(saldos[t.id]) : ''}</td>
+        <td class="r nowrap"><a class="btn ghost sm" href="#/compranueva?tipo=FC&tercero=${t.id}">Registrar factura</a><button class="ghost sm" data-ed="${t.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`
+      : `<p class="muted">${q ? 'Ningún proveedor coincide.' : 'Todavía no hay proveedores. Un cliente también puede ser proveedor: edítalo y marca "Es proveedor".'}</p>`;
+  };
+  $('q').oninput = () => { q = $('q').value.trim().toLowerCase(); pintar(); };
+  $('nuevo').onclick = () => formTercero({}, null, 'proveedor');
+  $('lst').onclick = ev => { const b = ev.target.closest('[data-ed]'); if (b) formTercero(terc(b.dataset.ed), null, 'proveedor'); };
+  pintar();
 }

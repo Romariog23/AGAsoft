@@ -342,6 +342,12 @@ const PARAMETROS = {
   caja: ['11050501', 'Caja (recibos en efectivo)'],
   bancos: ['11100501', 'Bancos (transferencias, tarjeta, cheque)'],
   anticipos: ['28050501', 'Anticipos de clientes'],
+  proveedores: ['22050501', 'Proveedores (cuenta por pagar)'],
+  iva_descontable: ['24080201', 'IVA descontable en compras'],
+  retefuente_pagar: ['23650501', 'Retención en la fuente que la empresa practica (por pagar)'],
+  reteiva_pagar: ['23670501', 'ReteIVA que la empresa practica (por pagar)'],
+  reteica_pagar: ['23680501', 'ReteICA que la empresa practica (por pagar)'],
+  anticipos_prov: ['13300501', 'Anticipos a proveedores'],
 };
 const parametrosPorDefecto = () => Object.fromEntries(Object.entries(PARAMETROS).map(([k, [c]]) => [k, c]));
 // Parámetros guardados por la empresa, llevados a cuentas auxiliares de 8 dígitos.
