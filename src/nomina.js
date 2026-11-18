@@ -1,0 +1,175 @@
+// Nómina: liquidación por empleado, aportes, provisiones de prestaciones y su contabilización.
+// Funciones puras. Los parámetros del año y las cuentas se guardan en empresas.contabilidad.nomina.
+// Las tarifas son las de ley en Colombia; el salario mínimo y el auxilio de transporte se escriben cada año.
+import { r2, num } from './calc.js';
+import { naturaleza, rubroPorDefecto } from './puc.js';
+
+export const AREAS = [['admin', 'Administración', '5105'], ['ventas', 'Ventas', '5205'], ['produccion', 'Producción', '7205']];
+export const CONTRATOS = [['indefinido', 'Término indefinido'], ['fijo', 'Término fijo'], ['obra', 'Obra o labor']];
+// Clase de riesgo ARL y su tarifa (% del IBC).
+export const RIESGOS = [['1', 'Riesgo I · 0,522 %', 0.522], ['2', 'Riesgo II · 1,044 %', 1.044], ['3', 'Riesgo III · 2,436 %', 2.436], ['4', 'Riesgo IV · 4,35 %', 4.35], ['5', 'Riesgo V · 6,96 %', 6.96]];
+export const PERIODOS = [['mensual', 'Mensual'], ['quincenal', 'Quincenal']];
+
+// Conceptos de nómina. tipo: dev (devengado), ded (deducción), apo (aporte de la empresa), pro (provisión de prestaciones).
+// sub = subcuenta del gasto dentro de 5105, 5205 o 7205; pasivo = cuenta por pagar (o por cobrar, en préstamos).
+// entidad = de quién es el saldo por pagar: la EPS, el fondo, la ARL o la caja (si no hay, el empleado).
+export const CONCEPTOS = [
+  { k: 'salario', nombre: 'Salario', tipo: 'dev', sub: '06' },
+  { k: 'horas_extra', nombre: 'Horas extra y recargos', tipo: 'dev', sub: '15', novedad: true },
+  { k: 'comisiones', nombre: 'Comisiones', tipo: 'dev', sub: '18', novedad: true },
+  { k: 'auxilio', nombre: 'Auxilio de transporte', tipo: 'dev', sub: '27' },
+  { k: 'bonificacion', nombre: 'Bonificación no salarial', tipo: 'dev', sub: '48', novedad: true },
+  { k: 'salud', nombre: 'Salud (empleado)', tipo: 'ded', pct: 4, pasivo: '23700501', entidad: 'eps' },
+  { k: 'pension', nombre: 'Pensión (empleado)', tipo: 'ded', pct: 4, pasivo: '23803001', entidad: 'pension' },
+  { k: 'solidaridad', nombre: 'Fondo de solidaridad pensional', tipo: 'ded', pasivo: '23803001', entidad: 'pension' },
+  { k: 'retencion', nombre: 'Retención en la fuente', tipo: 'ded', pasivo: '23650501', novedad: true },
+  { k: 'prestamo', nombre: 'Préstamos al empleado', tipo: 'ded', pasivo: '13659501', novedad: true },
+  { k: 'otros_desc', nombre: 'Libranzas, embargos y otros descuentos', tipo: 'ded', pasivo: '23709501', novedad: true },
+  { k: 'salud_emp', nombre: 'Salud (empresa)', tipo: 'apo', pct: 8.5, sub: '69', pasivo: '23700501', entidad: 'eps' },
+  { k: 'pension_emp', nombre: 'Pensión (empresa)', tipo: 'apo', pct: 12, sub: '70', pasivo: '23803001', entidad: 'pension' },
+  { k: 'arl', nombre: 'ARL', tipo: 'apo', sub: '68', pasivo: '23700601', entidad: 'arl' },
+  { k: 'caja', nombre: 'Caja de compensación', tipo: 'apo', pct: 4, sub: '72', pasivo: '23701001', entidad: 'caja' },
+  { k: 'icbf', nombre: 'ICBF', tipo: 'apo', pct: 3, sub: '75', pasivo: '23701001', entidad: 'icbf' },
+  { k: 'sena', nombre: 'SENA', tipo: 'apo', pct: 2, sub: '78', pasivo: '23701001', entidad: 'sena' },
+  { k: 'cesantias', nombre: 'Cesantías', tipo: 'pro', sub: '30', pasivo: '25100501' },
+  { k: 'intereses', nombre: 'Intereses sobre cesantías', tipo: 'pro', sub: '33', pasivo: '25150501' },
+  { k: 'prima', nombre: 'Prima de servicios', tipo: 'pro', sub: '36', pasivo: '25200501' },
+  { k: 'vacaciones', nombre: 'Vacaciones', tipo: 'pro', sub: '39', pasivo: '25250501' },
+];
+export const CONCEPTO = Object.fromEntries(CONCEPTOS.map(c => [c.k, c]));
+export const NOVEDADES = CONCEPTOS.filter(c => c.novedad);
+export const CUENTA_NETO = '25050501';
+
+// Parámetros de la empresa (los guardados o los de fábrica).
+export function paramNomina(contab) {
+  const g = contab?.nomina || {};
+  return {
+    smmlv: num(g.smmlv) || 1750905, auxilio: g.auxilio === undefined || g.auxilio === '' ? 249095 : num(g.auxilio),
+    periodo: g.periodo === 'quincenal' ? 'quincenal' : 'mensual', exonerada: g.exonerada !== false,
+    arl_id: g.arl_id || '', icbf_id: g.icbf_id || '', sena_id: g.sena_id || '',
+    cuenta_neto: String(g.cuenta_neto || '').trim() || CUENTA_NETO, cuentas: g.cuentas || {},
+  };
+}
+// Cuenta de gasto de un concepto para el área del empleado; la empresa puede cambiarla por concepto y área.
+export function cuentaGasto(P, k, area) {
+  const propia = String(P.cuentas?.[k]?.[area] || '').trim();
+  if (propia) return propia;
+  const pre = (AREAS.find(a => a[0] === area) || AREAS[0])[2];
+  return `${pre}${CONCEPTO[k].sub}01`;
+}
+export const cuentaPasivo = (P, k) => String(P.cuentas?.[k]?.pasivo || '').trim() || CONCEPTO[k].pasivo;
+
+// Porcentaje del fondo de solidaridad según el IBC del mes en salarios mínimos.
+export function pctSolidaridad(ibcMes, smmlv) {
+  const n = ibcMes / smmlv;
+  if (n < 4) return 0;
+  if (n < 16) return 1;
+  if (n <= 17) return 1.2;
+  if (n <= 18) return 1.4;
+  if (n <= 19) return 1.6;
+  if (n <= 20) return 1.8;
+  return 2;
+}
+
+// Liquidación de un empleado en un periodo. nov = { dias, horas_extra, comisiones, bonificacion, retencion, prestamo, otros_desc }.
+export function liquidar(emp, nov, P) {
+  const diasPeriodo = P.periodo === 'quincenal' ? 15 : 30;
+  const dias = Math.max(0, Math.min(30, nov?.dias === undefined || nov?.dias === '' ? diasPeriodo : num(nov.dias)));
+  const sal = num(emp.salario), v = k => r2(Math.max(0, num(nov?.[k])));
+  const out = { empleado_id: emp.id, tercero_id: emp.tercero_id, area: emp.area || 'admin', dias, items: [] };
+  // Sin la entidad configurada, el saldo queda sin tercero (se avisa al liquidar).
+  const entidad = e => ({ eps: emp.eps_id, pension: emp.pension_id, caja: emp.caja_id, arl: P.arl_id, icbf: P.icbf_id, sena: P.sena_id }[e] || null);
+  const add = (k, valor) => {
+    valor = r2(valor); if (!valor) return;
+    const c = CONCEPTO[k], it = { k, nombre: c.nombre, tipo: c.tipo, valor };
+    if (c.tipo === 'dev') { it.cuenta = cuentaGasto(P, k, out.area); it.tercero_id = emp.tercero_id; }
+    else if (c.tipo === 'ded') { it.cuenta = cuentaPasivo(P, k); it.tercero_id = c.entidad ? entidad(c.entidad) : emp.tercero_id; }
+    else { it.cuenta = cuentaGasto(P, k, out.area); it.contra = cuentaPasivo(P, k); it.tercero_id = c.entidad ? entidad(c.entidad) : emp.tercero_id; }
+    out.items.push(it);
+  };
+  const salario = sal * dias / 30;
+  add('salario', salario);
+  add('horas_extra', v('horas_extra')); add('comisiones', v('comisiones'));
+  // Auxilio de transporte: hasta dos salarios mínimos, si el empleado tiene derecho.
+  const auxilio = emp.auxilio !== false && sal <= 2 * P.smmlv ? P.auxilio * dias / 30 : 0;
+  add('auxilio', auxilio); add('bonificacion', v('bonificacion'));
+  // IBC: lo salarial del periodo (no el auxilio ni la bonificación), mínimo el salario mínimo proporcional.
+  const salarial = r2(salario + v('horas_extra') + v('comisiones'));
+  const ibc = dias ? r2(Math.max(salarial, P.smmlv * dias / 30)) : 0, ibcMes = dias ? ibc * 30 / dias : 0;
+  out.ibc = ibc;
+  add('salud', ibc * 0.04); add('pension', ibc * 0.04); add('solidaridad', ibc * pctSolidaridad(ibcMes, P.smmlv) / 100);
+  add('retencion', v('retencion')); add('prestamo', v('prestamo')); add('otros_desc', v('otros_desc'));
+  // Aportes de la empresa. Exonerada (art. 114-1 E.T.): sin salud 8,5 %, ICBF ni SENA por quien gana menos de 10 mínimos.
+  const exon = P.exonerada && ibcMes < 10 * P.smmlv;
+  if (!exon) add('salud_emp', ibc * 0.085);
+  add('pension_emp', ibc * 0.12);
+  add('arl', ibc * ((RIESGOS.find(r => r[0] === String(emp.riesgo || '1')) || RIESGOS[0])[2]) / 100);
+  add('caja', ibc * 0.04);
+  if (!exon) { add('icbf', ibc * 0.03); add('sena', ibc * 0.02); }
+  // Provisiones: cesantías y prima sobre lo salarial más el auxilio; vacaciones sobre el salario.
+  const basePrest = salarial + auxilio, ces = r2(basePrest / 12);
+  add('cesantias', ces); add('intereses', ces * 0.12); add('prima', basePrest / 12); add('vacaciones', salario / 24);
+  const suma = t => r2(out.items.filter(i => i.tipo === t).reduce((s, i) => s + i.valor, 0));
+  out.devengado = suma('dev'); out.deducciones = suma('ded'); out.neto = r2(out.devengado - out.deducciones);
+  out.aportes = suma('apo'); out.provisiones = suma('pro');
+  return out;
+}
+
+export const totalesNomina = lineas => ['devengado', 'deducciones', 'neto', 'aportes', 'provisiones'].reduce((o, k) => ({ ...o, [k]: r2((lineas || []).reduce((s, l) => s + num(l[k]), 0)) }), {});
+
+// Movimientos contables de una nómina guardada (las cuentas quedan guardadas en cada línea).
+export function asientoNomina(n) {
+  if (!n || n.estado === 'anulado') return [];
+  const ref = `NE ${n.numero}`, out = [];
+  const mov = (cuenta, debito, credito, tercero_id, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: n.fecha, doc_id: n.id, tipo: 'NE', ref, origen: 'nomina', cuenta, tercero_id: tercero_id || null, detalle, debito, credito }); };
+  for (const l of n.lineas || []) {
+    for (const i of l.items || []) {
+      if (i.tipo === 'dev') mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre);
+      else if (i.tipo === 'ded') mov(i.cuenta, 0, i.valor, i.tercero_id, i.nombre);
+      else { mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre); mov(i.contra, 0, i.valor, i.tercero_id, i.nombre); }
+    }
+    mov(n.cuenta_neto || CUENTA_NETO, 0, l.neto, l.tercero_id, 'Neto a pagar');
+  }
+  return out;
+}
+
+// Cuentas que usa una nómina y que faltan en el plan: se crean con su subcuenta y su cuenta si hace falta.
+const NOMBRES = {
+  '7205': 'Mano de obra (nómina)', '06': 'Sueldos', '15': 'Horas extras y recargos', '18': 'Comisiones', '27': 'Auxilio de transporte', '30': 'Cesantías',
+  '33': 'Intereses sobre cesantías', '36': 'Prima de servicios', '39': 'Vacaciones', '48': 'Bonificaciones', '68': 'Aportes a administradoras de riesgos laborales',
+  '69': 'Aportes a entidades promotoras de salud', '70': 'Aportes a fondos de pensiones', '72': 'Aportes a cajas de compensación familiar', '75': 'Aportes ICBF', '78': 'SENA',
+  '237005': 'Aportes a entidades promotoras de salud', '237006': 'Aportes a administradoras de riesgos laborales', '237010': 'Aportes parafiscales', '237095': 'Otros descuentos de nómina',
+  '238030': 'Fondos de cesantías y pensiones', '136595': 'Otras cuentas por cobrar a trabajadores', '236505': 'Salarios y pagos laborales',
+};
+export function cuentasFaltantes(codigos, cuentas) {
+  const hay = new Set((cuentas || []).map(c => c.codigo)), nuevas = [];
+  const nombre = cod => NOMBRES[cod] || (/^(5105|5205|7205)/.test(cod) && NOMBRES[cod.slice(4, 6)]) || '';
+  for (const cod of [...new Set(codigos)].filter(c => /^\d{8}$/.test(c))) {
+    if (hay.has(cod)) continue;
+    let ultimo = '';
+    for (const n of [2, 4, 6, 8]) {
+      const c = cod.slice(0, n);
+      if (hay.has(c)) { ultimo = (cuentas.find(x => x.codigo === c) || nuevas.find(x => x.codigo === c))?.nombre || ultimo; continue; }
+      const nom = nombre(c) || nombre(cod.slice(0, 6)) || ultimo || 'Nómina';
+      nuevas.push({ codigo: c, nombre: nom, naturaleza: naturaleza(c), niif_rubro: rubroPorDefecto(c), niif_codigo: '', activa: true });
+      hay.add(c); ultimo = nom;
+    }
+  }
+  return nuevas;
+}
+// Entidades que faltan para que cada saldo quede a nombre de quien se le paga.
+const NOMBRE_ENTIDAD = { eps: 'EPS', pension: 'fondo de pensiones', caja: 'caja de compensación', arl: 'ARL', icbf: 'ICBF', sena: 'SENA' };
+export function entidadesFaltantes(lineas) {
+  const out = new Set();
+  for (const l of lineas || []) for (const i of l.items || []) { const c = CONCEPTO[i.k]; if (c?.entidad && !i.tercero_id) out.add(c.entidad); }
+  return [...out].map(e => ({ entidad: e, nombre: NOMBRE_ENTIDAD[e], empresa: ['arl', 'icbf', 'sena'].includes(e) }));
+}
+export const cuentasDeNomina = lineas => (lineas || []).flatMap(l => (l.items || []).flatMap(i => [i.cuenta, i.contra].filter(Boolean)));
+
+// Saldos por pagar de nómina (salarios, aportes, prestaciones) de un tercero, desde los movimientos contables.
+export const CUENTAS_LABORALES = /^(2370|2380|2505|2510|2515|2520|2525)/;
+export function porPagarLaboral(movs, tercero_id) {
+  const s = {};
+  for (const m of movs || []) if (m.tercero_id === tercero_id && CUENTAS_LABORALES.test(m.cuenta)) s[m.cuenta] = r2((s[m.cuenta] || 0) + m.credito - m.debito);
+  return Object.entries(s).filter(([, v]) => v > 0.009).map(([cuenta, saldo]) => ({ cuenta, saldo })).sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+}

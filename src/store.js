@@ -3,7 +3,7 @@
 //  - "local": datos solo en este navegador, para probar sin configurar nada (modo demostración).
 import { createClient } from '@supabase/supabase-js';
 
-const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras'];
+const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const ahora = () => new Date().toISOString();
 
@@ -141,7 +141,7 @@ function supabaseStore(url, key) {
     async signUp(email, password, nombre) { return ok(await sb.auth.signUp({ email, password, options: { data: { nombre } } })); },
     async signOut() { await sb.auth.signOut(); },
     async listEmpresas() { return ok(await sb.from('empresas').select('*').order('nombre')); },
-    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
+    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras', 'empleados', 'nominas'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
     async save(t, row) {
       const { id, creado_en, owner, ...campos } = row;
       if (id) return ok(await sb.from(t).update(campos).eq('id', id).select().single());
