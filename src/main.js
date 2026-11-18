@@ -1127,19 +1127,19 @@ function vAuxiliar(m, q) {
   let cuenta = q.get('cuenta') || param().clientes, tercero = '';
   const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
   m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
-    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAll" class="mono" value="${esc(cuenta)}"></div>
+    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><select id="cta" class="mono" style="width:100%;max-width:100%">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo}" ${c.codigo === cuenta ? 'selected' : ''}>${'&nbsp;'.repeat(Math.max(0, c.codigo.length - 1) * 2)}${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' ·'}</option>`).join('')}</select><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Las marcadas con · no tienen movimientos.</p></div>
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
-    <datalist id="ctasAll">${S.d.cuentas.filter(c => conMov.some(x => x.startsWith(c.codigo))).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
+    
     ${filtroFechas('fa', true, () => pintar())}
     <section class="panel" id="out"></section>`;
   const pintar = () => {
     const a = libroAuxiliar(movs(), S.d.cuentas, cuenta, F.desde, F.hasta, tercero);
-    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 6 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
-      <tr class="muted"><td colspan="${cuenta.length < 6 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
-      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 6 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
-      <tr class="strong"><td colspan="${cuenta.length < 6 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 8 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+      <tr class="muted"><td colspan="${cuenta.length < 8 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 8 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
+      <tr class="strong"><td colspan="${cuenta.length < 8 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
   };
-  $('cta').onchange = () => { cuenta = $('cta').value.trim().split(' ')[0]; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
+  $('cta').onchange = () => { cuenta = $('cta').value; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   pintar();
 }
