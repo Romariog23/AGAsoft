@@ -266,3 +266,5 @@ dialog::backdrop{background:rgb(8 22 29 / .45)}
 .neg{color:var(--bad)}
 .tbl.comp small.hint{display:block;margin-top:2px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tbl.comp select{width:100%;min-width:0;max-width:100%}
+.puc .tg{display:inline-block;width:14px;color:var(--muted)}
+.puc tr.lv8 td:first-child{color:var(--fg)}

@@ -234,8 +234,33 @@ const PUC = `
 93|Acreedoras de control
 `.trim().split('\n').map(l => { const [codigo, nombre] = l.split('|'); return { codigo, nombre }; });
 
-const NIVEL = { 1: 'Clase', 2: 'Grupo', 4: 'Cuenta', 6: 'Subcuenta' };
+// Niveles: clase (1 dígito) y luego de a 2 dígitos: grupo (2), cuenta (4), subcuenta (6) y auxiliar (8).
+// Solo las auxiliares de 8 dígitos reciben movimientos.
+const NIVEL = { 1: 'Clase', 2: 'Grupo', 4: 'Cuenta', 6: 'Subcuenta', 8: 'Auxiliar' };
+const DIGITOS_AUX = 8;
 const nivelDe = c => NIVEL[c.length] || 'Auxiliar';
+const esAuxiliar = c => /^\d{8}$/.test(String(c || ''));
+// Lleva una cuenta de 4 o 6 dígitos a la auxiliar de 8 que AGAsoft crea por defecto (cuenta+05, subcuenta+01).
+// Sirve para datos guardados antes de que las auxiliares fueran de 8 dígitos.
+function a8(c) {
+  c = String(c || '').trim();
+  if (c.length === 6) return c + '01';
+  if (c.length === 4) return c + '0501';
+  return c;
+}
+// Cuentas que faltan para que cada cuenta (4) tenga subcuenta (6) y cada subcuenta tenga auxiliar (8).
+function completarPlan(cuentas) {
+  const cods = new Set(cuentas.map(c => c.codigo)), nuevas = [];
+  const tieneHijas = (cod, n) => [...cods].some(x => x.length === n && x.startsWith(cod));
+  const agregar = (codigo, nombre, padre) => {
+    cods.add(codigo);
+    nuevas.push({ codigo, nombre, naturaleza: padre.naturaleza || naturaleza(codigo), niif_rubro: null, niif_codigo: '', activa: true });
+  };
+  for (const c of [...cuentas].filter(c => c.codigo.length === 4)) if (!tieneHijas(c.codigo, 6)) agregar(c.codigo + '05', c.nombre, c);
+  const seis = [...cuentas.filter(c => c.codigo.length === 6), ...nuevas.filter(c => c.codigo.length === 6)];
+  for (const c of seis) if (!tieneHijas(c.codigo, 8)) agregar(c.codigo + '01', c.nombre, c);
+  return nuevas;
+}
 // Naturaleza: débito para activo, gastos y costos (y cuentas que restan en el crédito, como depreciaciones, son crédito).
 function naturaleza(c) {
   if (/^(1592|1598|1599|1698|1798|1299|1399|1499|6225)/.test(c)) return 'C';
@@ -300,23 +325,26 @@ function rubroPorDefecto(codigo) {
 
 // Plan inicial de una empresa: cada cuenta con naturaleza, nivel y rubro NIIF.
 function planInicial() {
-  return PUC.map(c => ({ codigo: c.codigo, nombre: c.nombre, naturaleza: naturaleza(c.codigo), niif_rubro: c.codigo.length >= 2 ? rubroPorDefecto(c.codigo) : null, niif_codigo: '', activa: true }));
+  const base = PUC.map(c => ({ codigo: c.codigo, nombre: c.nombre, naturaleza: naturaleza(c.codigo), niif_rubro: c.codigo.length >= 2 ? rubroPorDefecto(c.codigo) : null, niif_codigo: '', activa: true }));
+  return base.concat(completarPlan(base)).sort((a, b) => a.codigo.localeCompare(b.codigo));
 }
 
 // Parámetros de la contabilización automática (se pueden cambiar por empresa).
 const PARAMETROS = {
-  clientes: ['130505', 'Clientes (cuenta por cobrar)'],
-  ingresos: ['413501', 'Ingresos por ventas (si el producto no tiene cuenta propia)'],
-  iva: ['240801', 'IVA generado'],
-  devoluciones: ['417501', 'Devoluciones, rebajas y descuentos (si el producto no tiene cuenta propia)'],
-  intereses: ['421005', 'Ingresos por intereses (nota débito por intereses)'],
-  retefuente: ['135515', 'Retención en la fuente que le practican'],
-  reteiva: ['135517', 'ReteIVA que le practican'],
-  reteica: ['135518', 'ReteICA que le practican'],
-  caja: ['110505', 'Caja (recibos en efectivo)'],
-  bancos: ['111005', 'Bancos (transferencias, tarjeta, cheque)'],
-  anticipos: ['280505', 'Anticipos de clientes'],
+  clientes: ['13050501', 'Clientes (cuenta por cobrar)'],
+  ingresos: ['41350101', 'Ingresos por ventas (si el producto no tiene cuenta propia)'],
+  iva: ['24080101', 'IVA generado'],
+  devoluciones: ['41750101', 'Devoluciones, rebajas y descuentos (si el producto no tiene cuenta propia)'],
+  intereses: ['42100501', 'Ingresos por intereses (nota débito por intereses)'],
+  retefuente: ['13551501', 'Retención en la fuente que le practican'],
+  reteiva: ['13551701', 'ReteIVA que le practican'],
+  reteica: ['13551801', 'ReteICA que le practican'],
+  caja: ['11050501', 'Caja (recibos en efectivo)'],
+  bancos: ['11100501', 'Bancos (transferencias, tarjeta, cheque)'],
+  anticipos: ['28050501', 'Anticipos de clientes'],
 };
 const parametrosPorDefecto = () => Object.fromEntries(Object.entries(PARAMETROS).map(([k, [c]]) => [k, c]));
+// Parámetros guardados por la empresa, llevados a cuentas auxiliares de 8 dígitos.
+const parametrosDe = guardados => Object.fromEntries(Object.entries({ ...parametrosPorDefecto(), ...(guardados || {}) }).map(([k, c]) => [k, a8(c)]));
 
-export { PUC, planInicial, naturaleza, nivelDe, RUBROS, RUBRO, rubroPorDefecto, PARAMETROS, parametrosPorDefecto };
+export { PUC, planInicial, completarPlan, a8, esAuxiliar, DIGITOS_AUX, parametrosDe, naturaleza, nivelDe, RUBROS, RUBRO, rubroPorDefecto, PARAMETROS, parametrosPorDefecto };

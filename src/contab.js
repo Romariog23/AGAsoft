@@ -1,7 +1,7 @@
 // Contabilización automática de los documentos de venta e informes contables.
 // Todo es derivado: los asientos se calculan desde los documentos emitidos, así siempre cuadran con ellos.
 import { r2, num, linea } from './calc.js';
-import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosPorDefecto } from './puc.js';
+import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
 
 const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC: 'Recibo de caja' };
 
@@ -9,12 +9,12 @@ const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC
 // ctx: { items (todas las líneas), aplicaciones, productos, param, docs (para referencias) }
 function asiento(d, ctx) {
   if (d.estado !== 'emitido') return [];
-  const P = { ...parametrosPorDefecto(), ...(ctx.param || {}) };
+  const P = parametrosDe(ctx.param);
   const ref = `${d.prefijo || ''}${d.prefijo ? ' ' : ''}${d.numero}`;
   const base = { fecha: d.fecha, doc_id: d.id, tipo: d.tipo, ref, tercero_id: d.tercero_id };
   const out = [];
   const mov = (cuenta, debito, credito, detalle, conTercero = true) => {
-    debito = r2(debito); credito = r2(credito);
+    debito = r2(debito); credito = r2(credito); cuenta = a8(cuenta);
     if (!debito && !credito) return;
     out.push({ ...base, cuenta, debito, credito, detalle, tercero_id: conTercero ? d.tercero_id : null });
   };
@@ -81,10 +81,10 @@ const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', 
 function asientoComprobante(c) {
   if (c.estado === 'anulado') return [];
   const ref = `${c.tipo} ${c.numero}`;
-  return (c.lineas || []).map(l => ({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'comp', cuenta: String(l.cuenta || '').trim(), tercero_id: l.tercero_id || null,
+  return (c.lineas || []).map(l => ({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'comp', cuenta: a8(l.cuenta), tercero_id: l.tercero_id || null,
     detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)) })).filter(m => m.debito || m.credito);
 }
-// Errores del comprobante (lista vacía si está bien). Solo se contabiliza en cuentas auxiliares: las que no tienen subcuentas.
+// Errores del comprobante (lista vacía si está bien). Solo se contabiliza en cuentas auxiliares de 8 dígitos.
 function erroresComprobante(c, cuentas) {
   const idx = indexar(cuentas), out = [];
   const ls = (c.lineas || []).filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito));
@@ -93,8 +93,8 @@ function erroresComprobante(c, cuentas) {
   ls.forEach((l, i) => {
     const cta = String(l.cuenta || '').trim(), n = `Línea ${i + 1}`;
     if (!cta) out.push(`${n}: falta la cuenta.`);
+    else if (!esAuxiliar(cta)) out.push(`${n}: la cuenta ${cta} no es auxiliar; solo se registran movimientos en cuentas de 8 dígitos.`);
     else if (!idx[cta]) out.push(`${n}: la cuenta ${cta} no existe en el plan de cuentas.`);
-    else if (cuentas.some(x => x.codigo.length > cta.length && x.codigo.startsWith(cta))) out.push(`${n}: la cuenta ${cta} tiene subcuentas; usa una auxiliar.`);
     const d = num(l.debito), k = num(l.credito);
     if (d < 0 || k < 0) out.push(`${n}: los valores no pueden ser negativos.`);
     else if (d && k) out.push(`${n}: lleva débito o crédito, no los dos.`);
