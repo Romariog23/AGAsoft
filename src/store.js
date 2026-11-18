@@ -68,8 +68,9 @@ function localStore() {
     },
     async saveDoc(doc, items, apl) {
       const prev = doc.id && db.documentos.find(d => d.id === doc.id);
-      if (prev && prev.estado !== 'borrador') throw new Error('Solo se pueden modificar borradores.');
-      const d = await api.save('documentos', { ...doc, estado: 'borrador' });
+      if (prev && prev.estado === 'anulado') throw new Error('El documento está anulado.');
+      if (prev && prev.estado === 'emitido' && prev.electronica) throw new Error('Los documentos electrónicos no se modifican: se corrigen con una nota.');
+      const d = await api.save('documentos', prev && prev.estado === 'emitido' ? { ...doc, tipo: prev.tipo, electronica: false, estado: 'emitido', prefijo: prev.prefijo, numero: prev.numero, numeracion_id: prev.numeracion_id } : { ...doc, estado: 'borrador' });
       db.items = db.items.filter(r => r.documento_id !== d.id).concat(items.map((it, i) => ({ ...it, id: uid(), documento_id: d.id, empresa_id: d.empresa_id, orden: i })));
       db.aplicaciones = db.aplicaciones.filter(r => r.recibo_id !== d.id).concat((apl || []).map(a => ({ ...a, id: uid(), recibo_id: d.id, empresa_id: d.empresa_id })));
       persist(); return d;
@@ -86,7 +87,10 @@ function localStore() {
     },
     async anular(id, motivo) {
       const d = db.documentos.find(x => x.id === id);
-      if (!d || d.tipo !== 'RC' || d.estado !== 'emitido') throw new Error('Solo se pueden anular recibos de caja emitidos.');
+      if (!d || d.estado !== 'emitido') throw new Error('Solo se anulan documentos guardados.');
+      if (d.electronica && d.tipo !== 'RC') throw new Error('Los documentos electrónicos no se anulan: se corrigen con una nota.');
+      if (d.tipo === 'FV' && db.documentos.some(x => x.ref_id === id && x.estado === 'emitido')) throw new Error('La factura tiene notas crédito o débito. Anúlalas primero.');
+      if (d.tipo === 'FV' && db.aplicaciones.some(a => a.factura_id === id && db.documentos.find(r => r.id === a.recibo_id)?.estado === 'emitido')) throw new Error('La factura tiene pagos. Anula primero los recibos de caja que la pagan.');
       d.estado = 'anulado'; d.anulado_motivo = motivo; d.anulado_en = ahora(); persist(); return { ...d };
     },
     async eliminar(id) {

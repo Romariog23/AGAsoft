@@ -444,7 +444,7 @@ function vEmpresa(m) {
     <p class="hint">Cuando la DIAN te dé una resolución nueva, regístrala aquí y queda como la activa. Las notas y los recibos se manejan en <a href="#/numeraciones">Numeraciones</a>.</p></section>
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
-    <p class="hint">Las facturas normales no se reportan a la DIAN y se pueden eliminar aunque estén emitidas.</p></section>
+    <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
@@ -521,7 +521,7 @@ function vLista(m, tipo) {
   let q = '', est = '';
   m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2>${tipo === 'FV' ? '<div class="row"><a class="btn" href="#/nuevo/FV?clase=normal">Nueva factura normal</a><a class="btn primary" href="#/nuevo/FV?clase=electronica">Nueva factura electrónica</a></div>'
     : `<a class="btn primary" href="#/nuevo/${tipo}">Nueva ${T.corto.toLowerCase().replace('recibo', 'recibo de caja')}</a>`}</header>
-    <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o cliente"><select id="est" aria-label="Estado"><option value="">Todos</option><option value="borrador">Borradores</option><option value="emitido">Emitidos</option>${tipo === 'RC' ? '<option value="anulado">Anulados</option>' : ''}</select></div>
+    <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o cliente"><select id="est" aria-label="Estado"><option value="">Todos</option><option value="borrador">Borradores</option><option value="emitido">Emitidos</option><option value="anulado">Anulados</option></select></div>
     ${tipo === 'NC' || tipo === 'ND' ? `<p class="hint">Las notas se crean desde la factura que corrigen. También puedes crear una aquí y escoger la factura.</p>` : ''}
     <section class="panel" id="lst"></section>`;
   const pintar = () => {
@@ -544,7 +544,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   if (id) {
     const d = docById(id);
     if (!d) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
-    if (d.estado !== 'borrador') { location.replace('#/doc/' + id); return; }
+    if (d.estado !== 'borrador' && (d.estado !== 'emitido' || d.electronica)) { location.replace('#/doc/' + id); return; }
     doc = { ...d }; items = itemsDe(id).map(i => ({ ...i })); apl = aplDe(id).map(a => ({ ...a })); tipo = d.tipo;
   } else {
     if (!TIPOS[tipo]) { location.replace('#/inicio'); return; }
@@ -559,15 +559,19 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
+  // Documento ya guardado (no electrónico) que el dueño está editando: conserva su número.
+  const editando = !!id && doc.estado === 'emitido';
+  // Solo los electrónicos tienen borrador y se emiten; los demás contabilizan al guardar.
+  const esElec = () => tipo === 'FV' ? !!doc.electronica : esNota ? !!docById(($('ref') && $('ref').value) || doc.ref_id)?.electronica : false;
   const clientes = [...S.d.terceros].filter(t => t.es_cliente !== false || t.id === doc.tercero_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  m.innerHTML = `<header class="vhead"><div><h2>${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}${tipo === 'FV' ? ` <span id="claseTag">${claseTag(doc)}</span>` : ''}</h2><p class="sub">Borrador: puedes cambiarlo hasta que lo emitas.</p></div></header>
+  m.innerHTML = `<header class="vhead"><div><h2>${editando ? `Editar ${esc(nomDoc(doc))}` : `${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}`}${tipo === 'FV' && !editando ? ` <span id="claseTag">${claseTag(doc)}</span>` : ''}</h2><p class="sub" id="edSub"></p></div></header>
   <form id="ed" class="stack" novalidate>
     <section class="panel grid-doc">
       <div class="span2"><label for="cli">Cliente</label>
         <div class="row nowrap"><select id="cli" required><option value="">Escoge el cliente…</option>${clientes.map(t => `<option value="${t.id}" ${t.id === doc.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
         <button type="button" id="newCli" title="Crear cliente">+ Nuevo</button></div></div>
       <div><label for="fecha">Fecha</label><input id="fecha" type="date" value="${doc.fecha}" required></div>
-      ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase">${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
+      ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase" ${editando ? 'disabled' : ''}>${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
       ${tipo === 'FV' ? `<div><label for="fp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="fp">${fVenta().map(f => `<option value="${f.id}" ${f.id === formaDe(fVenta(), doc.forma_pago === 'credito', doc.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
       ${tipo === 'FV' || esRC ? `<div><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
@@ -589,11 +593,11 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
         <div><label for="rica">ReteICA (por mil)</label><input id="rica" type="number" min="0" max="100" step="0.001" class="mono" value="${num(doc.reteica_milaje) || ''}"></div></div></div>`}
       <div class="span2 totbox" id="tot"></div>
     </section>
-    <section class="panel stack"><div class="vhead"><h3>Contabilización</h3><span class="hint">Vista previa. Se registra al emitir.</span></div><div id="asi"></div></section>
+    <section class="panel stack"><div class="vhead"><h3>Contabilización</h3><span class="hint" id="asiHint"></span></div><div id="asi"></div></section>
     <p class="err" id="edErr" hidden></p>
     <div class="row end sticky-actions">
-      ${id ? '<button type="button" class="ghost" id="delB">Borrar borrador</button>' : ''}<span class="spacer"></span>
-      <a class="btn ghost" href="#/${tipo}">Cancelar</a>
+      ${id && !editando ? '<button type="button" class="ghost" id="delB">Borrar borrador</button>' : ''}<span class="spacer"></span>
+      <a class="btn ghost" href="${editando ? '#/doc/' + id : '#/' + tipo}">Cancelar</a>
       <button type="button" id="saveB">Guardar borrador</button>
       <button type="submit" class="primary" id="emitB">Emitir</button>
     </div>
@@ -678,6 +682,14 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if (!$('ref')) return;
     const fs = facturasCliente($('cli').value || null);
     $('ref').innerHTML = `<option value="">Escoge la factura…</option>` + fs.map(f => `<option value="${f.id}" ${f.id === doc.ref_id ? 'selected' : ''}>${esc(numDoc(f))} · ${fFecha(f.fecha)} · ${money(f.total)}${$('cli').value ? '' : ' · ' + esc(terc(f.tercero_id)?.nombre)}</option>`).join('');
+  };
+
+  // Electrónico: borrador y Emitir. Los demás: un solo botón Guardar que contabiliza.
+  const pintarBotones = () => {
+    const el = esElec() && !editando;
+    $('saveB').hidden = !el; $('emitB').textContent = el ? 'Emitir' : 'Guardar';
+    $('edSub').textContent = editando ? 'Al guardar se actualiza la contabilización. El número no cambia.' : el ? 'Borrador: puedes cambiarlo hasta que lo emitas.' : 'Al guardar queda con número y contabilizado. Después se puede editar o anular.';
+    $('asiHint').textContent = el ? 'Vista previa. Se registra al emitir.' : 'Vista previa. Se registra al guardar.';
   };
 
   // Eventos
@@ -781,7 +793,8 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
-  if ($('clase')) $('clase').onchange = () => { doc.electronica = $('clase').value === 'electronica'; $('claseTag').innerHTML = claseTag(doc); };
+  if ($('clase')) $('clase').onchange = () => { doc.electronica = $('clase').value === 'electronica'; $('claseTag').innerHTML = claseTag(doc); pintarBotones(); };
+  if ($('ref')) $('ref').addEventListener('change', pintarBotones);
   $('saveB').onclick = async () => { errEd(''); $('saveB').disabled = true; try { const g = await guardar(); toast('Borrador guardado.'); history.replaceState(null, '', '#/editar/' + g.id); } catch (e) { errEd(e.message); } finally { $('saveB').disabled = false; } };
   form.onsubmit = async ev => {
     ev.preventDefault(); errEd('');
@@ -789,15 +802,26 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if (!doc.tercero_id) return errEd('Escoge el cliente.');
     const msg = validarEmision(); if (msg) return errEd(msg);
     if (esNota) doc.electronica = !!docById(doc.ref_id)?.electronica;
+    if (editando) {
+      $('emitB').disabled = true;
+      try { const g = await guardar(); toast(`Cambios guardados: ${nomDoc(g)}.`); location.hash = '#/doc/' + g.id; } catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
+      return;
+    }
     const n = numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones);
-    if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar${tipo === 'RC' ? ', solo anular' : doc.electronica ? '; se corrige con una nota' : '; como no es electrónica, se puede eliminar si hace falta'}.`, 'Emitir')) return;
+    if (!esElec()) {
+      $('emitB').disabled = true;
+      try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`Guardado y contabilizado: ${nomDoc(e)}.`); location.hash = '#/doc/' + e.id; }
+      catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
+      return;
+    }
+    if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar: se corrige con una nota.`, 'Emitir')) return;
     $('emitB').disabled = true;
     try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`${nomDoc(e)} ${tipo === 'RC' ? 'emitido' : 'emitida'}.`); location.hash = '#/doc/' + e.id; }
     catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
   };
   if ($('delB')) $('delB').onclick = async () => { if (!await confirmar('Borrar borrador', 'El borrador se elimina.', 'Borrar')) return; try { await store.remove('documentos', id); await cargarEmpresa(); location.hash = '#/' + tipo; } catch (e) { fail(e); } };
 
-  pintarRef(); pintarItems(); pintarApl(); calcular();
+  pintarRef(); pintarItems(); pintarApl(); calcular(); pintarBotones();
 }
 function saldoDe(fid) { return cartera(S.d.documentos, S.d.aplicaciones).find(c => c.factura.id === fid)?.saldo ?? 0; }
 
@@ -858,8 +882,8 @@ function vDoc(m, id) {
   const rel = S.d.documentos.filter(x => x.estado !== 'borrador' && (x.ref_id === id || S.d.aplicaciones.some(a => a.recibo_id === x.id && a.factura_id === id)));
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/${d.tipo}">← ${TIPOS[d.tipo].plural}</a><h2>${esc(nomDoc(d))}</h2></div>
     <div class="row">${d.tipo === 'FV' && d.estado === 'emitido' ? `${c?.saldo > 0.009 ? `<a class="btn" href="#/nuevo/RC?ref=${id}">Recibir pago</a>` : ''}<a class="btn" href="#/nuevo/NC?ref=${id}">Nota crédito</a><a class="btn" href="#/nuevo/ND?ref=${id}">Nota débito</a>` : ''}
-    ${d.tipo === 'RC' && d.estado === 'emitido' ? '<button id="anular">Anular</button>' : ''}
-    ${d.tipo !== 'RC' && !d.electronica ? '<button id="eliminar">Eliminar</button>' : ''}
+    ${d.estado === 'emitido' && !d.electronica ? `<a class="btn" href="#/editar/${id}">Editar</a>` : ''}
+    ${d.estado === 'emitido' && !d.electronica ? '<button id="anular">Anular</button>' : ''}
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
@@ -872,10 +896,10 @@ function vDoc(m, id) {
     if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. No es electrónica, así que no se reportó a la DIAN.<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
     try { await store.eliminar(d.id); await cargarEmpresa(); toast(`${nomDoc(d)} eliminada.`); location.hash = '#/' + d.tipo; } catch (e) { fail(e); }
   };
-  if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>Los pagos de este recibo dejan de aplicarse a las facturas.</p>
-    <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular recibo')}`, async fd => {
+  if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>${d.tipo === 'RC' ? 'Los pagos de este recibo dejan de aplicarse a las facturas.' : 'Su contabilización deja de sumar en los informes.'} El número no se vuelve a usar.</p>
+    <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
     const mot = fd.get('motivo').trim(); if (!mot) throw new Error('Escribe el motivo.');
-    await store.anular(d.id, mot); await cargarEmpresa(); toast('Recibo anulado.'); route();
+    await store.anular(d.id, mot); await cargarEmpresa(); toast(`Anulado: ${nomDoc(d)}.`); route();
   });
 }
 function imprimir(d) {
@@ -1060,7 +1084,7 @@ function formNumeracion(n = {}) {
   const usada = n.id && S.d.documentos.some(d => d.numeracion_id === n.id);
   const f = dialogo(`<h2>${n.id ? 'Editar numeración' : 'Nueva numeración'}</h2>
     <div class="grid2">${campoSel('tipo', 'Documento', Object.entries(TIPOS).map(([k, v]) => [k, v.nombre]), n.tipo || 'FV')}${campo('prefijo', 'Prefijo', n.prefijo, 'maxlength="4" class="mono" pattern="[A-Za-z0-9]{0,4}" placeholder="FE"')}</div>
-    <div id="wEl">${check('electronica', 'Factura electrónica (con resolución DIAN)', n.id ? !!n.electronica : n.electronica ?? true)}<p class="hint">Desmárcala para la numeración de facturas normales (no electrónicas), que se pueden eliminar.</p></div>
+    <div id="wEl">${check('electronica', 'Factura electrónica (con resolución DIAN)', n.id ? !!n.electronica : n.electronica ?? true)}<p class="hint">Desmárcala para la numeración de facturas normales (no electrónicas), que se pueden editar o anular.</p></div>
     <div id="wRes" class="stack"><div class="grid2">${campo('resolucion', 'Número de resolución DIAN', n.resolucion, 'class="mono" inputmode="numeric"')}${campo('fecha_resolucion', 'Fecha de la resolución', n.fecha_resolucion, 'type="date"')}</div>
     <div class="grid2">${campo('vigencia_desde', 'Vigente desde', n.vigencia_desde, 'type="date"')}${campo('vigencia_hasta', 'Vigente hasta', n.vigencia_hasta, 'type="date"')}</div></div>
     <div class="grid3">${campo('desde', 'Desde', n.desde ?? 1, 'type="number" min="1" required class="mono"')}${campo('hasta', 'Hasta', n.hasta ?? '', 'type="number" min="1" required class="mono"')}${campo('siguiente', 'Siguiente número', n.siguiente ?? 1, 'type="number" min="1" required class="mono"')}</div>
