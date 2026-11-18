@@ -89,7 +89,9 @@ $$;
 
 alter table public.empresas enable row level security;
 drop policy if exists empresas_ver on public.empresas;
-create policy empresas_ver on public.empresas for select to authenticated using (public.puede_ver(id));
+-- El dueño ve su empresa directo (así puede leer la fila que acaba de crear).
+create policy empresas_ver on public.empresas for select to authenticated
+  using ((owner = auth.uid() and public.aprobado()) or public.puede_ver(id));
 drop policy if exists empresas_crear on public.empresas;
 create policy empresas_crear on public.empresas for insert to authenticated with check (public.aprobado() and owner = auth.uid());
 drop policy if exists empresas_editar on public.empresas;
