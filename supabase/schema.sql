@@ -148,11 +148,12 @@ create table if not exists public.numeraciones (
   vigencia_desde date,
   vigencia_hasta date,
   activa boolean not null default true,
+  electronica boolean not null default false,
   creado_en timestamptz not null default now(),
   check (siguiente >= desde)
 );
 -- Solo una numeración activa por tipo de documento.
-create unique index if not exists numeraciones_una_activa on public.numeraciones (empresa_id, tipo) where activa;
+create unique index if not exists numeraciones_una_activa on public.numeraciones (empresa_id, tipo, electronica) where activa;
 
 do $$ declare t text; begin
   foreach t in array array['terceros', 'productos', 'numeraciones'] loop
@@ -195,6 +196,7 @@ create table if not exists public.documentos (
   empresa_id uuid not null references public.empresas(id) on delete cascade,
   tipo text not null check (tipo in ('FV', 'NC', 'ND', 'RC')),
   estado text not null default 'borrador' check (estado in ('borrador', 'emitido', 'anulado')),
+  electronica boolean not null default false,
   prefijo text not null default '',
   numero bigint,
   numeracion_id uuid references public.numeraciones(id),
@@ -286,15 +288,15 @@ begin
   end if;
   select * into d from jsonb_populate_record(null::documentos, p_doc);
   if did is null then
-    insert into documentos (empresa_id, tipo, fecha, vence, tercero_id, forma_pago, medio_pago, ref_id, concepto, observaciones,
+    insert into documentos (empresa_id, tipo, electronica, fecha, vence, tercero_id, forma_pago, medio_pago, ref_id, concepto, observaciones,
       bruto, descuento, base, iva, retefuente_pct, reteiva_pct, reteica_milaje, retefuente, reteiva, reteica, total, neto, anticipo)
-    values (eid, d.tipo, coalesce(d.fecha, current_date), d.vence, d.tercero_id, coalesce(d.forma_pago, 'contado'), coalesce(d.medio_pago, 'efectivo'), d.ref_id,
+    values (eid, d.tipo, coalesce(d.electronica, false), coalesce(d.fecha, current_date), d.vence, d.tercero_id, coalesce(d.forma_pago, 'contado'), coalesce(d.medio_pago, 'efectivo'), d.ref_id,
       coalesce(d.concepto, ''), coalesce(d.observaciones, ''), coalesce(d.bruto, 0), coalesce(d.descuento, 0), coalesce(d.base, 0), coalesce(d.iva, 0),
       coalesce(d.retefuente_pct, 0), coalesce(d.reteiva_pct, 0), coalesce(d.reteica_milaje, 0), coalesce(d.retefuente, 0), coalesce(d.reteiva, 0),
       coalesce(d.reteica, 0), coalesce(d.total, 0), coalesce(d.neto, 0), coalesce(d.anticipo, 0))
     returning id into did;
   else
-    update documentos set fecha = coalesce(d.fecha, current_date), vence = d.vence, tercero_id = d.tercero_id, forma_pago = coalesce(d.forma_pago, 'contado'),
+    update documentos set electronica = coalesce(d.electronica, false), fecha = coalesce(d.fecha, current_date), vence = d.vence, tercero_id = d.tercero_id, forma_pago = coalesce(d.forma_pago, 'contado'),
       medio_pago = coalesce(d.medio_pago, 'efectivo'), ref_id = d.ref_id, concepto = coalesce(d.concepto, ''), observaciones = coalesce(d.observaciones, ''),
       bruto = coalesce(d.bruto, 0), descuento = coalesce(d.descuento, 0), base = coalesce(d.base, 0), iva = coalesce(d.iva, 0),
       retefuente_pct = coalesce(d.retefuente_pct, 0), reteiva_pct = coalesce(d.reteiva_pct, 0), reteica_milaje = coalesce(d.reteica_milaje, 0),
@@ -319,7 +321,6 @@ begin
   return did;
 end $$;
 
--- Emite un borrador: valida y le asigna el siguiente consecutivo de su numeración.
 create or replace function public.emitir_documento(p_id uuid) returns void
 language plpgsql security definer set search_path = public as $$
 declare d documentos; n numeraciones; f documentos; acred numeric;
@@ -335,15 +336,21 @@ begin
     select * into f from documentos where id = d.ref_id;
     if not found or f.tipo <> 'FV' or f.estado <> 'emitido' or f.empresa_id <> d.empresa_id then raise exception 'La nota debe referirse a una factura emitida.'; end if;
     if f.tercero_id <> d.tercero_id then raise exception 'La nota debe ser del mismo cliente de la factura.'; end if;
+    update documentos set electronica = f.electronica where id = p_id; d.electronica := f.electronica;
     if d.tipo = 'NC' then
       select coalesce(sum(total), 0) into acred from documentos where tipo = 'NC' and estado = 'emitido' and ref_id = f.id;
       if acred + d.total > f.total then raise exception 'La nota crédito supera el valor pendiente de la factura (% disponible).', f.total - acred; end if;
     end if;
   end if;
+  if d.tipo = 'RC' and d.electronica then update documentos set electronica = false where id = p_id; d.electronica := false; end if;
   if d.tipo = 'RC' and d.total <= 0 then raise exception 'El recibo debe tener un valor mayor que cero.'; end if;
 
-  select * into n from numeraciones where empresa_id = d.empresa_id and tipo = d.tipo and activa for update;
-  if not found then raise exception 'No hay una numeración activa para este tipo de documento. Créala en Numeraciones.'; end if;
+  -- La factura usa la numeración de su clase (electrónica o normal). Notas y recibos prefieren la de su clase y si no, la que haya.
+  select * into n from numeraciones where empresa_id = d.empresa_id and tipo = d.tipo and activa and (d.tipo <> 'FV' or electronica = d.electronica)
+    order by (electronica = d.electronica) desc limit 1 for update;
+  if not found then raise exception '%', case when d.tipo = 'FV' and d.electronica then 'No hay una numeración activa de factura electrónica. Créala en Numeraciones con la resolución DIAN.'
+    when d.tipo = 'FV' then 'No hay una numeración activa de factura normal (no electrónica). Créala en Numeraciones.'
+    else 'No hay una numeración activa para este tipo de documento. Créala en Numeraciones.' end; end if;
   if n.siguiente > n.hasta then raise exception 'Se agotó el rango de numeración % (hasta %).', n.prefijo, n.hasta; end if;
   if n.vigencia_hasta is not null and d.fecha > n.vigencia_hasta then raise exception 'La numeración % venció el %.', n.prefijo, n.vigencia_hasta; end if;
   if n.vigencia_desde is not null and d.fecha < n.vigencia_desde then raise exception 'La numeración % rige desde el %.', n.prefijo, n.vigencia_desde; end if;
@@ -376,6 +383,35 @@ end $$;
 
 revoke all on function public.guardar_documento(jsonb, jsonb, jsonb), public.emitir_documento(uuid), public.anular_recibo(uuid, text), public.borrar_borrador(uuid) from public, anon;
 grant execute on function public.guardar_documento(jsonb, jsonb, jsonb), public.emitir_documento(uuid), public.anular_recibo(uuid, text), public.borrar_borrador(uuid) to authenticated;
+
+-- Elimina una factura, nota crédito o nota débito NO electrónica, aunque esté emitida.
+-- Una factura con notas o pagos vigentes no se puede eliminar: primero se eliminan las notas y se anulan los recibos.
+-- Si era el último número de su numeración, ese número se vuelve a usar.
+create or replace function public.eliminar_documento(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare d documentos;
+begin
+  select * into d from documentos where id = p_id for update;
+  if not found or not public.puede_editar(d.empresa_id) then raise exception 'Documento no encontrado.'; end if;
+  if d.tipo not in ('FV', 'NC', 'ND') then raise exception 'Los recibos de caja no se eliminan: se anulan.'; end if;
+  if d.electronica and d.estado <> 'borrador' then raise exception 'Las facturas y notas electrónicas no se eliminan: se corrigen con una nota.'; end if;
+  if d.tipo = 'FV' then
+    if exists (select 1 from documentos x where x.ref_id = p_id and x.estado <> 'borrador') then
+      raise exception 'La factura tiene notas crédito o débito. Elimínalas primero.'; end if;
+    if exists (select 1 from aplicaciones a join documentos r on r.id = a.recibo_id where a.factura_id = p_id and r.estado = 'emitido') then
+      raise exception 'La factura tiene pagos. Anula primero los recibos de caja que la pagan.'; end if;
+    -- Borradores de notas y pagos de recibos anulados o en borrador que apuntan a la factura.
+    delete from documentos where ref_id = p_id and estado = 'borrador';
+    delete from aplicaciones where factura_id = p_id;
+  end if;
+  delete from documentos where id = p_id;
+  if d.numeracion_id is not null then
+    update numeraciones set siguiente = d.numero where id = d.numeracion_id and siguiente = d.numero + 1 and d.numero >= desde;
+  end if;
+end $$;
+
+revoke all on function public.eliminar_documento(uuid) from public, anon;
+grant execute on function public.eliminar_documento(uuid) to authenticated;
 
 /* ============ Comprobantes contables (también en 004_comprobantes.sql) ============ */
 create table if not exists public.comprobantes (

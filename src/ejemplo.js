@@ -17,7 +17,8 @@ export function datosEjemplo(hoy) {
       { codigo: 'LIB-001', nombre: 'Libro de contabilidad (exento)', unidad: 'UND', precio: 65000, iva_pct: 0, activo: true },
     ],
     numeraciones: [
-      { tipo: 'FV', prefijo: 'FE', resolucion: '18764000000000', fecha_resolucion: `${y}-01-15`, vigencia_desde: `${y}-01-15`, vigencia_hasta: `${Number(y) + 2}-01-15`, desde: 1, hasta: 5000, siguiente: 1, activa: true },
+      { tipo: 'FV', prefijo: 'FE', resolucion: '18764000000000', fecha_resolucion: `${y}-01-15`, vigencia_desde: `${y}-01-15`, vigencia_hasta: `${Number(y) + 2}-01-15`, desde: 1, hasta: 5000, siguiente: 1, activa: true, electronica: true },
+      { tipo: 'FV', prefijo: 'FN', resolucion: '', desde: 1, hasta: 999999999, siguiente: 1, activa: true, electronica: false },
       { tipo: 'NC', prefijo: 'NC', resolucion: '', desde: 1, hasta: 999999999, siguiente: 1, activa: true },
       { tipo: 'ND', prefijo: 'ND', resolucion: '', desde: 1, hasta: 999999999, siguiente: 1, activa: true },
       { tipo: 'RC', prefijo: 'RC', resolucion: '', desde: 1, hasta: 999999999, siguiente: 1, activa: true },
