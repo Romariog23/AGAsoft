@@ -15,13 +15,14 @@ const fail = e => toast(e?.message || String(e), true);
 
 /* ---------- Datos: Supabase, o una demostración local para probar el panel ---------- */
 function apiNube(sb) {
-  const ok = ({ data, error }) => { if (error) throw new Error(/admin_cuentas|planes/.test(error.message) && /exist|schema|find/i.test(error.message) ? 'Falta correr en Supabase el archivo supabase/009_planes.sql.' : error.message); return data; };
+  const ok = ({ data, error }) => { if (error) throw new Error(/exist|schema|find/i.test(error.message) && /admin_eliminar_cuenta/.test(error.message) ? 'Falta correr en Supabase el archivo supabase/011_eliminar_cuenta.sql.' : /exist|schema|find/i.test(error.message) && /admin_cuentas|planes/.test(error.message) ? 'Falta correr en Supabase el archivo supabase/009_planes.sql.' : error.message); return data; };
   return {
     async cuentas() { return ok(await sb.rpc('admin_cuentas')); },
     async planes() { return ok(await sb.from('planes').select('*').order('orden').order('nombre')); },
     async guardarPlan(p) { const { id, creado_en, ...c } = p; return id ? ok(await sb.from('planes').update(c).eq('id', id)) : ok(await sb.from('planes').insert(c)); },
     async borrarPlan(id) { ok(await sb.from('planes').delete().eq('id', id)); },
     async setCuenta(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
+    async eliminarCuenta(id) { ok(await sb.rpc('admin_eliminar_cuenta', { p_id: id })); },
   };
 }
 function apiDemo() {
@@ -53,6 +54,7 @@ function apiDemo() {
     async guardarPlan(p) { if (p.id) Object.assign(db.planes.find(x => x.id === p.id), p); else db.planes.push({ ...p, id: id() }); save(); },
     async borrarPlan(pid) { db.planes = db.planes.filter(x => x.id !== pid); save(); },
     async setCuenta(cid, campos) { Object.assign(db.cuentas.find(x => x.id === cid), campos); save(); },
+    async eliminarCuenta(cid) { db.cuentas = db.cuentas.filter(x => x.id !== cid); save(); },
   };
 }
 const api = store.mode === 'supabase' ? apiNube(store.sb) : apiDemo();
@@ -150,12 +152,13 @@ function pintarCuentas() {
       <td>${c.es_admin ? '—' : c.prueba_hasta && !p ? fFecha(c.prueba_hasta) : fFecha(c.plan_vence)}</td>
       <td>${uso(c.empresas, c.es_admin ? null : p?.max_empresas)}</td><td>${uso(c.documentos_mes, c.es_admin ? null : p?.max_documentos_mes)}</td><td>${uso(c.usuarios, c.es_admin ? null : p?.max_usuarios)}</td>
       <td><span class="tag ${cls}">${est}</span>${sobreLimite(c) ? ' <span class="tag bad">En el límite</span>' : ''}</td>
-      <td class="r nowrap">${c.es_admin ? '' : `${porAprobar(c) ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}`}</td></tr>`; }).join('')}
+      <td class="r nowrap">${c.es_admin ? '' : `${porAprobar(c) ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}<button class="sm ghost bad" data-del="${c.id}">Eliminar</button>`}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   $('q').oninput = () => { S.filtro = $('q').value; const pos = $('q').selectionStart; pintarCuentas(); $('q').focus(); $('q').setSelectionRange(pos, pos); };
   $('tabC').onclick = async ev => {
     const b = ev.target.closest('button'); if (!b) return;
-    const c = S.cuentas.find(x => x.id === (b.dataset.ap || b.dataset.ed || b.dataset.sus)); if (!c) return;
+    const c = S.cuentas.find(x => x.id === (b.dataset.ap || b.dataset.ed || b.dataset.sus || b.dataset.del)); if (!c) return;
+    if (b.dataset.del) return formEliminar(c);
     if (b.dataset.ed || b.dataset.ap) return formCuenta(c, !!b.dataset.ap);
     try { await api.setCuenta(c.id, { suspendido: !c.suspendido }); toast(c.suspendido ? 'Cuenta reactivada.' : 'Cuenta suspendida: ya no puede entrar a sus contabilidades.'); await cargar(); } catch (e) { fail(e); }
   };
@@ -189,6 +192,17 @@ function formCuenta(c, aprobar) {
     }
     await api.setCuenta(c.id, campos); toast(aprobar ? 'Cuenta aprobada.' : 'Plan guardado.'); await cargar();
   });
+}
+
+function formEliminar(c) {
+  const f = dialogo(`<h2>Eliminar cuenta</h2><p><b>${esc(c.nombre)}</b> · ${esc(c.correo)}</p>
+    <p class="aviso bad">Se borra la cuenta con sus ${c.empresas} contabilidad(es) y todos sus documentos, terceros y cuentas. No se puede deshacer.</p>
+    <p class="hint">Si solo quieres que no entre, usa Suspender: no borra nada y se puede reactivar.</p>
+    <div><label for="f_conf">Para confirmar, escribe el correo de la cuenta</label><input id="f_conf" name="conf" autocomplete="off" placeholder="${esc(c.correo)}"></div>`, async fd => {
+    if (String(fd.get('conf')).trim().toLowerCase() !== c.correo.toLowerCase()) throw new Error('El correo no coincide.');
+    await api.eliminarCuenta(c.id); toast('Cuenta eliminada.'); await cargar();
+  });
+  f.querySelector('#dOk').textContent = 'Eliminar cuenta'; f.querySelector('#dOk').classList.add('danger-btn');
 }
 
 function pintarPlanes() {
