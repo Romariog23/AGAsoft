@@ -1,5 +1,6 @@
 // Contabilización automática de los documentos de venta e informes contables.
 // Todo es derivado: los asientos se calculan desde los documentos emitidos, así siempre cuadran con ellos.
+import { cuentaIva } from './impuestos.js';
 import { r2, num, linea } from './calc.js';
 import { asientoCompra } from './compras.js';
 import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
@@ -36,7 +37,7 @@ function asiento(d, ctx) {
   // Factura, nota débito (suman) y nota crédito (resta).
   const its = (ctx.items || []).filter(i => i.documento_id === d.id);
   const porCuenta = {};
-  let iva = 0;
+  const ivaPor = {};
   for (const it of its) {
     const l = linea(it);
     // Cada producto puede tener su cuenta para factura y nota débito, y otra para nota crédito o devolución.
@@ -49,7 +50,9 @@ function asiento(d, ctx) {
     else if (pr.cuenta_ingreso) cta = pr.cuenta_ingreso;
     else cta = d.tipo === 'ND' && d.concepto === '1' ? P.intereses : P.ingresos;
     porCuenta[cta] = r2((porCuenta[cta] || 0) + l.base);
-    iva += l.iva;
+    // El IVA va a la cuenta de su tarifa (si la tarifa tiene cuenta propia) o a la de los parámetros.
+    const ci = cuentaIva(ctx.tarifas, it.iva_pct, 'venta', P);
+    ivaPor[ci] = r2((ivaPor[ci] || 0) + l.iva);
   }
   const signo = d.tipo === 'NC' ? -1 : 1; // NC invierte débitos y créditos
   const lado = (cuenta, valor, detalle, deudor) => {
@@ -60,14 +63,17 @@ function asiento(d, ctx) {
   // La forma de pago de contado lleva el valor a caja, bancos u otra cuenta en vez de clientes. Las notas siguen a su factura.
   const fac = d.tipo === 'FV' ? d : (ctx.docs || []).find(x => x.id === d.ref_id);
   lado(String(fac?.cuenta_pago || '').trim() || P.clientes, d.neto, det, true);
-  lado(P.retefuente, d.retefuente, 'Retención en la fuente', true);
-  lado(P.reteiva, d.reteiva, 'ReteIVA', true);
-  lado(P.reteica, d.reteica, 'ReteICA', true);
+  // Retenciones: la cuenta del concepto escogido en el documento (las notas sin concepto propio siguen a su factura).
+  // Naturaleza débito en ventas; la nota crédito la lleva al crédito.
+  for (const [k, nom] of [['retefuente', 'Retención en la fuente'], ['reteiva', 'ReteIVA'], ['reteica', 'ReteICA']]) {
+    const r = d.retenciones?.[k] || (d.tipo !== 'FV' ? fac?.retenciones?.[k] : null);
+    lado(String(r?.cuenta || '').trim() || P[k], d[k], r?.nombre ? `${nom} · ${r.nombre}` : nom, (r?.naturaleza || 'D') === 'D');
+  }
   for (const [cta, v] of Object.entries(porCuenta)) {
     // La nota crédito lleva la devolución al débito (4175 o la cuenta de devolución del producto).
     if (d.tipo === 'NC') mov(cta, v, 0, det); else lado(cta, v, det, false);
   }
-  lado(P.iva, iva, 'IVA', false);
+  for (const [ci, v] of Object.entries(ivaPor)) lado(ci, v, 'IVA', false);
   return cuadrar(out, P);
 }
 // Diferencias de centavos por redondeo se llevan a la cuenta de ingresos para que el asiento cuadre.
@@ -86,7 +92,28 @@ function unLado(m) {
   return { ...m, debito: n > 0 ? n : 0, credito: n < 0 ? -n : 0 };
 }
 /* ---------- Comprobantes contables manuales ---------- */
-const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', plural: 'Notas de contabilidad' }, SI: { nombre: 'Saldos iniciales', corto: 'Saldos ini.', plural: 'Saldos iniciales' } };
+const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', plural: 'Notas de contabilidad' }, SI: { nombre: 'Saldos iniciales', corto: 'Saldos ini.', plural: 'Saldos iniciales' },
+  CI: { nombre: 'Cierre contable', corto: 'Cierre', plural: 'Cierres contables' } };
+
+// Cierre del año: cancela los saldos de ingresos, gastos y costos (clases 4, 5, 6 y 7) de cada cuenta y tercero,
+// y lleva la diferencia a la utilidad (crédito) o a la pérdida del ejercicio (débito). Un cierre anterior del mismo año no cuenta.
+function cierreAnual(movs, anio, ctaUtilidad, ctaPerdida) {
+  const ini = `${anio}-01-01`, fin = `${anio}-12-31`, saldos = {};
+  for (const m of movs) {
+    if (m.tipo === 'CI' || m.fecha < ini || m.fecha > fin || !/^[4-7]/.test(m.cuenta)) continue;
+    const k = `${m.cuenta}|${m.tercero_id || ''}`;
+    saldos[k] = r2((saldos[k] || 0) + m.debito - m.credito);
+  }
+  const lineas = Object.entries(saldos).filter(([, v]) => v).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => {
+    const [cuenta, tercero_id] = k.split('|');
+    return { cuenta, tercero_id, detalle: `Cierre ${anio}`, debito: v < 0 ? -v : 0, credito: v > 0 ? v : 0 };
+  });
+  const resultado = r2(-Object.values(saldos).reduce((a, v) => a + v, 0)); // positivo = utilidad
+  const ingresos = r2(-Object.entries(saldos).filter(([k]) => k.startsWith('4')).reduce((a, [, v]) => a + v, 0));
+  if (resultado > 0) lineas.push({ cuenta: ctaUtilidad, tercero_id: '', detalle: `Utilidad del ejercicio ${anio}`, debito: 0, credito: resultado });
+  else if (resultado < 0) lineas.push({ cuenta: ctaPerdida, tercero_id: '', detalle: `Pérdida del ejercicio ${anio}`, debito: -resultado, credito: 0 });
+  return { lineas, resultado, ingresos, gastos: r2(ingresos - resultado), fecha: fin };
+}
 function asientoComprobante(c) {
   if (c.estado === 'anulado') return [];
   const ref = `${c.tipo} ${c.numero}`;
@@ -115,8 +142,8 @@ function erroresComprobante(c, cuentas) {
 }
 
 function movimientos(S) {
-  const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos };
-  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param)))
+  const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos, tarifas: S.tarifas };
+  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param, S.tarifas)))
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }
 
@@ -258,4 +285,4 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { cierreAnual, auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };

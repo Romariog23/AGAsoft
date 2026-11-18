@@ -6,10 +6,12 @@ import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPaga
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
+import { FORMATOS, formato, csvFormato } from './exogena.js';
+import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
@@ -187,14 +189,14 @@ const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
-  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'],
+  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
-  if (store.mode === 'supabase' && S.perfil?.es_admin) items.push(['-', 'Administración'], ['usuarios', 'Usuarios']);
   // Grupos desplegables: queda abierto el del módulo actual y los que la persona dejó abiertos.
   let abiertos = []; try { abiertos = JSON.parse(localStorage.getItem('agasoft-menu') || '[]'); } catch (_) {}
   const grupos = []; let g = null;
@@ -231,6 +233,10 @@ function route() {
     if (v === 'productos') return vProductos(m);
     if (v === 'numeraciones') return vNumeraciones(m);
     if (v === 'formaspago') return vFormasPago(m);
+    if (v === 'retenciones') return vRetenciones(m);
+    if (v === 'tarifasiva') return vTarifasIva(m);
+    if (v === 'cierre') return vCierre(m);
+    if (v === 'exogena') return vExogena(m);
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
@@ -449,9 +455,6 @@ function vEmpresa(m) {
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
-  ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
-    <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
-    <table class="tbl"><tbody>${S.d.miembros.map(x => `<tr><td>${esc(x.correo)}</td><td>${x.rol === 'consulta' ? 'Consulta' : 'Responsable'}</td><td class="r"><button class="ghost" data-delm="${x.id}">Quitar</button></td></tr>`).join('') || '<tr><td class="muted">Solo tú tienes acceso.</td></tr>'}</tbody></table></section>` : ''}
   <section class="panel stack danger"><h3>Zona de cuidado</h3>
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
@@ -464,12 +467,6 @@ function vEmpresa(m) {
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
   };
   if ($('delDemo')) $('delDemo').onclick = async () => { if (await confirmar('Borrar demostración', 'Se borran todas las empresas y documentos de este navegador.', 'Borrar todo')) { store.borrarDemo(); location.hash = ''; location.reload(); } };
-  if ($('addM')) $('addM').onclick = () => dialogo(`<h2>Dar acceso</h2>${campo('correo', 'Correo de la persona', '', 'type="email" required')}
-    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ['consulta', 'Consulta: solo ve']], 'responsable')}
-    <p class="hint">La persona debe tener cuenta aprobada en AGAsoft con ese mismo correo.</p>${pie('Dar acceso')}`, async fd => {
-    await store.save('miembros', { empresa_id: e.id, correo: fd.get('correo').trim().toLowerCase(), rol: fd.get('rol') }); await cargarEmpresa(); route();
-  });
-  m.querySelectorAll('[data-delm]').forEach(b => b.onclick = async () => { try { await store.remove('miembros', b.dataset.delm); await cargarEmpresa(); route(); } catch (er) { fail(er); } });
 }
 
 /* ---------- Inicio ---------- */
@@ -538,6 +535,36 @@ function vLista(m, tipo) {
 /* ---------- Editor de documentos ---------- */
 function facturasCliente(tid) { return S.d.documentos.filter(d => d.tipo === 'FV' && d.estado === 'emitido' && (!tid || d.tercero_id === tid)); }
 function nuevoItem(p) { return { producto_id: p?.id || '', codigo: p?.codigo || '', descripcion: p?.nombre || '', unidad: p?.unidad || 'UND', cantidad: 1, precio: num(p?.precio), descuento_pct: 0, iva_pct: emp().responsable_iva ? num(p?.iva_pct ?? 19) : 0 }; }
+// Retenciones con concepto (Impuestos › Conceptos de retención): cada tipo tiene un selector de concepto y su porcentaje.
+const RET_PCT = { retefuente: 'retefuente_pct', reteiva: 'reteiva_pct', reteica: 'reteica_milaje' };
+const conceptos = (uso, tipo) => conceptosRet(emp()?.contabilidad, param(), uso, tipo);
+const conceptoSel = (uso, tipo, idSel) => conceptos(uso, tipo).find(c => c.id === $(idSel)?.value) || null;
+// Concepto que corresponde a un documento: el que tiene guardado o, si no, el de la misma tarifa.
+const conceptoDoc = (uso, tipo, doc) => { const g = doc.retenciones?.[tipo]?.concepto, cs = conceptos(uso, tipo), v = num(doc[RET_PCT[tipo]]);
+  return (g && cs.find(c => c.id === g)) || (v ? cs.find(c => num(c.tarifa) === v) : null) || null; };
+function campoRet(uso, tipo, ids, doc) {
+  const T = TIPOS_RET[tipo], sel = conceptoDoc(uso, tipo, doc);
+  return `<div><label for="${ids[0]}">${T.corto} <a class="hint" href="#/retenciones">Conceptos</a></label>
+    <select id="${ids[0]}" data-retc="${tipo}"><option value="">Sin concepto (escribe el ${T.unidad === '%' ? 'porcentaje' : 'valor por mil'})</option>${conceptos(uso, tipo).map(c => `<option value="${c.id}" ${c.id === sel?.id ? 'selected' : ''}>${esc(c.nombre)} · ${num(c.tarifa)}${T.unidad === '%' ? '%' : '‰'}${num(c.base_minima) ? ` · base mín. ${money(c.base_minima)}` : ''}</option>`).join('')}</select>
+    <input id="${ids[1]}" type="number" min="0" max="100" step="0.001" class="mono" aria-label="${T.corto} ${T.unidad}" value="${num(doc[RET_PCT[tipo]]) || ''}"><p class="hint" id="${ids[0]}H"></p></div>`;
+}
+// Conecta los selectores: al escoger un concepto pone su tarifa (o 0 si la base no llega a la base mínima).
+function ligarRet(uso, mapa, base) {
+  for (const [tipo, [idS, idP]] of Object.entries(mapa)) if ($(idS)) $(idS).onchange = () => { const c = conceptoSel(uso, tipo, idS); if (c) { $(idP).value = tarifaAplicada(c, base()) || ''; } $(idP).dispatchEvent(new Event('input', { bubbles: true })); };
+}
+// Antes de calcular: respeta la base mínima de cada concepto y devuelve la foto de los conceptos para guardar en el documento.
+function leerRet(uso, mapa, base) {
+  const out = {};
+  for (const [tipo, [idS, idP]] of Object.entries(mapa)) {
+    const c = $(idS) && conceptoSel(uso, tipo, idS); if (!c) { if ($(idS + 'H')) $(idS + 'H').textContent = ''; continue; }
+    if (num(c.base_minima) > 0) { const t = tarifaAplicada(c, base); if (num($(idP).value) !== t) $(idP).value = t || ''; $(idS + 'H').textContent = t ? '' : `No aplica: la base es menor que ${money(c.base_minima)}.`; }
+    out[tipo] = fotoRet(c);
+  }
+  return out;
+}
+// Cuando cambia el cliente o proveedor: pone el concepto que coincide con la tarifa propuesta.
+function syncRet(uso, mapa) { for (const [tipo, [idS, idP]] of Object.entries(mapa)) if ($(idS)) { const v = num($(idP).value), c = v ? conceptos(uso, tipo).find(x => num(x.tarifa) === v) : null; $(idS).value = c?.id || ''; } }
+const optsIva = actual => { const ts = tarifasIva(emp()?.contabilidad); const v = String(num(actual)); return (ts.some(t => String(num(t.tarifa)) === v) ? '' : `<option value="${v}" selected>${v}</option>`) + ts.map(t => `<option value="${num(t.tarifa)}" ${String(num(t.tarifa)) === v ? 'selected' : ''}>${num(t.tarifa)}</option>`).join(''); };
 function retDe(t) { return t ? { retefuente_pct: num(t.retefuente_pct), reteiva_pct: num(t.reteiva_pct), reteica_milaje: num(t.reteica_milaje) } : { retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }; }
 
 function vEditor(m, { id, tipo, ref, tercero, clase }) {
@@ -560,6 +587,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
+  const RET_V = { retefuente: ['rfC', 'rf'], reteiva: ['riC', 'ri'], reteica: ['ricaC', 'rica'] };
   // Documento ya guardado (no electrónico) que el dueño está editando: conserva su número.
   const editando = !!id && doc.estado === 'emitido';
   // Solo los electrónicos tienen borrador y se emiten; los demás contabilizan al guardar.
@@ -591,9 +619,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="obs">Observaciones</label><textarea id="obs" rows="3" maxlength="1000">${esc(doc.observaciones)}</textarea></div>
       ${esRC ? '' : `<div class="span2 ret"><h3>Retenciones que practica el cliente</h3><div class="grid3">
-        <div><label for="rf">Retefuente %</label><input id="rf" type="number" min="0" max="100" step="0.001" class="mono" value="${num(doc.retefuente_pct) || ''}"></div>
-        <div><label for="ri">ReteIVA % (del IVA)</label><input id="ri" type="number" min="0" max="100" step="0.001" class="mono" value="${num(doc.reteiva_pct) || ''}"></div>
-        <div><label for="rica">ReteICA (por mil)</label><input id="rica" type="number" min="0" max="100" step="0.001" class="mono" value="${num(doc.reteica_milaje) || ''}"></div></div></div>`}
+        ${campoRet('venta', 'retefuente', ['rfC', 'rf'], doc)}${campoRet('venta', 'reteiva', ['riC', 'ri'], doc)}${campoRet('venta', 'reteica', ['ricaC', 'rica'], doc)}</div></div>`}
       <div class="span2 totbox" id="tot"></div>
     </section>
     <section class="panel stack"><div class="vhead"><h3>Contabilización</h3><span class="hint" id="asiHint"></span></div><div id="asi"></div></section>
@@ -614,7 +640,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if ($('rfp')) doc.cuenta_pago = $('rfp').value;
     if ($('ref')) { doc.ref_id = $('ref').value; doc.concepto = $('con').value; }
     doc.observaciones = $('obs').value;
-    if ($('rf')) Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) });
+    if ($('rf')) { doc.retenciones = leerRet('venta', RET_V, r2(items.reduce((s2, it) => s2 + linea(it).base, 0))); Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) }); }
     if ($('ant')) doc.anticipo = num($('ant').value);
   };
   // Cuenta que usará la línea si no se escoge otra: la del producto o la de la empresa.
@@ -630,7 +656,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     const tmp = { ...doc, id: '__tmp', tipo, estado: 'emitido', prefijo: '', numero: 'borrador' };
     const its = (esRC ? [] : items).map(it => ({ ...it, cuenta: a8(String(it.cuenta || '').trim().split(' ')[0]), documento_id: '__tmp' }));
     const ap = (apl || []).map(a => ({ ...a, recibo_id: '__tmp' }));
-    box.innerHTML = tablaAsiento(asiento(tmp, { items: its, aplicaciones: ap, productos: S.d.productos, param: param(), docs: S.d.documentos }));
+    box.innerHTML = tablaAsiento(asiento(tmp, { items: its, aplicaciones: ap, productos: S.d.productos, param: param(), docs: S.d.documentos, tarifas: tarifasIva(emp()?.contabilidad) }));
   };
   const calcular = () => {
     leerCab();
@@ -666,7 +692,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       <td data-l="Cantidad"><input data-k="cantidad" type="number" step="any" min="0" value="${it.cantidad}" class="r mono w-num" aria-label="Cantidad" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Precio unit."><input data-k="precio" type="number" step="0.01" min="0" value="${it.precio}" class="r mono w-val" aria-label="Precio unitario" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Desc. %"><input data-k="descuento_pct" type="number" step="0.01" min="0" max="100" value="${num(it.descuento_pct) || ''}" class="r mono w-num" aria-label="Descuento %" ${bloqueado ? 'readonly' : ''}></td>
-      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %" ${bloqueado || !emp().responsable_iva ? 'disabled' : ''}>${opts([['0', '0'], ['5', '5'], ['19', '19']], String(num(it.iva_pct)))}</select></td>
+      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %" ${bloqueado || !emp().responsable_iva ? 'disabled' : ''}>${optsIva(it.iva_pct)}</select></td>
       <td class="r mono c-tot" data-l="Total" data-lt="${i}">${money(linea(it).total)}</td>
       <td class="c-del">${bloqueado ? '' : `<button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button>`}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Sin líneas.</td></tr>';
     if ($('addIt')) $('addIt').hidden = bloqueado;
@@ -700,7 +726,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   const form = $('ed');
   $('cli').onchange = () => {
     const t = terc($('cli').value);
-    if (!id && t && !esRC && !doc.ref_id) { Object.assign(doc, retDe(t)); $('rf').value = num(t.retefuente_pct) || ''; $('ri').value = num(t.reteiva_pct) || ''; $('rica').value = num(t.reteica_milaje) || ''; }
+    if (!id && t && !esRC && !doc.ref_id) { Object.assign(doc, retDe(t)); $('rf').value = num(t.retefuente_pct) || ''; $('ri').value = num(t.reteiva_pct) || ''; $('rica').value = num(t.reteica_milaje) || ''; syncRet('venta', RET_V); }
     if ($('fp') && t) { $('fp').value = formaDe(fVenta(), t.plazo_dias > 0, t.plazo_dias > 0 ? '' : (fVenta().find(f => !f.credito)?.cuenta || '')).id; $('vence').value = t.plazo_dias > 0 ? sumarDias($('fecha').value, t.plazo_dias) : ''; $('wVence').hidden = !esCredFP(); if ($('wMp')) $('wMp').hidden = esCredFP(); }
     if ($('ref') && doc.ref_id && docById(doc.ref_id)?.tercero_id !== $('cli').value) doc.ref_id = '';
     pintarRef(); pintarApl(); calcular();
@@ -715,7 +741,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       if (f) {
         if (!$('cli').value) { $('cli').value = f.tercero_id; }
         Object.assign(doc, { retefuente_pct: num(f.retefuente_pct), reteiva_pct: num(f.reteiva_pct), reteica_milaje: num(f.reteica_milaje) });
-        $('rf').value = num(f.retefuente_pct) || ''; $('ri').value = num(f.reteiva_pct) || ''; $('rica').value = num(f.reteica_milaje) || '';
+        $('rf').value = num(f.retefuente_pct) || ''; $('ri').value = num(f.reteiva_pct) || ''; $('rica').value = num(f.reteica_milaje) || ''; syncRet('venta', RET_V);
         if (tipo === 'NC') items = itemsDe(f.id).map(i => ({ ...i, id: undefined, documento_id: undefined }));
         pintarRef(); pintarItems();
       }
@@ -835,6 +861,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   };
   if ($('delB')) $('delB').onclick = async () => { if (!await confirmar('Borrar borrador', 'El borrador se elimina.', 'Borrar')) return; try { await store.remove('documentos', id); await cargarEmpresa(); location.hash = '#/' + tipo; } catch (e) { fail(e); } };
 
+  ligarRet('venta', RET_V, () => r2(items.reduce((s2, it) => s2 + linea(it).base, 0)));
   pintarRef(); pintarItems(); pintarApl(); calcular(); pintarBotones();
 }
 function saldoDe(fid) { return cartera(S.d.documentos, S.d.aplicaciones).find(c => c.factura.id === fid)?.saldo ?? 0; }
@@ -1026,7 +1053,7 @@ function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
-    <div class="grid2">${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}${campoSel('iva_pct', 'IVA', [['19', '19%'], ['5', '5%'], ['0', 'Excluido o exento (0%)']], String(num(p.iva_pct ?? 19)))}</div>
+    <div class="grid2">${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}</div>
     <h3>Contabilización</h3>
     <div class="grid2">${selCuenta('cuenta_ingreso', 'Cuenta en factura y nota débito', /^4[12]/, p.cuenta_ingreso, param().ingresos)}${selCuenta('cuenta_devolucion', 'Cuenta en nota crédito y devolución', /^4/, p.cuenta_devolucion, param().devoluciones)}</div>
     <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas.</p>
@@ -1155,9 +1182,21 @@ function vNumeraciones(m) {
 }
 
 /* ---------- Usuarios (administrador) ---------- */
+// Configuración › Usuarios: quién tiene acceso a esta empresa. El administrador de AGAsoft ve además todas las cuentas.
 async function vUsuarios(m) {
-  if (!S.perfil?.es_admin) { m.innerHTML = '<p>Solo el administrador ve esta sección.</p>'; return; }
-  m.innerHTML = '<header class="vhead"><h2>Usuarios</h2><a class="btn primary" href="/admin">Abrir panel de planes y uso</a></header><p class="hint">Los planes, los límites y el uso de cada cuenta se manejan en el panel del administrador (/admin), con su propio ingreso.</p><section class="panel" id="lst"><p class="muted">Cargando…</p></section>';
+  const e = emp(), adm = store.mode === 'supabase' && S.perfil?.es_admin;
+  m.innerHTML = `<header class="vhead"><div><h2>Usuarios</h2><p class="sub">Personas que pueden entrar a ${esc(e?.nombre || 'esta empresa')}</p></div></header>
+  ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
+    <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
+    <table class="tbl"><tbody>${S.d.miembros.map(x => `<tr><td>${esc(x.correo)}</td><td>${x.rol === 'consulta' ? 'Consulta' : 'Responsable'}</td><td class="r"><button class="ghost" data-delm="${x.id}">Quitar</button></td></tr>`).join('') || '<tr><td class="muted">Solo tú tienes acceso.</td></tr>'}</tbody></table></section>` : '<section class="panel"><p class="muted">En el modo de demostración no hay usuarios. Al entrar con tu cuenta puedes dar acceso a tu equipo.</p></section>'}
+  ${adm ? '<section class="panel stack"><header class="vhead"><h3>Todas las cuentas de AGAsoft</h3><a class="btn primary" href="/admin">Abrir panel de planes y uso</a></header><p class="hint">Solo lo ve el administrador. Los planes, los límites y el uso se manejan en /admin.</p><div id="lst"><p class="muted">Cargando…</p></div></section>' : ''}`;
+  if ($('addM')) $('addM').onclick = () => dialogo(`<h2>Dar acceso</h2>${campo('correo', 'Correo de la persona', '', 'type="email" required')}
+    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ['consulta', 'Consulta: solo ve']], 'responsable')}
+    <p class="hint">La persona debe tener cuenta aprobada en AGAsoft con ese mismo correo.</p>${pie('Dar acceso')}`, async fd => {
+    await store.save('miembros', { empresa_id: e.id, correo: fd.get('correo').trim().toLowerCase(), rol: fd.get('rol') }); await cargarEmpresa(); route();
+  });
+  m.querySelectorAll('[data-delm]').forEach(b => b.onclick = async () => { try { await store.remove('miembros', b.dataset.delm); await cargarEmpresa(); route(); } catch (er) { fail(er); } });
+  if (!adm) return;
   try {
     const l = await store.listPerfiles();
     $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Correo</th><th>Estado</th><th></th></tr></thead><tbody>
@@ -1176,8 +1215,8 @@ const nomForma = (formas, credito, cuenta) => { if (credito) return formas.find(
 // Opciones de las formas de pago de contado (recibos y egresos); conserva la cuenta guardada aunque ya no esté en la lista.
 const optsContado = (formas, cuenta) => { const fs = formas.filter(f => !f.credito); const sel = fs.find(f => f.cuenta === cuenta) || (cuenta ? null : fs[0]);
   return (cuenta && !sel ? `<option value="${esc(cuenta)}" selected>${esc(cuenta)} ${esc(nomCta(cuenta))}</option>` : '') + fs.map(f => `<option value="${esc(f.cuenta)}" ${f === sel ? 'selected' : ''}>${esc(f.nombre)} · ${esc(f.cuenta)}</option>`).join(''); };
-const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos });
-const movs = () => movimientos({ ...S.d, param: param() });
+const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos, tarifas: tarifasIva(emp()?.contabilidad) });
+const movs = () => movimientos({ ...S.d, param: param(), tarifas: tarifasIva(emp()?.contabilidad) });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
 const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
 const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: hoy() };
@@ -1301,6 +1340,153 @@ function formFormaPago(f, todas, guardar) {
   });
   const ver = () => { $('ff_w').hidden = $('ff_t').value === 'si'; };
   $('ff_t').onchange = ver; ver();
+}
+/* ---------- Cierre contable ---------- */
+function vCierre(m) {
+  const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort().reverse();
+  const actual = String(Number(hoy().slice(0, 4)) - (hoy().slice(5) < '12-31' ? 1 : 0));
+  let anio = anios.includes(actual) ? actual : anios[0] || actual;
+  const P = { util: '36050501', perd: '36100501' };
+  const ctas3 = cuentasAux().filter(c => /^3/.test(c.codigo));
+  m.innerHTML = `<header class="vhead"><div><h2>Cierre contable</h2><p class="sub">Cancela los ingresos, gastos y costos del año y lleva el resultado a la cuenta de utilidad o de pérdida del ejercicio.</p></div></header>
+    <section class="panel stack"><div class="row filters">
+      <div><label for="ca">Año que cierra</label><select id="ca">${(anios.length ? anios : [actual]).map(a => `<option ${a === anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="grow"><label for="cu">Cuenta de la utilidad</label><input id="cu" list="ctas3" class="mono" value="${P.util}" autocomplete="off"><p class="hint" id="cuN"></p></div>
+      <div class="grow"><label for="cp">Cuenta de la pérdida</label><input id="cp" list="ctas3" class="mono" value="${P.perd}" autocomplete="off"><p class="hint" id="cpN"></p></div></div>
+      <datalist id="ctas3">${optsLista(ctas3)}</datalist></section>
+    <section class="panel stack" id="cOut"></section>`;
+  const pintar = () => {
+    anio = $('ca').value;
+    const cu = $('cu').value.trim().split(' ')[0], cp = $('cp').value.trim().split(' ')[0];
+    $('cuN').textContent = nomCta(cu); $('cpN').textContent = nomCta(cp);
+    const hecho = comps().find(c => c.tipo === 'CI' && c.estado !== 'anulado' && c.fecha.startsWith(anio));
+    const r = cierreAnual(ms, anio, cu, cp);
+    $('cOut').innerHTML = `<div class="kpis"><div class="kpi"><span>Ingresos ${anio}</span><b class="mono">${money(r.ingresos)}</b></div><div class="kpi"><span>Gastos y costos</span><b class="mono">${money(r.gastos)}</b></div>
+      <div class="kpi ${r.resultado < 0 ? 'warn' : ''}"><span>${r.resultado < 0 ? 'Pérdida' : 'Utilidad'} del ejercicio</span><b class="mono">${money(Math.abs(r.resultado))}</b></div></div>
+      ${hecho ? `<p class="aviso">El año ${anio} ya está cerrado con el <a href="#/comp/${hecho.id}">${esc(nomComp(hecho))}</a> del ${fFecha(hecho.fecha)}. Si registras algo más en ${anio}, anula ese cierre y hazlo de nuevo.</p>` : ''}
+      ${r.resultado ? `<p>La ${r.resultado < 0 ? 'pérdida' : 'utilidad'} de <b>${money(Math.abs(r.resultado))}</b> se lleva a <b class="mono">${esc(r.resultado < 0 ? cp : cu)}</b> ${esc(nomCta(r.resultado < 0 ? cp : cu))}, con fecha ${fFecha(r.fecha)}.</p>` : ''}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+      ${r.lineas.map(l => `<tr><td><span class="mono">${l.cuenta}</span> ${esc(nomCta(l.cuenta))}</td><td>${esc(l.tercero_id ? terc(l.tercero_id)?.nombre || '' : '')}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay ingresos, gastos ni costos en ese año.</td></tr>'}</tbody></table></div>
+      <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
+    if ($('cGo')) $('cGo').onclick = async () => {
+      for (const [c, q] of [[cu, 'utilidad'], [cp, 'pérdida']]) if (!esAuxiliar(c) || !idxCuentas()[c]) return toast(`La cuenta de la ${q} (${c}) no es auxiliar o no existe en el plan de cuentas.`, true);
+      if (!await confirmar(`Cierre contable ${anio}`, `Se crea un comprobante de cierre con fecha ${fFecha(r.fecha)} que deja en cero los ingresos, gastos y costos de ${anio} y lleva la ${r.resultado < 0 ? 'pérdida' : 'utilidad'} de <b>${money(Math.abs(r.resultado))}</b> a ${esc(r.resultado < 0 ? cp : cu)}.<br>Si después hace falta, se anula el comprobante y se cierra de nuevo.`, 'Hacer el cierre')) return;
+      try {
+        const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'CI', numero: siguienteComp('CI'), fecha: r.fecha, descripcion: `Cierre contable ${anio}`, lineas: r.lineas.map(l => ({ ...l, tercero_id: l.tercero_id || '' })), estado: 'contabilizado' });
+        await cargarEmpresa(); toast(`Cierre de ${anio} hecho.`); location.hash = '#/comp/' + g.id;
+      } catch (e) { fail(e); }
+    };
+  };
+  $('ca').onchange = pintar; $('cu').onchange = pintar; $('cp').onchange = pintar;
+  pintar();
+}
+
+/* ---------- Medios magnéticos ---------- */
+function vExogena(m) {
+  const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort().reverse();
+  const def = String(Number(hoy().slice(0, 4)) - 1);
+  m.innerHTML = `<header class="vhead"><div><h2>Medios magnéticos</h2><p class="sub">Información exógena para la DIAN, sacada de la contabilidad por tercero.</p></div></header>
+    <section class="panel stack"><div class="row filters">
+      <div><label for="xa">Año gravable</label><select id="xa">${(anios.length ? anios : [def]).map(a => `<option ${a === (anios.includes(def) ? def : anios[0]) ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="grow"><label for="xf">Formato</label><select id="xf">${Object.entries(FORMATOS).map(([k, f]) => `<option value="${k}">${k} · ${esc(f.nombre)}</option>`).join('')}</select></div>
+      <div class="end"><button class="primary" id="xd">Descargar para Excel</button></div></div>
+      <p class="hint">Los conceptos salen de la cuenta contable (por ejemplo 5110 honorarios = 5002). Revísalos antes de pasarlos al prevalidador de la DIAN. Para persona natural se usan los nombres y apellidos del tercero; para jurídica, la razón social. Los terceros sin nombres separados o sin dirección hay que completarlos en Clientes o Proveedores.</p></section>
+    <section class="panel" id="xOut"></section>`;
+  const datos = () => ({ anio: $('xa').value, cod: $('xf').value, filas: formato($('xf').value, ms, $('xa').value) });
+  const pintar = () => {
+    const { cod, filas } = datos(), F = FORMATOS[cod], con = ['1001', '1007', '1008', '1009'].includes(cod);
+    const falta = t => !t ? true : (t.tipo_persona === 'natural' ? !(t.primer_nombre && t.primer_apellido) : false) || !t.direccion;
+    $('xOut').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr>${con ? '<th>Concepto</th>' : ''}<th>Tercero</th><th>Identificación</th>${F.valores.map(([, n]) => `<th class="r">${esc(n)}</th>`).join('')}</tr></thead><tbody>
+      ${filas.map(f => { const t = terc(f.tercero_id); return `<tr>${con ? `<td class="nowrap"><b class="mono">${f.concepto}</b> <span class="hint">${esc(f.nombre_concepto)}</span></td>` : ''}<td>${esc(t?.nombre || '')}${falta(t) ? ' <span class="tag bad">Datos incompletos</span>' : ''}</td><td class="mono nowrap">${esc(fmtNit(t?.numero || ''))}</td>${F.valores.map(([k]) => `<td class="r mono">${money(f[k] || 0)}</td>`).join('')}</tr>`; }).join('') || `<tr><td colspan="${3 + F.valores.length}" class="muted">Sin información para este formato en el año.</td></tr>`}
+      ${filas.length ? `<tr class="strong"><td colspan="${con ? 3 : 2}">Total (${filas.length} registros)</td>${F.valores.map(([k]) => `<td class="r mono">${money(filas.reduce((a, f) => a + (f[k] || 0), 0))}</td>`).join('')}</tr>` : ''}</tbody></table></div>`;
+  };
+  $('xa').onchange = pintar; $('xf').onchange = pintar;
+  $('xd').onclick = () => {
+    const { anio, cod, filas } = datos();
+    const url = URL.createObjectURL(new Blob([csvFormato(cod, filas, S.d.terceros)], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = `formato-${cod}-${anio}-${(emp()?.nit || 'empresa')}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  pintar();
+}
+
+/* ---------- Impuestos ---------- */
+// Guarda una lista de impuestos dentro de la configuración contable de la empresa.
+const guardarContab = async (clave, valor) => { await store.save('empresas', { id: S.eid, contabilidad: { ...(emp()?.contabilidad || {}), [clave]: valor } }); await recargar(); };
+function vRetenciones(m) {
+  const P = param(), todos = conceptosRet(emp()?.contabilidad, P);
+  const nat = c => c.naturaleza === 'D' ? 'Débito' : 'Crédito';
+  const tabla = (uso, titulo, sub) => `<section class="panel stack"><header class="vhead"><div><h3>${titulo}</h3><p class="hint">${sub}</p></div><button class="primary" data-nr="${uso}">Nuevo concepto</button></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tipo</th><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base mínima</th><th>Cuenta</th><th>Naturaleza</th><th></th></tr></thead><tbody>
+    ${todos.filter(c => c.uso === uso).map(c => `<tr><td>${TIPOS_RET[c.tipo].corto}</td><td><b>${esc(c.nombre)}</b></td><td class="r mono">${num(c.tarifa)}${c.tipo === 'reteica' ? '‰' : '%'}</td><td class="r mono">${num(c.base_minima) ? money(c.base_minima) : ''}</td>
+      <td class="mono">${esc(c.cuenta)} <span class="muted">${esc(nomCta(c.cuenta))}</span></td><td>${nat(c)}<br><span class="hint">Nota crédito: ${c.naturaleza === 'D' ? 'crédito' : 'débito'}</span></td>
+      <td class="r nowrap"><button class="sm" data-er="${c.id}">Editar</button><button class="sm ghost" data-br="${c.id}">Quitar</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Sin conceptos.</td></tr>'}</tbody></table></div></section>`;
+  m.innerHTML = `<header class="vhead"><div><h2>Conceptos de retención</h2><p class="sub">Cada concepto tiene su tarifa, su base mínima y la cuenta a la que va. Se escogen en las facturas de venta y de compra.</p></div></header>
+    ${tabla('venta', 'Ventas: retenciones que le practican a la empresa', 'Facturas de venta y notas. Naturaleza débito (anticipo de impuestos); la nota crédito la lleva al crédito.')}
+    ${tabla('compra', 'Compras: retenciones que practica la empresa', 'Facturas de proveedor y documentos soporte. Naturaleza crédito (retención por pagar).')}
+    <p class="hint">Para llevar cada concepto a su propia subcuenta (por ejemplo 23651501 honorarios o 23652501 servicios), créala primero en el Plan de cuentas.</p>`;
+  const guardar = async lista => { await guardarContab('retenciones', lista.map(({ naturaleza: _n, ...x }) => x)); vRetenciones(m); };
+  m.querySelectorAll('[data-nr]').forEach(b => b.onclick = () => formRetencion({ uso: b.dataset.nr, tipo: 'retefuente' }, todos, guardar));
+  m.querySelectorAll('[data-er]').forEach(b => b.onclick = () => formRetencion(todos.find(c => c.id === b.dataset.er), todos, guardar));
+  m.querySelectorAll('[data-br]').forEach(b => b.onclick = async () => { try { await guardar(todos.filter(x => x.id !== b.dataset.br)); toast('Concepto quitado.'); } catch (e) { fail(e); } });
+}
+function formRetencion(c, todos, guardar) {
+  const P = param();
+  const defecto = t => c.uso === 'venta' ? P[t] : P[t + '_pagar'];
+  const ctas = cuentasAux().filter(x => c.uso === 'venta' ? /^13/.test(x.codigo) : /^2/.test(x.codigo));
+  dialogo(`<h2>${c.id ? 'Editar' : 'Nuevo'} concepto de retención · ${c.uso === 'venta' ? 'ventas' : 'compras'}</h2>
+    <div class="grid2"><div><label for="fr_t">Tipo</label><select id="fr_t" name="tipo">${opts(Object.entries(TIPOS_RET).map(([k, v]) => [k, v.nombre]), c.tipo)}</select></div>
+      <div><label for="fr_n">Concepto</label><input id="fr_n" name="nombre" required maxlength="60" value="${esc(c.nombre || '')}" placeholder="Ej.: Servicios en general"></div></div>
+    <div class="grid2"><div><label for="fr_p" id="fr_pl">Tarifa</label><input id="fr_p" name="tarifa" type="number" min="0" max="100" step="0.001" class="mono" value="${c.tarifa ?? ''}"><p class="hint" id="fr_ph"></p></div>
+      <div><label for="fr_b">Base mínima (pesos)</label><input id="fr_b" name="base_minima" type="number" min="0" step="1" class="mono" value="${num(c.base_minima) || ''}"><p class="hint">Si la base del documento es menor, no se retiene. Vacío = siempre.</p></div></div>
+    <div><label for="fr_c">Cuenta</label><input id="fr_c" name="cuenta" list="ctasFR" class="mono" value="${esc(c.cuenta || '')}" autocomplete="off" placeholder="Código o nombre"><datalist id="ctasFR">${optsLista(ctas)}</datalist>
+      <p class="hint" id="fr_ch"></p></div>
+    <p class="hint">Naturaleza: <b>${c.uso === 'venta' ? 'débito' : 'crédito'}</b> en ${c.uso === 'venta' ? 'la factura y la nota débito' : 'la factura de proveedor y el documento soporte'}${c.uso === 'venta' ? '; en la nota crédito va al crédito' : ''}.</p>${pie()}`, async fd => {
+    const tipo = fd.get('tipo'), nombre = String(fd.get('nombre') || '').trim(), cuenta = String(fd.get('cuenta') || '').trim().split(' ')[0] || defecto(tipo);
+    if (!nombre) throw new Error('Escribe el nombre del concepto.');
+    if (num(fd.get('tarifa')) < 0 || num(fd.get('tarifa')) > 100) throw new Error('La tarifa debe estar entre 0 y 100.');
+    if (!esAuxiliar(cuenta)) throw new Error('Escoge una cuenta auxiliar de 8 dígitos.');
+    if (!idxCuentas()[cuenta]) throw new Error(`La cuenta ${cuenta} no existe en el plan de cuentas.`);
+    const nuevo = { id: c.id || `${c.uso[0]}-r-${Date.now().toString(36)}`, uso: c.uso, tipo, nombre, tarifa: num(fd.get('tarifa')), base_minima: Math.max(0, num(fd.get('base_minima'))), cuenta };
+    await guardar(c.id ? todos.map(x => x.id === c.id ? nuevo : x) : [...todos, nuevo]);
+    toast('Concepto guardado.');
+  });
+  const ver = () => { const t = $('fr_t').value; $('fr_pl').textContent = `Tarifa (${TIPOS_RET[t].unidad})`; $('fr_ph').textContent = TIPOS_RET[t].ayuda; $('fr_ch').textContent = `Vacío = la de la empresa (${defecto(t)} ${nomCta(defecto(t))}).`; };
+  $('fr_t').onchange = ver; ver();
+}
+function vTarifasIva(m) {
+  const P = param(), ts = tarifasIva(emp()?.contabilidad);
+  m.innerHTML = `<header class="vhead"><div><h2>Tarifas de IVA</h2><p class="sub">Las tarifas que se escogen en los productos y en cada línea de las facturas de venta y de compra.</p></div><button class="primary" id="nt">Nueva tarifa</button></header>
+    <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tarifa</th><th class="r">%</th><th>Cuenta en ventas</th><th>Cuenta en compras</th><th class="r">Productos</th><th></th></tr></thead><tbody>
+    ${ts.map(t => { const n = S.d.productos.filter(p => num(p.iva_pct) === num(t.tarifa)).length; return `<tr><td><b>${esc(t.nombre)}</b></td><td class="r mono">${num(t.tarifa)}%</td>
+      <td class="mono">${esc(t.cuenta_venta || P.iva)} <span class="muted">${esc(nomCta(t.cuenta_venta || P.iva))}</span></td><td class="mono">${esc(t.cuenta_compra || P.iva_descontable)} <span class="muted">${esc(nomCta(t.cuenta_compra || P.iva_descontable))}</span></td>
+      <td class="r">${n}</td><td class="r nowrap"><button class="sm" data-et="${t.id}">Editar</button><button class="sm ghost" data-bt="${t.id}">Quitar</button></td></tr>`; }).join('')}</tbody></table></div></section>
+    <p class="hint">Si una tarifa no tiene cuenta propia, usa la de la empresa (Plan de cuentas › Cuentas de la empresa): ${P.iva} en ventas y ${P.iva_descontable} en compras.</p>`;
+  const guardar = async lista => { await guardarContab('tarifas_iva', lista); vTarifasIva(m); };
+  const form = t => {
+    const ctas = cuentasAux().filter(x => /^24/.test(x.codigo));
+    dialogo(`<h2>${t.id ? 'Editar' : 'Nueva'} tarifa de IVA</h2>
+      <div class="grid2"><div><label for="ft_n">Nombre</label><input id="ft_n" name="nombre" required maxlength="50" value="${esc(t.nombre || '')}" placeholder="Ej.: IVA 19 %"></div>
+        <div><label for="ft_p">Tarifa %</label><input id="ft_p" name="tarifa" type="number" min="0" max="100" step="0.01" class="mono" required value="${t.tarifa ?? ''}"></div></div>
+      <div class="grid2"><div><label for="ft_v">Cuenta en ventas</label><input id="ft_v" name="cuenta_venta" list="ctasT" class="mono" value="${esc(t.cuenta_venta || '')}" autocomplete="off" placeholder="${P.iva}"></div>
+        <div><label for="ft_c">Cuenta en compras</label><input id="ft_c" name="cuenta_compra" list="ctasT" class="mono" value="${esc(t.cuenta_compra || '')}" autocomplete="off" placeholder="${P.iva_descontable}"></div></div>
+      <datalist id="ctasT">${optsLista(ctas)}</datalist><p class="hint">Vacías = las de la empresa.</p>${pie()}`, async fd => {
+      const nombre = String(fd.get('nombre') || '').trim(), tarifa = num(fd.get('tarifa'));
+      if (!nombre) throw new Error('Escribe el nombre de la tarifa.');
+      if (tarifa < 0 || tarifa > 100) throw new Error('La tarifa debe estar entre 0 y 100.');
+      if (ts.some(x => x.id !== t.id && num(x.tarifa) === tarifa)) throw new Error(`Ya existe una tarifa del ${tarifa} %.`);
+      const cta = k => { const v = String(fd.get(k) || '').trim().split(' ')[0]; if (v && (!esAuxiliar(v) || !idxCuentas()[v])) throw new Error(`La cuenta ${v} no es auxiliar o no existe.`); return v; };
+      const nueva = { id: t.id || `iva-${Date.now().toString(36)}`, nombre, tarifa, cuenta_venta: cta('cuenta_venta'), cuenta_compra: cta('cuenta_compra') };
+      await guardar(t.id ? ts.map(x => x.id === t.id ? nueva : x) : [...ts, nueva]); toast('Tarifa guardada.');
+    });
+  };
+  $('nt').onclick = () => form({});
+  m.querySelectorAll('[data-et]').forEach(b => b.onclick = () => form(ts.find(t => t.id === b.dataset.et)));
+  m.querySelectorAll('[data-bt]').forEach(b => b.onclick = async () => {
+    const t = ts.find(x => x.id === b.dataset.bt);
+    if (S.d.productos.some(p => num(p.iva_pct) === num(t.tarifa))) return toast('Hay productos con esa tarifa. Cámbiales la tarifa primero.', true);
+    if (ts.length < 2) return toast('Debe quedar al menos una tarifa.', true);
+    try { await guardar(ts.filter(x => x.id !== t.id)); toast('Tarifa quitada.'); } catch (e) { fail(e); }
+  });
 }
 function formCuenta(c = {}, padre = '') {
   const nueva = !c.id;
@@ -1479,7 +1665,8 @@ function vEsf(m) {
 function vEr(m) {
   m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
   const pintar = () => {
-    const r = estadoResultados(movsInf(F.desde, F.hasta), S.d.cuentas, F.desde, F.hasta);
+    // El cierre contable no se muestra en el estado de resultados (lo dejaría en cero).
+    const r = estadoResultados(movsInf(F.desde, F.hasta).filter(x => x.tipo !== 'CI'), S.d.cuentas, F.desde, F.hasta);
     $('out').innerHTML = cabInforme('Estado de resultados', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
       <div class="inf">${r.secciones.map(sx => sx.total ? `<div class="inf-l tot ${sx.final ? 'big' : ''}"><span>${sx.total}</span><span class="mono">${money(sx.valor)}</span></div>`
         : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
@@ -1729,7 +1916,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   }
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
   const pagado = !esCE && id && compras().some(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
-  const ctasRet = ctasDe(/^2365/);
+  const RET_C = { retefuente: ['krfC', 'krf'], reteiva: ['kriC', 'kri'], reteica: ['kricaC', 'krica'] };
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/compras/${tipo}">← ${T.plural}</a><h2>${id ? `Editar ${esc(nomCompra(c))}` : T.nuevo}</h2>
     <p class="sub">${esCE ? 'Pago a un proveedor: escoge las facturas que se pagan o registra un anticipo.' : tipo === 'DS' ? 'Compra a una persona no obligada a facturar. Se contabiliza al guardar.' : 'Factura electrónica que te envió el proveedor. Se contabiliza al guardar.'}</p></div></header>
   <form id="ke" class="stack" novalidate>
@@ -1752,10 +1939,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
       ${esCE ? '' : `<div class="span2 ret"><h3>Retenciones que la empresa practica</h3><div class="grid3">
-        <div><label for="krf">Retefuente %</label><input id="krf" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.retefuente_pct) || ''}"></div>
-        <div><label for="kri">ReteIVA % (del IVA)</label><input id="kri" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.reteiva_pct) || ''}"></div>
-        <div><label for="krica">ReteICA (por mil)</label><input id="krica" type="number" min="0" max="100" step="0.001" class="mono" value="${num(c.reteica_milaje) || ''}"></div></div>
-        <div><label for="krc">Cuenta de la retefuente</label><select id="krc"><option value="">La de la empresa (${esc(param().retefuente_pagar)})</option>${optsCta(ctasRet, c.cuenta_retefuente)}</select></div></div>`}
+        ${campoRet('compra', 'retefuente', ['krfC', 'krf'], c)}${campoRet('compra', 'reteiva', ['kriC', 'kri'], c)}${campoRet('compra', 'reteica', ['kricaC', 'krica'], c)}</div></div>`}
       <div class="span2 totbox" id="ktot"></div>
     </section>
     <section class="panel stack"><h3>Contabilización</h3><div id="kas"></div></section>
@@ -1768,7 +1952,8 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     else {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
       if ($('kfp')) { const f = fCompra().find(x => x.id === $('kfp').value) || fCompra()[0]; c.cuenta_pago = f.credito ? '' : f.cuenta; }
-      Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value), cuenta_retefuente: $('krc').value });
+      c.retenciones = leerRet('compra', RET_C, r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
+      Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value) });
       Object.assign(c, totalesCompra(c.lineas, c));
     }
   };
@@ -1783,14 +1968,14 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd></dl>`;
       c.lineas.forEach((l, i) => { const x = m.querySelector(`[data-kt="${i}"]`); if (x) x.textContent = money(r2(num(l.base) * (1 + num(l.iva_pct) / 100))); });
     }
-    $('kas').innerHTML = tablaAsiento(asientoCompra({ ...c, id: c.id || 'nuevo', numero: c.numero || siguienteCompra(tipo), estado: 'contabilizado', aplicaciones: (c.aplicaciones || []).filter(a => num(a.valor)).map(a => { const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; }) }, emp()?.contabilidad));
+    $('kas').innerHTML = tablaAsiento(asientoCompra({ ...c, id: c.id || 'nuevo', numero: c.numero || siguienteCompra(tipo), estado: 'contabilizado', aplicaciones: (c.aplicaciones || []).filter(a => num(a.valor)).map(a => { const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; }) }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)));
   };
   const pintarLineas = () => {
     $('kl').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="Código o nombre" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
       <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA"></td>
-      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${opts([['0', '0'], ['5', '5'], ['19', '19']], String(num(l.iva_pct)))}</select></td>
+      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
       <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
       <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin líneas.</td></tr>';
     resumen();
@@ -1821,10 +2006,11 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     $('kl').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') { c.lineas[Number(tr.dataset.i)].iva_pct = el.value; resumen(); } });
     $('kl').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintarLineas(); });
     $('addK').onclick = () => { const u = c.lineas.at(-1) || {}; c.lineas.push({ cuenta: u.cuenta || '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
+    ligarRet('compra', RET_C, () => r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
     $('prv').onchange = () => {
       // Al escoger el proveedor se proponen sus retenciones y su plazo.
       const t = terc($('prv').value); if (!t || id) return resumen();
-      $('krf').value = num(t.ret_compra_fuente_pct) || ''; $('kri').value = num(t.ret_compra_iva_pct) || ''; $('krica').value = num(t.ret_compra_ica_milaje) || '';
+      $('krf').value = num(t.ret_compra_fuente_pct) || ''; $('kri').value = num(t.ret_compra_iva_pct) || ''; $('krica').value = num(t.ret_compra_ica_milaje) || ''; syncRet('compra', RET_C);
       if (t.plazo_dias > 0 && !$('kv').value) $('kv').value = sumarDias($('kf').value || hoy(), t.plazo_dias);
       resumen();
     };
@@ -1844,7 +2030,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     try {
       const t = esCE ? { base: 0, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: totalEgreso(c), neto: totalEgreso(c) } : totalesCompra(c.lineas, c);
       const row = { empresa_id: S.eid, tipo, fecha: c.fecha, vence: esCE ? null : (c.vence || null), tercero_id: c.tercero_id, num_proveedor: c.num_proveedor || '', observaciones: c.observaciones || '',
-        lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '',
+        lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '', retenciones: esCE ? {} : (c.retenciones || {}),
         cuenta_pago: c.cuenta_pago || '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t };
       let g;
       if (id) g = await store.save('compras', { ...row, id });
@@ -1875,7 +2061,7 @@ function hojaCompra(c, imprimir) {
         ${num(c.retefuente) ? `<dt>Retefuente ${num(c.retefuente_pct)}%</dt><dd class="mono">−${money(c.retefuente)}</dd>` : ''}${num(c.reteiva) ? `<dt>ReteIVA ${num(c.reteiva_pct)}%</dt><dd class="mono">−${money(c.reteiva)}</dd>` : ''}${num(c.reteica) ? `<dt>ReteICA ${num(c.reteica_milaje)}‰</dt><dd class="mono">−${money(c.reteica)}</dd>` : ''}
         <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd>${s ? `<dt>Pagado</dt><dd class="mono">${money(s.pagado)}</dd><dt class="strong">Saldo</dt><dd class="mono strong">${money(s.saldo)}</dd>` : ''}</dl>`}
     ${c.observaciones ? `<p><b>Observaciones:</b> ${esc(c.observaciones)}</p>` : ''}${imprimir && c.estado === 'anulado' ? '<p><b>ANULADO</b></p>' : ''}
-    ${imprimir ? `<h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad))}<div class="firmas"><span>Elaboró</span><span>${c.tipo === 'CE' ? 'Recibí conforme' : 'Aprobó'}</span></div><p class="rep-small">Elaborado con AGAsoft.</p>` : ''}`;
+    ${imprimir ? `<h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)))}<div class="firmas"><span>Elaboró</span><span>${c.tipo === 'CE' ? 'Recibí conforme' : 'Aprobó'}</span></div><p class="rep-small">Elaborado con AGAsoft.</p>` : ''}`;
 }
 function vCompra(m, id) {
   const c = compraById(id); if (!c) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
@@ -1885,7 +2071,7 @@ function vCompra(m, id) {
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/compras/${c.tipo}">← ${T.plural}</a><h2>${esc(nomCompra(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
     <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     <section class="panel stack">${hojaCompra(c)}</section>
-    <section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad))}${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}</section>
+    <section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)))}${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}</section>
     ${pagos.length ? `<section class="panel stack noprint"><h3>Pagos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${pagos.map(e => `<tr class="click" data-go="#/compra/${e.id}"><td>${fFecha(e.fecha)}</td><td><a href="#/compra/${e.id}">Egreso ${e.numero}</a></td><td class="r mono">${money(e.aplicaciones.find(a => a.compra_id === id).valor)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
   $('imprimir').onclick = () => { $('print').innerHTML = hojaCompra(c, true); const t = document.title; document.title = `${nomCompra(c)} - ${emp().nombre}`; window.print(); document.title = t; };
   if ($('anular')) $('anular').onclick = () => {
