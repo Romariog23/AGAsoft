@@ -121,6 +121,7 @@ function supabaseStore(url, key) {
 
 const MSG = {
   'Invalid login credentials': 'Correo o clave incorrectos.',
+  'Email not confirmed': 'Falta confirmar el correo: abre el enlace que te llegó al registrarte, o pídele al administrador que lo confirme.',
   'User already registered': 'Ese correo ya tiene cuenta. Entra con tu clave.',
   'duplicate key value violates unique constraint': 'Ya existe un registro con ese número.',
   'new row violates row-level security policy': 'No tienes permiso para hacer eso en esta empresa.',
