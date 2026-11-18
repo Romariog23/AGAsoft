@@ -4,7 +4,7 @@ import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, e
 import { datosEjemplo } from './ejemplo.js';
 import { COLOMBIA } from './colombia.js';
 import { planInicial, RUBROS, RUBRO, PARAMETROS, parametrosPorDefecto, nivelDe } from './puc.js';
-import { asiento, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -100,7 +100,7 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
-  ['-', 'Contabilidad'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['productos', 'Productos y servicios'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
@@ -128,7 +128,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : v);
+  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v);
   const m = $('main');
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
@@ -145,6 +145,10 @@ function route() {
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
+    if (v === 'comprobantes') return vComprobantes(m);
+    if (v === 'comp') return vComp(m, arg);
+    if (v === 'compnuevo') return vCompEditor(m, { tipo: q.get('tipo') });
+    if (v === 'compeditar') return vCompEditor(m, { id: arg });
     if (v === 'balance') return vBalance(m);
     if (v === 'auxiliar') return vAuxiliar(m, q);
     if (v === 'esf') return vEsf(m);
@@ -953,7 +957,7 @@ const movs = () => movimientos({ ...S.d, param: param() });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
 const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
 const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: hoy() };
-const linkDoc = m => `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
+const linkDoc = m => m.origen === 'comp' ? `<a class="mono" href="#/comp/${m.doc_id}">${esc(TIPOS_COMP[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
 const valor = v => v ? money(v) : '';
 function tablaAsiento(ms) {
   if (!ms.length) return '<p class="muted">Este documento no genera movimientos.</p>';
@@ -1113,3 +1117,195 @@ function vEr(m) {
 
 iniciar().catch(e => { document.body.insertAdjacentHTML('afterbegin', `<p class="err" style="padding:16px">No se pudo iniciar AGAsoft: ${esc(e.message)}</p>`); });
 void dvOf;
+
+/* ---------- Comprobantes contables (notas de contabilidad y saldos iniciales) ---------- */
+const comps = () => S.d?.comprobantes || [];
+const compById = id => comps().find(c => c.id === id);
+const nomComp = c => `${TIPOS_COMP[c.tipo].nombre} ${c.numero}`;
+const valorComp = c => r2((c.lineas || []).reduce((s, l) => s + num(l.debito), 0));
+const siguienteComp = tipo => Math.max(0, ...comps().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
+// Cuentas auxiliares: las que no tienen subcuentas en el plan.
+function cuentasAux() {
+  const l = [...S.d.cuentas].filter(c => c.activa !== false).sort((a, b) => a.codigo.localeCompare(b.codigo));
+  return l.filter((c, i) => c.codigo.length >= 4 && !(l[i + 1] && l[i + 1].codigo.startsWith(c.codigo)));
+}
+// Valores como vienen de Excel en Colombia: "1.234.567,89", "$ 1,234,567.89", "-850000".
+function parseValor(v) {
+  let s = String(v ?? '').replace(/[$\s]/g, '').replace(/^\((.*)\)$/, '-$1');
+  if (!s) return 0;
+  const coma = s.lastIndexOf(','), punto = s.lastIndexOf('.');
+  if (coma >= 0 && punto >= 0) s = coma > punto ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (coma >= 0) s = /,\d{3}(,\d{3})*$/.test(s) && !/,\d{1,2}$/.test(s) && s.split(',').length > 2 ? s.replace(/,/g, '') : s.replace(/\./g, '').replace(',', '.');
+  else if (punto >= 0 && /^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  return num(s);
+}
+
+function vComprobantes(m) {
+  let q = '', tipo = '', anulados = false;
+  m.innerHTML = `<header class="vhead"><div><h2>Comprobantes contables</h2><p class="sub">Notas de contabilidad para ajustes, depreciaciones, provisiones y cierres, y los saldos iniciales de la empresa.</p></div>
+    <div class="row"><a class="btn" href="#/compnuevo?tipo=SI">Saldos iniciales</a><a class="btn primary" href="#/compnuevo?tipo=CC">Nueva nota de contabilidad</a></div></header>
+    <div class="row filters"><input id="q" type="search" placeholder="Buscar por número, descripción o cuenta"><select id="tp" aria-label="Tipo"><option value="">Todos</option>${Object.entries(TIPOS_COMP).map(([k, v]) => `<option value="${k}">${v.plural}</option>`).join('')}</select>
+    <label class="check"><input type="checkbox" id="anu"> Ver anulados</label></div>
+    <section class="panel" id="lst"></section>`;
+  const pintar = () => {
+    const l = comps().filter(c => (!tipo || c.tipo === tipo) && (anulados || c.estado !== 'anulado') && (!q || `${c.numero} ${c.descripcion} ${(c.lineas || []).map(x => `${x.cuenta} ${x.detalle}`).join(' ')}`.toLowerCase().includes(q)))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
+    $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Descripción</th><th class="r">Valor</th><th></th></tr></thead><tbody>
+      ${l.map(c => `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/comp/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="nowrap"><a href="#/comp/${c.id}">${esc(nomComp(c))}</a></td><td>${esc(c.descripcion)}</td><td class="r mono">${money(valorComp(c))}</td><td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : `<p class="muted">${q || tipo ? 'Ningún comprobante coincide.' : 'Todavía no hay comprobantes. Empieza por los saldos iniciales si la empresa ya venía funcionando.'}</p>`;
+  };
+  $('q').oninput = () => { q = $('q').value.trim().toLowerCase(); pintar(); };
+  $('tp').onchange = () => { tipo = $('tp').value; pintar(); };
+  $('anu').onchange = () => { anulados = $('anu').checked; pintar(); };
+  pintar();
+}
+
+function vCompEditor(m, { id, tipo }) {
+  let c;
+  if (id) {
+    const x = compById(id);
+    if (!x) { m.innerHTML = '<p>No se encontró el comprobante.</p>'; return; }
+    if (x.estado === 'anulado') { location.replace('#/comp/' + id); return; }
+    c = { ...x, lineas: (x.lineas || []).map(l => ({ ...l })) };
+  } else {
+    if (!TIPOS_COMP[tipo]) tipo = 'CC';
+    const linea0 = () => ({ cuenta: '', tercero_id: '', detalle: '', debito: '', credito: '' });
+    c = { empresa_id: S.eid, tipo, fecha: tipo === 'SI' ? hoy().slice(0, 4) + '-01-01' : hoy(), descripcion: tipo === 'SI' ? 'Saldos iniciales' : '', lineas: [linea0(), linea0()] };
+  }
+  const T = TIPOS_COMP[c.tipo];
+  const aux = cuentasAux(), idx = idxCuentas();
+  const terceros = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const nuevaLinea = () => ({ cuenta: '', tercero_id: '', detalle: '', debito: '', credito: '' });
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${id ? `Editar ${esc(nomComp(c))}` : `Nuevo: ${T.nombre.toLowerCase()}`}</h2>
+    <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
+  <form id="ce" class="stack" novalidate>
+    <section class="panel grid-doc">
+      <div><label for="cf">Fecha</label><input id="cf" type="date" value="${c.fecha}" required></div>
+      <div><label>Número</label><p class="mono">${id ? c.numero : `${siguienteComp(c.tipo)} (se asigna al guardar)`}</p></div>
+      <div class="span2"><label for="cd">Descripción</label><input id="cd" maxlength="300" value="${esc(c.descripcion)}" placeholder="${c.tipo === 'SI' ? 'Saldos iniciales' : 'Ej.: Depreciación de noviembre'}"></div>
+    </section>
+    <section class="panel stack"><div class="vhead"><h3>Movimientos</h3><div class="row"><button type="button" id="impL">Importar CSV</button><button type="button" id="addL">+ Agregar línea</button></div></div>
+      <datalist id="ctasComp">${aux.map(x => `<option value="${x.codigo}">${esc(x.nombre)}</option>`).join('')}</datalist>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
+      <div class="totbox" id="ctot"></div>
+    </section>
+    <div class="err" id="ceErr" hidden></div>
+    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/comp/' + id : '#/comprobantes'}">Cancelar</a><button type="submit" class="primary" id="ceSave">Guardar</button></div>
+  </form>`;
+  const nomDe = cod => cod ? (idx[cod]?.nombre || 'No existe en el plan') : '';
+  const pintar = () => {
+    $('lns').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" inputmode="numeric"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
+      <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero"><option value="">—</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
+      <td data-l="Detalle" class="c-desc"><input data-k="detalle" value="${esc(l.detalle)}" maxlength="200" aria-label="Detalle"></td>
+      <td data-l="Débito"><input data-k="debito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.debito) || ''}" aria-label="Débito"></td>
+      <td data-l="Crédito"><input data-k="credito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.credito) || ''}" aria-label="Crédito"></td>
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin líneas.</td></tr>';
+    totales_();
+  };
+  const totales_ = () => {
+    const d = r2(c.lineas.reduce((s, l) => s + num(l.debito), 0)), k = r2(c.lineas.reduce((s, l) => s + num(l.credito), 0)), dif = r2(d - k);
+    $('ctot').innerHTML = `<dl class="tot"><dt>Débitos</dt><dd class="mono">${money(d)}</dd><dt>Créditos</dt><dd class="mono">${money(k)}</dd>
+      <dt class="strong">Diferencia</dt><dd class="mono strong ${dif ? 'neg' : ''}">${dif ? money(dif) : 'Cuadrado ✓'}</dd></dl>`;
+  };
+  $('lns').addEventListener('input', ev => {
+    const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
+    const l = c.lineas[Number(tr.dataset.i)];
+    l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
+    if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = nomDe(l.cuenta);
+    if (el.dataset.k === 'debito' || el.dataset.k === 'credito') totales_();
+  });
+  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
+  $('lns').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });
+  $('addL').onclick = () => {
+    // La línea nueva propone el valor que falta para cuadrar.
+    const dif = r2(c.lineas.reduce((s, l) => s + num(l.debito) - num(l.credito), 0));
+    c.lineas.push({ ...nuevaLinea(), detalle: c.lineas.at(-1)?.detalle || '', debito: dif < 0 ? -dif : '', credito: dif > 0 ? dif : '' });
+    pintar(); $('lns').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=cuenta]`)?.focus();
+  };
+  $('impL').onclick = () => importarLineas(c, pintar);
+  $('ce').onsubmit = async ev => {
+    ev.preventDefault();
+    c.fecha = $('cf').value; c.descripcion = $('cd').value.trim();
+    const lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito))
+      .map(l => ({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)) }));
+    const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas);
+    if (errs.length) { $('ceErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>') + (errs.length > 8 ? `<br>…y ${errs.length - 8} más.` : ''); $('ceErr').hidden = false; return; }
+    $('ceErr').hidden = true; $('ceSave').disabled = true;
+    try {
+      const row = { empresa_id: S.eid, tipo: c.tipo, fecha: c.fecha, descripcion: c.descripcion, lineas };
+      let g;
+      if (id) g = await store.save('comprobantes', { ...row, id });
+      else {
+        try { g = await store.save('comprobantes', { ...row, numero: siguienteComp(c.tipo), estado: 'contabilizado' }); }
+        catch (e) { await cargarEmpresa(); g = await store.save('comprobantes', { ...row, numero: siguienteComp(c.tipo), estado: 'contabilizado' }); }
+      }
+      await cargarEmpresa(); toast('Comprobante guardado.'); location.hash = '#/comp/' + g.id;
+    } catch (e) { $('ceErr').textContent = /comprobantes/.test(e.message) && /exist|schema|relation/i.test(e.message) ? 'Falta crear la tabla de comprobantes en Supabase (archivo supabase/004_comprobantes.sql).' : e.message; $('ceErr').hidden = false; }
+    finally { $('ceSave').disabled = false; }
+  };
+  pintar();
+}
+
+// Importa líneas desde un CSV (por ejemplo el balance de prueba exportado de Alegra o World Office).
+function importarLineas(c, alTerminar) {
+  const COLS_L = { cuenta: ['cuenta', 'codigo', 'codigocuenta', 'cuentacontable', 'codcuenta'], tercero: ['nit', 'tercero', 'identificacion', 'numeroidentificacion', 'documento', 'nittercero'],
+    detalle: ['detalle', 'descripcion', 'concepto'], debito: ['debito', 'debitos', 'debe'], credito: ['credito', 'creditos', 'haber'], saldo: ['saldo', 'saldofinal', 'saldoactual', 'nuevosaldo'] };
+  const f = dialogo(`<h2>Importar movimientos</h2><p>Guarda la hoja como <b>CSV</b>. Debe tener la cuenta y los valores, en columnas <b>Débito</b> y <b>Crédito</b> o en una sola columna <b>Saldo</b>. Por ejemplo:</p>
+    <pre class="mono">Cuenta;NIT;Detalle;Débito;Crédito\n11100501;;Saldo banco;15.000.000;0\n31050501;;Capital;0;15.000.000</pre>
+    <p class="hint">Si el archivo trae cuentas de grupo (1, 11, 1110…) y también sus auxiliares, solo se toman las auxiliares para no sumar dos veces. Con la columna Saldo, el valor positivo va a la naturaleza de la cuenta.</p>
+    <input type="file" name="archivo" accept=".csv,text/csv" required><div id="ilPrev"></div>${pie('Importar')}`, async () => {
+    const filas = f._filas; if (!filas?.length) throw new Error('Escoge un archivo con datos.');
+    const idx = idxCuentas(), codigos = filas.map(x => x.cuenta);
+    const hojas = filas.filter(x => !codigos.some(o => o.length > x.cuenta.length && o.startsWith(x.cuenta)));
+    let sinTercero = 0;
+    const nuevas = hojas.map(x => {
+      let d = parseValor(x.debito), k = parseValor(x.credito);
+      if (x.saldo !== undefined && !x.debito && !x.credito) {
+        const s = parseValor(x.saldo), nat = idx[x.cuenta]?.naturaleza || (/^[1567]/.test(x.cuenta) ? 'D' : 'C');
+        if ((nat === 'D') === (s >= 0)) d = Math.abs(s); else k = Math.abs(s);
+      }
+      const neto = r2(d - k); d = neto > 0 ? neto : 0; k = neto < 0 ? -neto : 0;
+      const nit = String(x.tercero || '').split('-')[0].replace(/\D/g, '');
+      const t = nit ? S.d.terceros.find(y => y.numero === nit) : null;
+      if (nit && !t) sinTercero++;
+      return { cuenta: x.cuenta, tercero_id: t?.id || '', detalle: [x.detalle, nit && !t ? `NIT ${nit}` : ''].filter(Boolean).join(' · ') || c.descripcion || '', debito: d || '', credito: k || '' };
+    }).filter(l => l.debito || l.credito);
+    c.lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito)).concat(nuevas);
+    alTerminar();
+    toast(`${nuevas.length} líneas importadas.${sinTercero ? ` ${sinTercero} con un NIT que no está en Clientes (quedó en el detalle).` : ''}`);
+  });
+  f.querySelector('[name=archivo]').onchange = async ev => {
+    const file = ev.target.files[0]; if (!file) return;
+    let txt = await file.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
+    const rows = parseCSV(txt); const hi = rows.findIndex(r => r.some(h => COLS_L.cuenta.includes(norm(h))));
+    const head = (rows[hi] || []).map(norm), map = {};
+    for (const [k, alias] of Object.entries(COLS_L)) { const i = head.findIndex(h => alias.includes(h)); if (i >= 0) map[k] = i; }
+    const ok = hi >= 0 && (map.debito !== undefined || map.credito !== undefined || map.saldo !== undefined);
+    f._filas = ok ? rows.slice(hi + 1).map(r => Object.fromEntries(Object.entries(map).map(([k, i]) => [k, (r[i] || '').trim()]))).map(x => ({ ...x, cuenta: String(x.cuenta || '').replace(/\D/g, '') })).filter(x => x.cuenta) : null;
+    $('ilPrev').innerHTML = !ok ? '<p class="err">No encontré la columna de cuenta y la de valores (Débito y Crédito, o Saldo). Revisa los títulos.</p>' : `<p class="hint">${f._filas.length} filas con cuenta. Columnas reconocidas: ${Object.keys(map).join(', ')}.</p>`;
+  };
+}
+
+function vComp(m, id) {
+  const c = compById(id);
+  if (!c) { m.innerHTML = '<p>No se encontró el comprobante.</p>'; return; }
+  const anulado = c.estado === 'anulado';
+  const ms = asientoComprobante({ ...c, estado: 'contabilizado' });
+  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${esc(nomComp(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
+    <div class="row">${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compeditar/${c.id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <section class="panel stack">${hojaComp(c, ms)}</section>
+    ${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}`;
+  $('imprimir').onclick = () => { $('print').innerHTML = hojaComp(c, ms, true); const t = document.title; document.title = `${nomComp(c)} - ${emp().nombre}`; window.print(); document.title = t; };
+  if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomComp(c))}</h2><p>Sus movimientos dejan de sumar en el balance, el auxiliar y los estados financieros. El número no se vuelve a usar.</p>
+    <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular comprobante')}`, async fd => {
+    const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
+    await store.save('comprobantes', { id: c.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() });
+    await cargarEmpresa(); toast('Comprobante anulado.'); route();
+  });
+}
+function hojaComp(c, ms, imprimir) {
+  return `${cabInforme(TIPOS_COMP[c.tipo].nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
+    ${c.descripcion ? `<p><b>Descripción:</b> ${esc(c.descripcion)}</p>` : ''}${imprimir && c.estado === 'anulado' ? '<p><b>ANULADO</b></p>' : ''}
+    ${tablaAsiento(ms)}${imprimir ? '<div class="firmas"><span>Elaboró</span><span>Aprobó</span></div><p class="rep-small">Elaborado con AGAsoft.</p>' : ''}`;
+}

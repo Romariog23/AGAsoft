@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { totales } from '../src/calc.js';
 import { planInicial } from '../src/puc.js';
-import { asiento, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera } from '../src/contab.js';
+import { asiento, asientoComprobante, erroresComprobante, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera } from '../src/contab.js';
 
 const cuadra = ms => Math.abs(ms.reduce((s, m) => s + m.debito - m.credito, 0)) < 0.001;
 const its = [{ id: 'i1', documento_id: 'f1', cantidad: 1, precio: 1000000, iva_pct: 19, producto_id: 'p1' }, { id: 'i2', documento_id: 'f1', cantidad: 2, precio: 50000, iva_pct: 0, producto_id: 'p2' }];
@@ -60,5 +60,23 @@ test('cuentas propias del producto en nota débito y nota crédito', () => {
   assert.equal(b.find(m => m.cuenta === '240801').debito, 3800);
   // Sin cuenta propia: la nota débito por intereses va a la de intereses de la empresa.
   const c = asiento(nd, { ...ctx, productos: [] }); assert.equal(c.find(m => m.cuenta === '421005').credito, 10000);
+});
+
+test('comprobantes manuales: asiento, validación e informes', () => {
+  const plan = planInicial();
+  const si = { id: 'c1', tipo: 'SI', numero: 1, fecha: '2026-01-01', descripcion: 'Saldos iniciales', estado: 'contabilizado',
+    lineas: [{ cuenta: '111005', debito: 15000000, credito: 0 }, { cuenta: '3105', debito: 0, credito: 15000000, tercero_id: 't1' }] };
+  const a = asientoComprobante(si);
+  assert.ok(cuadra(a)); assert.equal(a.length, 2); assert.equal(a[0].ref, 'SI 1'); assert.equal(a[1].tercero_id, 't1');
+  assert.deepEqual(erroresComprobante(si, plan), []);
+  assert.equal(asientoComprobante({ ...si, estado: 'anulado' }).length, 0);
+  const malo = { ...si, lineas: [{ cuenta: '1110', debito: 10, credito: 0 }, { cuenta: '999999', debito: 0, credito: 5 }, { cuenta: '3105', debito: 1, credito: 1 }] };
+  const e = erroresComprobante(malo, plan).join(' | ');
+  assert.match(e, /subcuentas/); assert.match(e, /no existe/); assert.match(e, /no los dos/); assert.match(e, /No cuadra/);
+  const ms = movimientos({ ...S, comprobantes: [si, { ...si, id: 'c2', numero: 2, estado: 'anulado' }] });
+  assert.equal(ms.filter(m => m.origen === 'comp').length, 2);
+  const b = balancePrueba(ms, plan, '2026-01-01', '2026-12-31');
+  assert.equal(b.debitos, b.creditos);
+  assert.equal(b.filas.find(f => f.codigo === '3105').final, 15000000);
 });
 
