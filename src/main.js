@@ -100,8 +100,9 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
-  ['-', 'Contabilidad'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['puc', 'Plan de cuentas PUC y NIIF'],
-  ['-', 'Datos'], ['clientes', 'Clientes'], ['productos', 'Productos y servicios'], ['numeraciones', 'Numeraciones'], ['empresa', 'Empresa'],
+  ['-', 'Contabilidad'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['-', 'Datos'], ['clientes', 'Clientes'], ['productos', 'Productos y servicios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -128,7 +129,7 @@ function route() {
     if (v === 'clientes') return vClientes(m);
     if (v === 'productos') return vProductos(m);
     if (v === 'numeraciones') return vNumeraciones(m);
-    if (v === 'empresa') return vEmpresa(m);
+    if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'balance') return vBalance(m);
@@ -288,14 +289,15 @@ function formEmpresa(e = {}) {
   const f = dialogo(`<h2>${e.id ? 'Datos de la empresa' : 'Nueva empresa'}</h2>${camposEmpresa(e)}${pie(e.id ? 'Guardar' : 'Crear empresa')}`, async fd => {
     await guardarEmpresa(fd, e);
     toast(e.id ? 'Datos guardados.' : 'Empresa creada. Ahora registra la numeración de facturas.');
-    location.hash = e.id ? '#/empresa' : '#/numeraciones'; route();
+    location.hash = e.id ? '#/config' : '#/numeraciones'; route();
   }, { ancho: true });
   activarNit(f);
 }
 function vEmpresa(m) {
   const e = emp();
-  m.innerHTML = `<header class="vhead"><h2>Empresa</h2><button class="primary" id="edit">Editar datos</button></header>
-  <section class="panel">
+  const res = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa);
+  m.innerHTML = `<header class="vhead"><div><h2>Configuración</h2><p class="sub">Datos de la empresa, resolución de facturación y ajustes contables.</p></div></header>
+  <section class="panel stack"><header class="vhead"><h3>Datos de la empresa</h3><button class="primary" id="edit">Modificar</button></header>
     <dl class="kv">
       <dt>Nombre</dt><dd>${esc(e.nombre)}</dd>
       <dt>NIT</dt><dd class="mono">${fmtNit(e.nit)}-${e.dv}</dd>
@@ -305,12 +307,20 @@ function vEmpresa(m) {
       <dt>Contacto</dt><dd>${esc([e.telefono, e.correo].filter(Boolean).join(' · ')) || '—'}</dd>
     </dl>
   </section>
+  <section class="panel stack"><header class="vhead"><h3>Resolución de facturación DIAN</h3><button class="primary" id="editRes">${res ? 'Modificar' : 'Registrar'}</button></header>
+    ${res ? `<dl class="kv"><dt>Resolución</dt><dd class="mono">${esc(res.resolucion)}${res.fecha_resolucion ? ' del ' + fFecha(res.fecha_resolucion) : ''}</dd>
+      <dt>Prefijo y rango</dt><dd class="mono">${esc(res.prefijo) || '—'} ${res.desde} a ${res.hasta}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(res.prefijo)} ${res.siguiente}</dd>
+      <dt>Vigencia</dt><dd>${res.vigencia_hasta ? `${res.vigencia_desde ? fFecha(res.vigencia_desde) + ' a ' : 'hasta '}${fFecha(res.vigencia_hasta)}` : '—'}</dd></dl>`
+      : '<p class="muted">Todavía no has registrado la resolución. Sin ella no se pueden emitir facturas.</p>'}
+    <p class="hint">Cuando la DIAN te dé una resolución nueva, regístrala aquí y queda como la activa. Las notas y los recibos se manejan en <a href="#/numeraciones">Numeraciones</a>.</p></section>
+  <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
   ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
     <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
     <table class="tbl"><tbody>${S.d.miembros.map(x => `<tr><td>${esc(x.correo)}</td><td>${x.rol === 'consulta' ? 'Consulta' : 'Responsable'}</td><td class="r"><button class="ghost" data-delm="${x.id}">Quitar</button></td></tr>`).join('') || '<tr><td class="muted">Solo tú tienes acceso.</td></tr>'}</tbody></table></section>` : ''}
   <section class="panel stack danger"><h3>Zona de cuidado</h3>
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
+  $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE' });
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
