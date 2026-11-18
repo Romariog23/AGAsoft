@@ -209,3 +209,13 @@ test('medios magnéticos: reglas configuradas por la empresa', async () => {
   const g = formato('1001', ms, '2026', reglas);
   assert.deepEqual(g.map(x => x.concepto), ['5002', '5003']);
 });
+test('medios magnéticos: cálculo débito, crédito, saldo o pago por regla', async () => {
+  const { formato, reglasExogena } = await import('../src/exogena.js');
+  const mv = (cuenta, debito, credito, fecha) => ({ cuenta, debito, credito, tercero_id: 't9', fecha, tipo: 'CC' });
+  const ms = [mv('51101001', 1000, 0, '2026-03-01'), mv('51101001', 0, 200, '2026-04-01'), mv('51101001', 500, 0, '2025-06-01')];
+  const con = calculo => formato('1001', ms, '2026', [...reglasExogena(), { id: 'z', formato: '1001', cuenta: '5110', concepto: '5002', columna: 'pago', calculo }])[0].pago;
+  assert.equal(con('pago'), 800);
+  assert.equal(con('debito'), 1000);
+  assert.equal(con('credito'), 200);
+  assert.equal(con('saldo'), 1300); // acumulado desde el inicio
+});
