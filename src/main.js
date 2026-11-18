@@ -793,7 +793,8 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       const c = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones.filter(a => a.recibo_id !== doc.id)).map(x => [x.factura.id, x]));
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
     }
-    try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
+    // Los que no son electrónicos crean su numeración solos si falta.
+    if (esElec()) try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
   if ($('clase')) $('clase').onchange = () => { doc.electronica = $('clase').value === 'electronica'; $('claseTag').innerHTML = claseTag(doc); pintarBotones(); };
@@ -810,13 +811,18 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       try { const g = await guardar(); toast(`Cambios guardados: ${nomDoc(g)}.`); location.hash = '#/doc/' + g.id; } catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
       return;
     }
-    const n = numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones);
     if (!esElec()) {
       $('emitB').disabled = true;
-      try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`Guardado y contabilizado: ${nomDoc(e)}.`); location.hash = '#/doc/' + e.id; }
-      catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
+      const nuevo = !id; let g = null;
+      try { g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`Guardado y contabilizado: ${nomDoc(e)}.`); location.hash = '#/doc/' + e.id; }
+      catch (e) {
+        // Si no pudo tomar el consecutivo, no deja un borrador suelto.
+        if (nuevo && g) { try { await store.remove('documentos', g.id); await cargarEmpresa(); } catch (_) {} doc.id = undefined; id = undefined; }
+        errEd(e.message);
+      } finally { $('emitB').disabled = false; }
       return;
     }
+    const n = numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones);
     if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar: se corrige con una nota.`, 'Emitir')) return;
     $('emitB').disabled = true;
     try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`${nomDoc(e)} ${tipo === 'RC' ? 'emitido' : 'emitida'}.`); location.hash = '#/doc/' + e.id; }
