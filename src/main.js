@@ -1,5 +1,5 @@
 import './style.css';
-import { crearStore, numeracionPara } from './store.js';
+import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
@@ -142,7 +142,7 @@ function route() {
   try {
     if (v === 'inicio') return vInicio(m);
     if (TIPOS[v]) return vLista(m, v);
-    if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero') });
+    if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero'), clase: q.get('clase') });
     if (v === 'editar') return vEditor(m, { id: arg });
     if (v === 'doc') return vDoc(m, arg);
     if (v === 'cartera') return vCartera(m);
@@ -211,7 +211,7 @@ function pasoResolucion(m) {
     ev.preventDefault(); $('resErr').hidden = true;
     const fd = new FormData($('resF'));
     const row = { empresa_id: S.eid, tipo: 'FV', prefijo: String(fd.get('prefijo')).trim().toUpperCase(), resolucion: String(fd.get('resolucion')).trim(), fecha_resolucion: fd.get('fecha_resolucion') || null,
-      vigencia_desde: fd.get('vigencia_desde') || null, vigencia_hasta: fd.get('vigencia_hasta') || null, desde: Math.round(num(fd.get('desde'))) || 1, hasta: Math.round(num(fd.get('hasta'))), siguiente: Math.round(num(fd.get('siguiente'))) || 1, activa: true };
+      vigencia_desde: fd.get('vigencia_desde') || null, vigencia_hasta: fd.get('vigencia_hasta') || null, desde: Math.round(num(fd.get('desde'))) || 1, hasta: Math.round(num(fd.get('hasta'))), siguiente: Math.round(num(fd.get('siguiente'))) || 1, activa: true, electronica: true };
     const err = !/^[A-Z0-9]{0,4}$/.test(row.prefijo) ? 'El prefijo lleva máximo 4 letras o números.' : !row.resolucion ? 'Escribe el número de la resolución.' : row.hasta < row.desde ? 'Revisa el rango: "hasta" debe ser mayor que "desde".'
       : row.siguiente < row.desde || row.siguiente > row.hasta ? 'La siguiente factura debe estar dentro del rango.' : row.vigencia_desde && row.vigencia_hasta && row.vigencia_hasta < row.vigencia_desde ? 'La vigencia termina antes de empezar.' : '';
     if (err) { $('resErr').textContent = err; $('resErr').hidden = false; return; }
@@ -341,7 +341,8 @@ function formEmpresa(e = {}) {
 }
 function vEmpresa(m) {
   const e = emp();
-  const res = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa);
+  const res = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa && n.electronica);
+  const resN = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa && !n.electronica);
   m.innerHTML = `<header class="vhead"><div><h2>Configuración</h2><p class="sub">Datos de la empresa, resolución de facturación y ajustes contables.</p></div></header>
   <section class="panel stack"><header class="vhead"><h3>Datos de la empresa</h3><button class="primary" id="edit">Modificar</button></header>
     <dl class="kv">
@@ -359,6 +360,9 @@ function vEmpresa(m) {
       <dt>Vigencia</dt><dd>${res.vigencia_hasta ? `${res.vigencia_desde ? fFecha(res.vigencia_desde) + ' a ' : 'hasta '}${fFecha(res.vigencia_hasta)}` : '—'}</dd></dl>`
       : '<p class="muted">Todavía no has registrado la resolución. Sin ella no se pueden emitir facturas.</p>'}
     <p class="hint">Cuando la DIAN te dé una resolución nueva, regístrala aquí y queda como la activa. Las notas y los recibos se manejan en <a href="#/numeraciones">Numeraciones</a>.</p></section>
+  <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
+    ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
+    <p class="hint">Las facturas normales no se reportan a la DIAN y se pueden eliminar aunque estén emitidas.</p></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
   ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
     <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
@@ -366,7 +370,8 @@ function vEmpresa(m) {
   <section class="panel stack danger"><h3>Zona de cuidado</h3>
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
-  $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE' });
+  $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
@@ -408,10 +413,12 @@ function vInicio(m) {
 
 /* ---------- Listas de documentos ---------- */
 function estadoTag(d) {
-  if (d.estado === 'borrador') return '<span class="tag">Borrador</span>';
+  const c = d.tipo === 'RC' ? '' : ' ' + claseTag(d);
+  if (d.estado === 'borrador') return '<span class="tag">Borrador</span>' + c;
   if (d.estado === 'anulado') return '<span class="tag bad">Anulado</span>';
-  return '<span class="tag ok">Emitido</span>';
+  return '<span class="tag ok">Emitido</span>' + c;
 }
+const claseTag = d => d.electronica ? '<span class="tag el">Electrónica</span>' : '<span class="tag">Normal</span>';
 function tablaDocs(list, conTipo) {
   if (!list.length) return '';
   const cart = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones).map(c => [c.factura.id, c]));
@@ -426,7 +433,8 @@ document.addEventListener('click', ev => { const tr = ev.target.closest('tr[data
 function vLista(m, tipo) {
   const T = TIPOS[tipo];
   let q = '', est = '';
-  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2><a class="btn primary" href="#/nuevo/${tipo}">Nueva ${T.corto.toLowerCase().replace('recibo', 'recibo de caja')}</a></header>
+  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2>${tipo === 'FV' ? '<div class="row"><a class="btn" href="#/nuevo/FV?clase=normal">Nueva factura normal</a><a class="btn primary" href="#/nuevo/FV?clase=electronica">Nueva factura electrónica</a></div>'
+    : `<a class="btn primary" href="#/nuevo/${tipo}">Nueva ${T.corto.toLowerCase().replace('recibo', 'recibo de caja')}</a>`}</header>
     <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o cliente"><select id="est" aria-label="Estado"><option value="">Todos</option><option value="borrador">Borradores</option><option value="emitido">Emitidos</option>${tipo === 'RC' ? '<option value="anulado">Anulados</option>' : ''}</select></div>
     ${tipo === 'NC' || tipo === 'ND' ? `<p class="hint">Las notas se crean desde la factura que corrigen. También puedes crear una aquí y escoger la factura.</p>` : ''}
     <section class="panel" id="lst"></section>`;
@@ -445,7 +453,7 @@ function facturasCliente(tid) { return S.d.documentos.filter(d => d.tipo === 'FV
 function nuevoItem(p) { return { producto_id: p?.id || '', codigo: p?.codigo || '', descripcion: p?.nombre || '', unidad: p?.unidad || 'UND', cantidad: 1, precio: num(p?.precio), descuento_pct: 0, iva_pct: emp().responsable_iva ? num(p?.iva_pct ?? 19) : 0 }; }
 function retDe(t) { return t ? { retefuente_pct: num(t.retefuente_pct), reteiva_pct: num(t.reteiva_pct), reteica_milaje: num(t.reteica_milaje) } : { retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }; }
 
-function vEditor(m, { id, tipo, ref, tercero }) {
+function vEditor(m, { id, tipo, ref, tercero, clase }) {
   let doc, items, apl;
   if (id) {
     const d = docById(id);
@@ -457,19 +465,23 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     const f = ref && docById(ref);
     const t = terc(f?.tercero_id || tercero);
     doc = { empresa_id: S.eid, tipo, fecha: hoy(), tercero_id: t?.id || '', forma_pago: t?.plazo_dias > 0 ? 'credito' : 'contado', vence: t?.plazo_dias > 0 ? sumarDias(hoy(), t.plazo_dias) : '', medio_pago: 'transferencia', ref_id: f?.tipo === 'FV' && (tipo === 'NC' || tipo === 'ND') ? f.id : '', concepto: tipo === 'NC' ? '1' : tipo === 'ND' ? '4' : '', observaciones: '', anticipo: 0, ...retDe(t) };
+    // Clase de la factura: la que se pidió; si no, normal salvo que solo exista numeración electrónica. Las notas heredan la de su factura.
+    const numFV = el => S.d.numeraciones.some(x => x.tipo === 'FV' && x.activa && !!x.electronica === el);
+    doc.electronica = tipo === 'FV' ? (clase ? clase === 'electronica' : !numFV(false) && numFV(true)) : (tipo === 'NC' || tipo === 'ND') ? !!f?.electronica : false;
     if (f && tipo !== 'RC') Object.assign(doc, { retefuente_pct: num(f.retefuente_pct), reteiva_pct: num(f.reteiva_pct), reteica_milaje: num(f.reteica_milaje) });
     items = tipo === 'NC' && f ? itemsDe(f.id).map(i => ({ ...i, id: undefined, documento_id: undefined })) : tipo === 'RC' ? [] : [nuevoItem()];
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
   const clientes = [...S.d.terceros].filter(t => t.es_cliente !== false || t.id === doc.tercero_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  m.innerHTML = `<header class="vhead"><div><h2>${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}</h2><p class="sub">Borrador: puedes cambiarlo hasta que lo emitas.</p></div></header>
+  m.innerHTML = `<header class="vhead"><div><h2>${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}${tipo === 'FV' ? ` <span id="claseTag">${claseTag(doc)}</span>` : ''}</h2><p class="sub">Borrador: puedes cambiarlo hasta que lo emitas.</p></div></header>
   <form id="ed" class="stack" novalidate>
     <section class="panel grid-doc">
       <div class="span2"><label for="cli">Cliente</label>
         <div class="row nowrap"><select id="cli" required><option value="">Escoge el cliente…</option>${clientes.map(t => `<option value="${t.id}" ${t.id === doc.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
         <button type="button" id="newCli" title="Crear cliente">+ Nuevo</button></div></div>
       <div><label for="fecha">Fecha</label><input id="fecha" type="date" value="${doc.fecha}" required></div>
+      ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase">${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
       ${tipo === 'FV' ? `<div><label for="fp">Forma de pago</label><select id="fp">${opts(FORMAS_PAGO, doc.forma_pago)}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
       ${tipo === 'FV' || esRC ? `<div><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
@@ -503,6 +515,7 @@ function vEditor(m, { id, tipo, ref, tercero }) {
 
   const leerCab = () => {
     doc.tercero_id = $('cli').value; doc.fecha = $('fecha').value;
+    if ($('clase')) doc.electronica = $('clase').value === 'electronica';
     if ($('fp')) { doc.forma_pago = $('fp').value; doc.vence = doc.forma_pago === 'credito' ? $('vence').value : doc.fecha; }
     if ($('mp')) doc.medio_pago = $('mp').value;
     if ($('ref')) { doc.ref_id = $('ref').value; doc.concepto = $('con').value; }
@@ -682,14 +695,16 @@ function vEditor(m, { id, tipo, ref, tercero }) {
     try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
+  if ($('clase')) $('clase').onchange = () => { doc.electronica = $('clase').value === 'electronica'; $('claseTag').innerHTML = claseTag(doc); };
   $('saveB').onclick = async () => { errEd(''); $('saveB').disabled = true; try { const g = await guardar(); toast('Borrador guardado.'); history.replaceState(null, '', '#/editar/' + g.id); } catch (e) { errEd(e.message); } finally { $('saveB').disabled = false; } };
   form.onsubmit = async ev => {
     ev.preventDefault(); errEd('');
     calcular();
     if (!doc.tercero_id) return errEd('Escoge el cliente.');
     const msg = validarEmision(); if (msg) return errEd(msg);
-    const n = S.d.numeraciones.find(x => x.tipo === tipo && x.activa);
-    if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar${tipo === 'RC' ? ', solo anular' : '; se corrige con una nota'}.`, 'Emitir')) return;
+    if (esNota) doc.electronica = !!docById(doc.ref_id)?.electronica;
+    const n = numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones);
+    if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar${tipo === 'RC' ? ', solo anular' : doc.electronica ? '; se corrige con una nota' : '; como no es electrónica, se puede eliminar si hace falta'}.`, 'Emitir')) return;
     $('emitB').disabled = true;
     try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`${nomDoc(e)} ${tipo === 'RC' ? 'emitido' : 'emitida'}.`); location.hash = '#/doc/' + e.id; }
     catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
@@ -708,13 +723,13 @@ function representacion(d) {
   const tot = d.tipo === 'RC' ? null : totales(its, d);
   const conc = d.tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND;
   return `<article class="rep">
-    ${d.tipo !== 'RC' ? '<p class="aviso">Documento de prueba: no ha sido transmitido ni validado por la DIAN. No es válido como factura electrónica.</p>' : ''}
+    ${d.tipo !== 'RC' && d.electronica ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
     ${d.estado === 'anulado' ? `<p class="aviso bad">ANULADO${d.anulado_motivo ? ': ' + esc(d.anulado_motivo) : ''}</p>` : ''}
     <header class="rep-head">
       <div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
         <p>${esc(ubic(e))}${e.telefono ? ' · Tel. ' + esc(e.telefono) : ''}${e.correo ? ' · ' + esc(e.correo) : ''}</p>
 ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
-      <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}</span><b class="mono">${esc(numDoc(d))}</b></div>
+      <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}${d.tipo === 'FV' && d.electronica ? ' ELECTRÓNICA' : ''}</span><b class="mono">${esc(numDoc(d))}</b></div>
     </header>
     ${d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? ', vigente hasta ' + fFecha(n.vigencia_hasta) : ''}.</p>` : ''}
     <section class="rep-grid">
@@ -758,12 +773,19 @@ function vDoc(m, id) {
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/${d.tipo}">← ${TIPOS[d.tipo].plural}</a><h2>${esc(nomDoc(d))}</h2></div>
     <div class="row">${d.tipo === 'FV' && d.estado === 'emitido' ? `${c?.saldo > 0.009 ? `<a class="btn" href="#/nuevo/RC?ref=${id}">Recibir pago</a>` : ''}<a class="btn" href="#/nuevo/NC?ref=${id}">Nota crédito</a><a class="btn" href="#/nuevo/ND?ref=${id}">Nota débito</a>` : ''}
     ${d.tipo === 'RC' && d.estado === 'emitido' ? '<button id="anular">Anular</button>' : ''}
+    ${d.tipo !== 'RC' && !d.electronica ? '<button id="eliminar">Eliminar</button>' : ''}
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
     ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
+  if ($('eliminar')) $('eliminar').onclick = async () => {
+    const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones);
+    if (motivo) return fail(new Error(motivo));
+    if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. No es electrónica, así que no se reportó a la DIAN.<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
+    try { await store.eliminar(d.id); await cargarEmpresa(); toast(`${nomDoc(d)} eliminada.`); location.hash = '#/' + d.tipo; } catch (e) { fail(e); }
+  };
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>Los pagos de este recibo dejan de aplicarse a las facturas.</p>
     <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular recibo')}`, async fd => {
     const mot = fd.get('motivo').trim(); if (!mot) throw new Error('Escribe el motivo.');
@@ -952,6 +974,7 @@ function formNumeracion(n = {}) {
   const usada = n.id && S.d.documentos.some(d => d.numeracion_id === n.id);
   const f = dialogo(`<h2>${n.id ? 'Editar numeración' : 'Nueva numeración'}</h2>
     <div class="grid2">${campoSel('tipo', 'Documento', Object.entries(TIPOS).map(([k, v]) => [k, v.nombre]), n.tipo || 'FV')}${campo('prefijo', 'Prefijo', n.prefijo, 'maxlength="4" class="mono" pattern="[A-Za-z0-9]{0,4}" placeholder="FE"')}</div>
+    <div id="wEl">${check('electronica', 'Factura electrónica (con resolución DIAN)', n.id ? !!n.electronica : n.electronica ?? true)}<p class="hint">Desmárcala para la numeración de facturas normales (no electrónicas), que se pueden eliminar.</p></div>
     <div id="wRes" class="stack"><div class="grid2">${campo('resolucion', 'Número de resolución DIAN', n.resolucion, 'class="mono" inputmode="numeric"')}${campo('fecha_resolucion', 'Fecha de la resolución', n.fecha_resolucion, 'type="date"')}</div>
     <div class="grid2">${campo('vigencia_desde', 'Vigente desde', n.vigencia_desde, 'type="date"')}${campo('vigencia_hasta', 'Vigente hasta', n.vigencia_hasta, 'type="date"')}</div></div>
     <div class="grid3">${campo('desde', 'Desde', n.desde ?? 1, 'type="number" min="1" required class="mono"')}${campo('hasta', 'Hasta', n.hasta ?? '', 'type="number" min="1" required class="mono"')}${campo('siguiente', 'Siguiente número', n.siguiente ?? 1, 'type="number" min="1" required class="mono"')}</div>
@@ -960,30 +983,35 @@ function formNumeracion(n = {}) {
     ${usada ? '<p class="hint">Esta numeración ya tiene documentos: solo cambia el rango o la vigencia si la DIAN lo amplió.</p>' : ''}
     ${pie()}`, async fd => {
     const row = { empresa_id: S.eid, tipo: fd.get('tipo'), prefijo: String(fd.get('prefijo')).trim().toUpperCase(), resolucion: String(fd.get('resolucion') || '').trim(), fecha_resolucion: fd.get('fecha_resolucion') || null,
-      vigencia_desde: fd.get('vigencia_desde') || null, vigencia_hasta: fd.get('vigencia_hasta') || null, desde: Math.round(num(fd.get('desde'))), hasta: Math.round(num(fd.get('hasta'))), siguiente: Math.round(num(fd.get('siguiente'))), activa: fd.get('activa') === 'on' };
+      vigencia_desde: fd.get('vigencia_desde') || null, vigencia_hasta: fd.get('vigencia_hasta') || null, desde: Math.round(num(fd.get('desde'))), hasta: Math.round(num(fd.get('hasta'))), siguiente: Math.round(num(fd.get('siguiente'))), activa: fd.get('activa') === 'on', electronica: fd.get('tipo') === 'FV' && fd.get('electronica') === 'on' };
     if (!/^[A-Z0-9]{0,4}$/.test(row.prefijo)) throw new Error('El prefijo lleva máximo 4 letras o números.');
     if (row.desde < 1 || row.hasta < row.desde) throw new Error('Revisa el rango: "Hasta" debe ser mayor o igual que "Desde".');
     if (row.siguiente < row.desde || row.siguiente > row.hasta + 1) throw new Error('El siguiente número debe estar dentro del rango.');
-    if (row.tipo === 'FV' && !row.resolucion) throw new Error('Escribe el número de la resolución de facturación de la DIAN.');
+    if (row.electronica && !row.resolucion) throw new Error('Escribe el número de la resolución de facturación de la DIAN.');
+    if (row.tipo === 'FV' && S.d.numeraciones.some(x => x.tipo === 'FV' && x.id !== n.id && !!x.electronica !== row.electronica && (x.prefijo || '') === row.prefijo)) throw new Error('Usa un prefijo distinto al de la otra clase de factura (electrónica o normal), para que los números no se crucen.');
     if (row.vigencia_desde && row.vigencia_hasta && row.vigencia_hasta < row.vigencia_desde) throw new Error('La vigencia termina antes de empezar.');
     if (n.id && n.siguiente > row.siguiente && usada) throw new Error(`El siguiente número no puede bajar de ${n.siguiente}: ya hay documentos emitidos.`);
-    if (row.activa) for (const o of S.d.numeraciones.filter(x => x.tipo === row.tipo && x.activa && x.id !== n.id)) await store.save('numeraciones', { id: o.id, activa: false });
+    if (row.activa) for (const o of S.d.numeraciones.filter(x => x.tipo === row.tipo && !!x.electronica === row.electronica && x.activa && x.id !== n.id)) await store.save('numeraciones', { id: o.id, activa: false });
     await store.save('numeraciones', n.id ? { ...row, id: n.id } : row); await cargarEmpresa(); toast('Numeración guardada.'); route();
   }, { ancho: true });
-  const t = f.querySelector('[name=tipo]'); const sync = () => { $('wRes').hidden = t.value !== 'FV'; }; t.onchange = sync; sync();
+  const t = f.querySelector('[name=tipo]'), el = f.querySelector('[name=electronica]');
+  const sync = () => { $('wEl').hidden = t.value !== 'FV'; $('wRes').hidden = t.value !== 'FV' || !el.checked; }; t.onchange = sync; el.onchange = sync; sync();
+  if (usada) el.disabled = true, f.insertAdjacentHTML('afterbegin', n.electronica ? '<input type="hidden" name="electronica" value="on">' : '');
   if (usada) t.disabled = true, f.querySelector('[name=prefijo]').readOnly = true;
   if (usada) f.insertAdjacentHTML('afterbegin', `<input type="hidden" name="tipo" value="${n.tipo}">`);
 }
 function vNumeraciones(m) {
   const l = [...S.d.numeraciones].sort((a, b) => Object.keys(TIPOS).indexOf(a.tipo) - Object.keys(TIPOS).indexOf(b.tipo) || (b.activa - a.activa));
   m.innerHTML = `<header class="vhead"><h2>Numeraciones</h2><button class="primary" id="nuevo">Nueva numeración</button></header>
-    <p class="sub">La factura usa el prefijo y el rango de tu resolución DIAN. Las notas y los recibos llevan su propio consecutivo.</p>
+    <p class="sub">La factura electrónica usa el prefijo y el rango de tu resolución DIAN. La factura normal (no electrónica) lleva su propio consecutivo con otro prefijo. Las notas y los recibos llevan el suyo.</p>
+    <div class="row"><button id="nuevaN">Nueva numeración de factura normal</button></div>
     <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>
-    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre} ${n.activa ? '<span class="tag ok">Activa</span>' : '<span class="tag">Inactiva</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
+    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${n.activa ? '<span class="tag ok">Activa</span>' : '<span class="tag">Inactiva</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
       <td class="r mono">${n.desde} – ${Number(n.hasta) >= 999999999 ? 'sin límite' : n.hasta}</td><td class="r mono">${n.siguiente}${n.tipo === 'FV' && quedan <= 50 ? ` <span class="tag bad">quedan ${Math.max(0, quedan)}</span>` : ''}</td>
       <td>${n.vigencia_hasta ? `hasta ${fFecha(n.vigencia_hasta)}${vence ? ' <span class="tag bad">por vencer</span>' : ''}` : '—'}</td><td class="r"><button class="ghost sm" data-ed="${n.id}">Editar</button></td></tr>`; }).join('')}
     </tbody></table></div>` : '<p class="muted">No hay numeraciones.</p>'}</section>`;
   $('nuevo').onclick = () => formNumeracion();
+  $('nuevaN').onclick = () => formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   m.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => formNumeracion(S.d.numeraciones.find(n => n.id === b.dataset.ed)));
 }
 

@@ -64,7 +64,7 @@ pre{background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:0;font
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 @media (max-width:560px){.grid2,.grid3{grid-template-columns:minmax(0,1fr)}}
 .tag{display:inline-block;font-size:.7rem;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:1px 7px;border-radius:99px;background:var(--surface-2);color:var(--muted);vertical-align:middle;white-space:nowrap}
-.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}.tag.el{background:var(--accent-soft);color:var(--accent)}
 .tag.bad{background:var(--bad-soft);color:var(--bad)}
 .tag.demo{background:var(--warn-soft);color:var(--warn)}
 

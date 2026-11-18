@@ -10,13 +10,31 @@ const ahora = () => new Date().toISOString();
 /* ---------- Reglas de emisión compartidas ---------- */
 // Devuelve la numeración que usará el documento o lanza un error con el motivo.
 function numeracionPara(doc, numeraciones) {
-  const n = numeraciones.find(x => x.empresa_id === doc.empresa_id && x.tipo === doc.tipo && x.activa);
-  if (!n) throw new Error('No hay una numeración activa para este tipo de documento. Créala en Numeraciones.');
+  // La factura usa la numeración de su clase (electrónica o normal); notas y recibos prefieren la de su clase.
+  const el = !!doc.electronica;
+  const act = numeraciones.filter(x => x.empresa_id === doc.empresa_id && x.tipo === doc.tipo && x.activa);
+  const n = act.find(x => !!x.electronica === el) || (doc.tipo !== 'FV' ? act[0] : null);
+  if (!n) throw new Error(doc.tipo === 'FV' ? (el ? 'No hay una numeración activa de factura electrónica. Créala en Numeraciones con la resolución DIAN.' : 'No hay una numeración activa de factura normal (no electrónica). Créala en Numeraciones.')
+    : 'No hay una numeración activa para este tipo de documento. Créala en Numeraciones.');
   if (Number(n.siguiente) > Number(n.hasta)) throw new Error(`Se agotó el rango de numeración ${n.prefijo || ''} (hasta ${n.hasta}).`);
   if (n.vigencia_hasta && doc.fecha > n.vigencia_hasta) throw new Error(`La numeración ${n.prefijo || ''} venció el ${n.vigencia_hasta}.`);
   if (n.vigencia_desde && doc.fecha < n.vigencia_desde) throw new Error(`La numeración ${n.prefijo || ''} rige desde el ${n.vigencia_desde}.`);
   return n;
 }
+
+// Facturas y notas normales (no electrónicas) se pueden eliminar aunque estén emitidas. Devuelve el motivo si no se puede.
+function motivoNoEliminar(d, documentos, aplicaciones) {
+  if (!d) return 'Documento no encontrado.';
+  if (!['FV', 'NC', 'ND'].includes(d.tipo)) return 'Los recibos de caja no se eliminan: se anulan.';
+  if (d.electronica && d.estado !== 'borrador') return 'Las facturas y notas electrónicas no se eliminan: se corrigen con una nota.';
+  if (d.tipo === 'FV') {
+    if (documentos.some(x => x.ref_id === d.id && x.estado !== 'borrador')) return 'La factura tiene notas crédito o débito. Elimínalas primero.';
+    const rc = new Set(documentos.filter(x => x.tipo === 'RC' && x.estado === 'emitido').map(x => x.id));
+    if (aplicaciones.some(a => a.factura_id === d.id && rc.has(a.recibo_id))) return 'La factura tiene pagos. Anula primero los recibos de caja que la pagan.';
+  }
+  return '';
+}
+function revisarEliminar(d, documentos, aplicaciones) { const m = motivoNoEliminar(d, documentos, aplicaciones); if (m) throw new Error(m); }
 
 /* ---------- Modo local ---------- */
 function localStore() {
@@ -59,6 +77,8 @@ function localStore() {
     async emitir(id) {
       const d = db.documentos.find(x => x.id === id);
       if (!d || d.estado !== 'borrador') throw new Error('El documento ya no es un borrador.');
+      if (d.tipo === 'NC' || d.tipo === 'ND') d.electronica = !!db.documentos.find(x => x.id === d.ref_id)?.electronica;
+      if (d.tipo === 'RC') d.electronica = false;
       const n = numeracionPara(d, db.numeraciones);
       d.prefijo = n.prefijo || ''; d.numero = Number(n.siguiente); d.numeracion_id = n.id; d.estado = 'emitido'; d.emitido_en = ahora();
       n.siguiente = Number(n.siguiente) + 1;
@@ -68,6 +88,17 @@ function localStore() {
       const d = db.documentos.find(x => x.id === id);
       if (!d || d.tipo !== 'RC' || d.estado !== 'emitido') throw new Error('Solo se pueden anular recibos de caja emitidos.');
       d.estado = 'anulado'; d.anulado_motivo = motivo; d.anulado_en = ahora(); persist(); return { ...d };
+    },
+    async eliminar(id) {
+      const d = db.documentos.find(x => x.id === id);
+      revisarEliminar(d, db.documentos, db.aplicaciones);
+      if (d.tipo === 'FV') {
+        for (const b of db.documentos.filter(x => x.ref_id === id && x.estado === 'borrador')) await api.remove('documentos', b.id);
+        db.aplicaciones = db.aplicaciones.filter(a => a.factura_id !== id);
+      }
+      const n = db.numeraciones.find(x => x.id === d.numeracion_id);
+      if (n && Number(n.siguiente) === Number(d.numero) + 1 && Number(d.numero) >= Number(n.desde)) n.siguiente = Number(d.numero);
+      await api.remove('documentos', id);
     },
     async listPerfiles() { return []; },
     async setPerfil() {},
@@ -113,6 +144,7 @@ function supabaseStore(url, key) {
     },
     async emitir(id) { ok(await sb.rpc('emitir_documento', { p_id: id })); return ok(await sb.from('documentos').select('*').eq('id', id).single()); },
     async anular(id, motivo) { ok(await sb.rpc('anular_recibo', { p_id: id, p_motivo: motivo })); return ok(await sb.from('documentos').select('*').eq('id', id).single()); },
+    async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async listPerfiles() { return ok(await sb.from('perfiles').select('*').order('creado_en', { ascending: false })); },
     async setPerfil(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },
   };
@@ -136,4 +168,4 @@ function crearStore() {
   return url && key ? supabaseStore(url, key) : localStore();
 }
 
-export { crearStore, numeracionPara };
+export { crearStore, numeracionPara, motivoNoEliminar };
