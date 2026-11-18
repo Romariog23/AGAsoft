@@ -28,3 +28,10 @@ test('solo se eliminan facturas y notas normales sin notas ni pagos vigentes', (
   assert.match(motivoNoEliminar(fv, [fv, rc], [{ recibo_id: 'r', factura_id: 'f', valor: 1 }]), /pagos/);
   assert.equal(motivoNoEliminar(fv, [fv, { ...rc, estado: 'anulado' }], [{ recibo_id: 'r', factura_id: 'f', valor: 1 }]), '');
 });
+
+test('cada línea del asiento lleva solo débito o solo crédito', async () => {
+  const { unLado } = await import('../src/contab.js');
+  assert.deepEqual([unLado({ debito: 100, credito: 30 }).debito, unLado({ debito: 100, credito: 30 }).credito], [70, 0]);
+  assert.deepEqual([unLado({ debito: 10, credito: 25 }).debito, unLado({ debito: 10, credito: 25 }).credito], [0, 15]);
+  assert.equal(unLado({ debito: 5, credito: 0 }).debito, 5);
+});
