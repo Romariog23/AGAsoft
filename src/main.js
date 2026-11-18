@@ -1124,17 +1124,19 @@ function formCuenta(c = {}, padre = '') {
   }
 }
 
-let balOpc = { nivel: '4', tercero: '', detalle: false };
+let balOpc = { nivel: '4', tercero: '', detalle: '' };
 function vBalance(m) {
   const terceros = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead"><h2>Balance de prueba</h2><button id="csv">Descargar CSV</button></header>
     ${filtroFechas('fb', true, () => pintar())}
     <div class="row filters"><div><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']], balOpc.nivel)}</select></div>
       <div class="grow"><label for="bter">Tercero</label><select id="bter"><option value="">Todos los terceros</option>${terceros.map(t => `<option value="${t.id}" ${t.id === balOpc.tercero ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select></div>
-      <label class="check"><input type="checkbox" id="bdet" ${balOpc.detalle ? 'checked' : ''}> Detallar por tercero</label></div>
+      <div><label for="bdet">Detallar por tercero</label><select id="bdet">${opts([['', 'No'], ['nivel', 'Solo el nivel escogido'], ['todos', 'En todos los niveles']], balOpc.detalle)}</select></div></div>
     <section class="panel" id="out"></section>`;
   let b, ms;
   const nomT = id => id ? (terc(id)?.nombre || 'Tercero borrado') : 'Sin tercero';
+  // Terceros debajo de cada cuenta: solo en el nivel escogido o en todos los niveles visibles.
+  const conDet = f => balOpc.detalle === 'todos' || (balOpc.detalle && f.codigo.length === Math.min(Number(balOpc.nivel), 8));
   const detalle = f => saldosPorTercero(ms, S.d.cuentas, f.codigo, F.desde, F.hasta).sort((a, c) => nomT(a.tercero_id).localeCompare(nomT(c.tercero_id)));
   const pintar = () => {
     ms = movs().filter(x => !balOpc.tercero || x.tercero_id === balOpc.tercero);
@@ -1144,19 +1146,19 @@ function vBalance(m) {
     const sub = balOpc.tercero ? `${esc(nomT(balOpc.tercero))} · ${esc(docId(terc(balOpc.tercero)))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>` : `${fFecha(F.desde)} a ${fFecha(F.hasta)}`;
     $('out').innerHTML = cabInforme(balOpc.tercero ? 'Balance de prueba por tercero' : 'Balance de prueba', sub) + (l.length ? `<div class="tbl-wrap"><table class="tbl bal"><thead><tr><th>Código</th><th>Cuenta</th><th class="r">Saldo anterior</th><th class="r">Débitos</th><th class="r">Créditos</th><th class="r">Saldo final</th></tr></thead><tbody>
       ${l.map(f => `<tr class="lv${f.codigo.length} click" data-go="#/auxiliar?cuenta=${f.codigo}"><td class="mono">${f.codigo}</td><td>${esc(f.nombre)}</td><td class="r mono">${valor(f.inicial)}</td><td class="r mono">${valor(f.debito)}</td><td class="r mono">${valor(f.credito)}</td><td class="r mono">${valor(f.final)}</td></tr>
-        ${balOpc.detalle && f.codigo.length === Math.min(n, 8) ? detalle(f).map(x => `<tr class="ter"><td></td><td>${esc(nomT(x.tercero_id))}${x.tercero_id ? ` <span class="muted mono">${esc(fmtNit(terc(x.tercero_id)?.numero || ''))}</span>` : ''}</td><td class="r mono">${valor(x.inicial)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${valor(x.final)}</td></tr>`).join('') : ''}`).join('')}
+        ${conDet(f) ? detalle(f).map(x => `<tr class="ter"><td></td><td>${esc(nomT(x.tercero_id))}${x.tercero_id ? ` <span class="muted mono">${esc(fmtNit(terc(x.tercero_id)?.numero || ''))}</span>` : ''}</td><td class="r mono">${valor(x.inicial)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${valor(x.final)}</td></tr>`).join('') : ''}`).join('')}
       <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(b.debitos)}</td><td class="r mono">${money(b.creditos)}</td><td></td></tr></tbody></table></div>
       ${!balOpc.tercero && Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.${balOpc.tercero ? ' Al filtrar por un tercero, las sumas no tienen que ser iguales.' : ''}</p>` : '<p class="muted">No hay movimientos en este periodo con ese filtro.</p>');
   };
   $('niv').onchange = () => { balOpc.nivel = $('niv').value; pintar(); };
   $('bter').onchange = () => { balOpc.tercero = $('bter').value; pintar(); };
-  $('bdet').onchange = () => { balOpc.detalle = $('bdet').checked; pintar(); };
+  $('bdet').onchange = () => { balOpc.detalle = $('bdet').value; pintar(); };
   $('csv').onclick = () => {
     const n = Number(balOpc.nivel), filas = [['Código', 'Cuenta', 'Tercero', 'Identificación', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']];
     const v = x => String(x).replace('.', ',');
     for (const f of b.filas.filter(f => f.codigo.length <= n)) {
       filas.push([f.codigo, f.nombre, balOpc.tercero ? nomT(balOpc.tercero) : '', balOpc.tercero ? terc(balOpc.tercero)?.numero || '' : '', v(f.inicial), v(f.debito), v(f.credito), v(f.final)]);
-      if (balOpc.detalle && f.codigo.length === Math.min(n, 8)) for (const x of detalle(f)) filas.push([f.codigo, f.nombre, nomT(x.tercero_id), terc(x.tercero_id)?.numero || '', v(x.inicial), v(x.debito), v(x.credito), v(x.final)]);
+      if (conDet(f)) for (const x of detalle(f)) filas.push([f.codigo, f.nombre, nomT(x.tercero_id), terc(x.tercero_id)?.numero || '', v(x.inicial), v(x.debito), v(x.credito), v(x.final)]);
     }
     descargar(`balance${balOpc.detalle || balOpc.tercero ? '-terceros' : ''}-${emp().nit}-${F.hasta}.csv`, '﻿' + filas.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   };
@@ -1184,32 +1186,47 @@ function vAuxiliar(m, q) {
   pintar();
 }
 
+// Nivel de detalle de los estados financieros: solo rubros NIIF (desplegables) o cuentas del PUC hasta el nivel escogido.
+let infOpc = { nivel: '0' };
+const NIVELES_INF = [['0', 'Rubros NIIF'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']];
+function selNivelInf() { return `<div class="row filters"><div><label for="ninf">Nivel</label><select id="ninf">${opts(NIVELES_INF, infOpc.nivel)}</select></div></div>`; }
+// Suma las cuentas auxiliares de un rubro en cada nivel del PUC hasta n dígitos (grupo, cuenta, subcuenta, auxiliar).
+function cuentasPorNivel(cuentas, n) {
+  const idx = idxCuentas(), acc = {};
+  for (const c of cuentas) for (const l of [2, 4, 6, 8]) if (l <= n && c.codigo.length >= l) { const k = c.codigo.slice(0, l); acc[k] = r2((acc[k] || 0) + c.valor); }
+  return Object.entries(acc).filter(([, v]) => v).sort(([a], [b]) => a.localeCompare(b)).map(([codigo, valor]) => ({ codigo, valor, nombre: idx[codigo]?.nombre || '' }));
+}
 function lineaInforme(x) {
+  const n = Number(infOpc.nivel);
+  if (n && x.cuentas?.length) return `<div class="inf-l plain head"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>
+    ${cuentasPorNivel(x.cuentas, n).map(c => `<a class="inf-c n${c.codigo.length}" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>`).join('')}`;
   return x.cuentas?.length ? `<details class="inf-l"><summary><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></summary>
     ${x.cuentas.map(c => `<a class="inf-c" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>`).join('')}</details>`
     : `<div class="inf-l plain"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>`;
 }
 function vEsf(m) {
-  m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
   const pintar = () => {
     const e = situacionFinanciera(movs(), S.d.cuentas, F.hasta);
-    $('out').innerHTML = cabInforme('Estado de situación financiera', `A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. Toca un rubro para ver las cuentas del PUC que lo forman.</p>
+    $('out').innerHTML = cabInforme('Estado de situación financiera', `A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. ${infOpc.nivel === '0' ? 'Toca un rubro para ver las cuentas del PUC que lo forman.' : 'Cada rubro muestra sus cuentas del PUC hasta el nivel escogido. Toca una cuenta para ver su libro auxiliar.'}</p>
       <div class="inf">${e.grupos.map(g => `<section class="inf-g"><h3>${g.titulo}</h3>${g.secciones.map(sx => sx.lineas.length ? `${sx.titulo ? `<h4>${sx.titulo}</h4>` : ''}${sx.lineas.map(lineaInforme).join('')}<div class="inf-l sub"><span>Total ${(sx.titulo || g.titulo).toLowerCase()}</span><span class="mono">${money(sx.lineas.reduce((s, x) => s + x.valor, 0))}</span></div>` : '').join('') || '<p class="muted">Sin saldos.</p>'}
         <div class="inf-l tot"><span>Total ${g.titulo.toLowerCase()}</span><span class="mono">${money(g.total)}</span></div></section>`).join('')}
         <div class="inf-l tot big"><span>Total pasivo y patrimonio</span><span class="mono">${money(e.pasivo + e.patrimonio)}</span></div></div>
       ${e.cuadra ? '<p class="okmsg">El activo es igual al pasivo más el patrimonio.</p>' : `<p class="err">No cuadra: diferencia de ${money(e.activo - e.pasivo - e.patrimonio)}. Revisa la homologación de las cuentas.</p>`}
       <p class="hint">El resultado del ejercicio incluye los ingresos, costos y gastos que aún no se han cerrado contra la cuenta 36.</p>`;
   };
+  $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
   pintar();
 }
 function vEr(m) {
-  m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
   const pintar = () => {
     const r = estadoResultados(movs(), S.d.cuentas, F.desde, F.hasta);
     $('out').innerHTML = cabInforme('Estado de resultados', `Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
       <div class="inf">${r.secciones.map(sx => sx.total ? `<div class="inf-l tot ${sx.final ? 'big' : ''}"><span>${sx.total}</span><span class="mono">${money(sx.valor)}</span></div>`
         : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
   };
+  $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
   pintar();
 }
 
