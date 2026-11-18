@@ -108,6 +108,7 @@ function localStore() {
     },
     async listPerfiles() { return []; },
     async setPerfil() {},
+    async guardarTema() {},
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
   };
   return api;
@@ -154,6 +155,7 @@ function supabaseStore(url, key) {
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async miPlan() { return ok(await sb.rpc('mi_plan')); },
     async planesActivos() { return ok(await sb.from('planes').select('*').eq('activo', true).order('orden').order('nombre')); },
+    async guardarTema(t) { ok(await sb.rpc('guardar_tema', { p_tema: t })); },
     async solicitarPlan(id) { ok(await sb.rpc('solicitar_plan', { p_plan: id })); },
     async listPerfiles() { return ok(await sb.from('perfiles').select('*').order('creado_en', { ascending: false })); },
     async setPerfil(id, campos) { ok(await sb.from('perfiles').update(campos).eq('id', id)); },

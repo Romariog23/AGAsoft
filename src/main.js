@@ -4,10 +4,12 @@ import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, e
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
+import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
+aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const COP0 = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -70,6 +72,7 @@ async function iniciar() {
   S.user = await store.session();
   if (!S.user) { $('auth').hidden = false; $('app').hidden = true; return; }
   S.perfil = await store.perfil();
+  if (S.perfil?.tema?.color) { const t = normalizar(S.perfil.tema); guardarLocal(t); aplicarTema(t); }
   if (S.perfil?.suspendido) {
     $('auth').hidden = false; $('app').hidden = true;
     $('authSub').textContent = 'Tu cuenta está suspendida. Comunícate con AGAsoft para reactivarla.';
@@ -127,6 +130,22 @@ async function finPrueba() {
     try { await pedirPlan(card); S.perfil = await store.perfil(); await finPrueba(); toast('Plan pedido. AGAsoft lo revisa y lo aprueba.'); }
     catch (e) { $('ePlan').textContent = e.message; $('ePlan').hidden = false; $('pedirP').disabled = false; }
   };
+}
+// Apariencia: color principal y modo claro/oscuro de cada usuario.
+function pintarApariencia() {
+  const box = $('apariencia'); if (!box) return;
+  const t = leerTema();
+  box.innerHTML = `<h3>Apariencia</h3><p class="sub">Escoge el color de tu AGAsoft. Lo ves solo tú, en cualquier equipo donde entres.</p>
+    <div class="colores" role="group" aria-label="Color">${COLORES.map(c => `<button type="button" class="color-op" data-color="${c.id}" aria-pressed="${c.id === t.color}"><i style="background:${c.claro}"></i>${esc(c.nombre)}</button>`).join('')}</div>
+    <div class="grid2"><div><label for="temaModo">Modo</label><select id="temaModo">${MODOS.map(([v, n]) => `<option value="${v}" ${v === t.modo ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`;
+  const cambiar = async campos => {
+    const nuevo = normalizar({ ...leerTema(), ...campos });
+    guardarLocal(nuevo); aplicarTema(nuevo); pintarApariencia();
+    if (S.perfil) S.perfil.tema = nuevo;
+    try { await store.guardarTema(nuevo); } catch (_) { /* falta 013_tema.sql: queda guardado en este navegador */ }
+  };
+  box.querySelectorAll('[data-color]').forEach(b => b.onclick = () => cambiar({ color: b.dataset.color }));
+  $('temaModo').onchange = () => cambiar({ modo: $('temaModo').value });
 }
 async function cargarMiPlan() {
   const box = $('miPlan'); if (!box) return;
@@ -425,6 +444,7 @@ function vEmpresa(m) {
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN y se pueden eliminar aunque estén emitidas.</p></section>
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
+  <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
   ${store.mode === 'supabase' ? `<section class="panel stack"><header class="vhead"><h3>Personas con acceso</h3><button id="addM">Dar acceso</button></header>
     <p class="hint">Un <b>responsable</b> puede crear y emitir documentos. <b>Consulta</b> solo puede verlos.</p>
@@ -433,6 +453,7 @@ function vEmpresa(m) {
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
   cargarMiPlan();
+  pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {

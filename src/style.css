@@ -70,7 +70,7 @@ pre{background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:0;font
 
 /* Marca */
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none}
-.mark{display:inline-grid;place-items:center;background:var(--brand);color:var(--lime);font-weight:800;font-size:.8rem;letter-spacing:.04em;border-radius:8px;width:38px;height:38px;flex:none}
+.mark{display:inline-grid;place-items:center;background:var(--brand);color:var(--mark-fg,var(--lime));font-weight:800;font-size:.8rem;letter-spacing:.04em;border-radius:8px;width:38px;height:38px;flex:none}
 .brand-name{font-weight:800;font-size:1.1rem}
 
 /* Inicio de sesión */
@@ -290,3 +290,8 @@ dialog::backdrop{background:rgb(8 22 29 / .45)}
 .plan-op input{width:auto;margin-top:3px}
 button.bad{color:var(--bad)}
 #dlgForm button.danger-btn{background:var(--bad);border-color:var(--bad);color:#fff}
+/* Apariencia */
+.colores{display:flex;flex-wrap:wrap;gap:10px}
+.color-op{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border:1px solid var(--line);border-radius:99px;background:var(--surface);font-weight:500}
+.color-op i{width:26px;height:26px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgb(0 0 0 / .12)}
+.color-op[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
