@@ -38,10 +38,13 @@ function asiento(d, ctx) {
   let iva = 0;
   for (const it of its) {
     const l = linea(it);
+    // Cada producto puede tener su cuenta para factura y nota débito, y otra para nota crédito o devolución.
+    // Si no la tiene, se usa la de los parámetros de la empresa.
+    const pr = prods[it.producto_id] || {};
     let cta;
-    if (d.tipo === 'NC') cta = P.devoluciones;
-    else if (d.tipo === 'ND' && d.concepto === '1') cta = P.intereses;
-    else cta = prods[it.producto_id]?.cuenta_ingreso || P.ingresos;
+    if (d.tipo === 'NC') cta = pr.cuenta_devolucion || P.devoluciones;
+    else if (pr.cuenta_ingreso) cta = pr.cuenta_ingreso;
+    else cta = d.tipo === 'ND' && d.concepto === '1' ? P.intereses : P.ingresos;
     porCuenta[cta] = r2((porCuenta[cta] || 0) + l.base);
     iva += l.iva;
   }
@@ -56,7 +59,7 @@ function asiento(d, ctx) {
   lado(P.reteiva, d.reteiva, 'ReteIVA', true);
   lado(P.reteica, d.reteica, 'ReteICA', true);
   for (const [cta, v] of Object.entries(porCuenta)) {
-    // La nota crédito lleva la devolución al débito de la 4175 (cuenta de naturaleza débito).
+    // La nota crédito lleva la devolución al débito (4175 o la cuenta de devolución del producto).
     if (d.tipo === 'NC') mov(cta, v, 0, det); else lado(cta, v, det, false);
   }
   lado(P.iva, iva, 'IVA', false);
