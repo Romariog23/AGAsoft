@@ -5,10 +5,11 @@ import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
+import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
@@ -930,13 +931,23 @@ function vCartera(m) {
 function descargar(nombre, texto) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
 /* ---------- Clientes ---------- */
+// Partes del nombre de un tercero viejo que solo tenía el nombre completo.
+function partesDe(t) {
+  if (t.primer_nombre || t.primer_apellido || !t.nombre) return t;
+  const w = String(t.nombre).trim().split(/\s+/);
+  const [n1, n2, a1, a2] = w.length >= 4 ? [w[0], w[1], w[2], w.slice(3).join(' ')] : w.length === 3 ? [w[0], '', w[1], w[2]] : [w[0], '', w[1] || '', ''];
+  return { ...t, primer_nombre: n1, segundo_nombre: n2, primer_apellido: a1, segundo_apellido: a2 };
+}
 function formTercero(t = {}, despues, modo = 'cliente') {
   const prov = modo === 'proveedor';
   const quien = prov ? 'proveedor' : 'cliente';
   const esProv = t.id ? !!t.es_proveedor : prov, esCli = t.id ? t.es_cliente !== false : !prov;
   const f = dialogo(`<h2>${t.id ? `Editar ${quien}` : `Nuevo ${quien}`}</h2>
     <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
-    ${campo('nombre', 'Nombre o razón social', t.nombre, 'required maxlength="200"')}
+    ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], t.tipo_persona || personaDe('', t, t.tipo_id || '31'))}
+    <div data-p="juridica">${campo('razon_social', 'Razón social', t.razon_social || (t.tipo_persona !== 'natural' ? t.nombre : '') || '', 'maxlength="200"')}</div>
+    <div data-p="natural" class="grid2">${(pn => `${campo('primer_nombre', 'Primer nombre', pn.primer_nombre || '', 'maxlength="60"')}${campo('segundo_nombre', 'Segundo nombre', pn.segundo_nombre || '', 'maxlength="60"')}
+      ${campo('primer_apellido', 'Primer apellido', pn.primer_apellido || '', 'maxlength="60"')}${campo('segundo_apellido', 'Segundo apellido', pn.segundo_apellido || '', 'maxlength="60"')}`)(t.tipo_persona === 'natural' || (t.id && t.tipo_id !== '31') ? partesDe(t) : t)}</div>
     ${campo('direccion', 'Dirección', t.direccion)}
     ${campoUbicacion(t)}
     <div class="grid2">${campo('telefono', 'Teléfono', t.telefono, 'type="tel"')}${campo('correo', 'Correo para enviar facturas', t.correo, 'type="email"')}</div>
@@ -956,10 +967,11 @@ function formTercero(t = {}, despues, modo = 'cliente') {
     const tipo = fd.get('tipo_id'); let numero = String(fd.get('numero')).trim(), dv = null;
     if (tipo === '31') { const p = parseNit(numero); if (p.error) throw new Error(p.error); numero = p.nit; dv = p.dv; }
     else { numero = numero.replace(/[.\s]/g, ''); if (!/^[0-9A-Za-z-]{3,20}$/.test(numero)) throw new Error('Revisa el número de documento.'); }
-    const nombre = String(fd.get('nombre')).trim(); if (!nombre) throw new Error(`Escribe el nombre del ${quien}.`);
+    const nom = nombreTercero(Object.fromEntries(['tipo_persona', 'razon_social', ...PARTES].map(k => [k, fd.get(k) || ''])), tipo);
+    if (nom.error) throw new Error(nom.error.charAt(0).toUpperCase() + nom.error.slice(1) + '.');
     if (fd.get('es_cliente') !== 'on' && fd.get('es_proveedor') !== 'on') throw new Error('Marca si es cliente, proveedor o ambos.');
     if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un tercero con ese documento (búscalo en Clientes o Proveedores).');
-    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, nombre, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
+    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, ...nom, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
       plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')),
       es_cliente: fd.get('es_cliente') === 'on', es_proveedor: fd.get('es_proveedor') === 'on', ret_compra_fuente_pct: num(fd.get('ret_compra_fuente_pct')), ret_compra_iva_pct: num(fd.get('ret_compra_iva_pct')), ret_compra_ica_milaje: num(fd.get('ret_compra_ica_milaje')) };
     const g = await store.save('terceros', t.id ? { ...row, id: t.id } : row);
@@ -968,9 +980,12 @@ function formTercero(t = {}, despues, modo = 'cliente') {
   }, { ancho: true });
   const sync = () => { f.querySelector('[data-fs=cli]').hidden = !f.querySelector('[name=es_cliente]').checked; f.querySelector('[data-fs=prov]').hidden = !f.querySelector('[name=es_proveedor]').checked; };
   f.querySelectorAll('[name=es_cliente],[name=es_proveedor]').forEach(x => x.onchange = sync); sync();
+  const psel = f.querySelector('[name=tipo_persona]');
+  const verP = () => f.querySelectorAll('[data-p]').forEach(x => { x.hidden = x.dataset.p !== psel.value; });
+  psel.onchange = verP; verP();
   const tsel = f.querySelector('[name=tipo_id]');
   const ver = ligarDv(f.querySelector('[name=numero]'), () => tsel.value === '31');
-  tsel.onchange = ver;
+  tsel.onchange = () => { ver(); if (!t.id) { psel.value = tsel.value === '31' ? 'juridica' : 'natural'; verP(); } };
 }
 function vClientes(m) {
   let q = '';
@@ -1351,32 +1366,39 @@ function vBalance(m) {
 }
 
 function vAuxiliar(m, q) {
-  let cuenta = q.get('cuenta') || param().clientes, tercero = '';
+  // Rango de cuentas: desde la 1 hasta la 2, o desde la 1 hasta la 1 para una sola.
+  let desdeC = q.get('cuenta') || param().clientes, hastaC = q.get('hasta') || desdeC, tercero = '';
   const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
+  const lista = `<datalist id="ctasAuxL">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' (sin movimientos)'}"></option>`).join('')}</datalist>`;
+  const caja = (id, lab, v) => `<div class="grow"><label for="${id}">${lab}</label><input id="${id}" list="ctasAuxL" class="mono" style="width:100%;max-width:100%" value="${esc(v)}" autocomplete="off" placeholder="Código o nombre de la cuenta"><p class="hint" id="${id}Nom">${esc(nomCta(v))}</p></div>`;
   m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
-    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAuxL" class="mono" style="width:100%;max-width:100%" value="${esc(cuenta)}" autocomplete="off" placeholder="Escribe el código o el nombre de la cuenta">
-      <datalist id="ctasAuxL">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' (sin movimientos)'}"></option>`).join('')}</datalist>
-      <p class="hint" id="ctaNom">${esc(cuenta)} ${esc(nomCta(cuenta))}</p><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Escribe el código (por ejemplo 1105 o 11050501) o parte del nombre.</p></div>
+    <div class="row filters">${caja('cta', 'Desde la cuenta', desdeC)}${caja('cta2', 'Hasta la cuenta', hastaC)}
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
-    
+    ${lista}<p class="hint">Escribe el código de cualquier nivel (por ejemplo 1105 o 11050501) o parte del nombre. Para una sola cuenta pon la misma en los dos campos; desde 1 hasta 1 es toda la clase 1.</p>
     ${filtroFechas('fa', true, () => pintar())}
     <section class="panel" id="out"></section>`;
+  const rango = () => desdeC === hastaC ? `${esc(desdeC)} ${esc(nomCta(desdeC))}` : `Desde ${esc(desdeC)} ${esc(nomCta(desdeC))} hasta ${esc(hastaC)} ${esc(nomCta(hastaC))}`;
   const pintar = () => {
-    const a = libroAuxiliar(movs(), S.d.cuentas, cuenta, F.desde, F.hasta, tercero);
-    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 8 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
-      <tr class="muted"><td colspan="${cuenta.length < 8 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
-      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 8 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
-      <tr class="strong"><td colspan="${cuenta.length < 8 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
+    const r = auxiliarRango(movs(), S.d.cuentas, desdeC, hastaC, F.desde, F.hasta, tercero);
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${rango()}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+      ${r.secciones.map(a => `<tr class="strong"><td colspan="7"><span class="mono">${a.cuenta}</span> ${esc(nomCta(a.cuenta))}</td></tr>
+      <tr class="muted"><td colspan="6">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td><td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('')}
+      <tr><td colspan="4" class="muted">Total ${a.cuenta}</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Sin movimientos en el periodo.</td></tr>'}
+      ${r.secciones.length > 1 ? `<tr class="strong"><td colspan="4">Totales del rango</td><td class="r mono">${money(r.debitos)}</td><td class="r mono">${money(r.creditos)}</td><td></td></tr>` : ''}</tbody></table></div>`;
   };
-  const irCuenta = () => {
-    const v = $('cta').value.trim().split(' ')[0];
-    if (!v) return;
-    if (!S.d.cuentas.some(c => c.codigo === v)) { $('ctaNom').textContent = `La cuenta ${v} no existe en el plan de cuentas.`; return; }
-    cuenta = v; $('cta').value = v; $('ctaNom').textContent = `${v} ${nomCta(v)}`;
-    history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar();
+  const leer = id => {
+    const v = $(id).value.trim().split(' ')[0];
+    if (!v) return null;
+    if (!S.d.cuentas.some(c => c.codigo === v)) { $(id + 'Nom').textContent = `La cuenta ${v} no existe en el plan de cuentas.`; return null; }
+    $(id).value = v; $(id + 'Nom').textContent = nomCta(v); return v;
   };
-  $('cta').onchange = irCuenta;
-  $('cta').onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); irCuenta(); } };
+  const ir = id => {
+    const v = leer(id); if (!v) return;
+    if (id === 'cta') { const igual = desdeC === hastaC; desdeC = v; if (igual) { hastaC = v; $('cta2').value = v; $('cta2Nom').textContent = nomCta(v); } } else hastaC = v;
+    history.replaceState(null, '', `#/auxiliar?cuenta=${desdeC}${hastaC !== desdeC ? '&hasta=' + hastaC : ''}`); pintar();
+  };
+  for (const id of ['cta', 'cta2']) { $(id).onchange = () => ir(id); $(id).onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ir(id); } }; }
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   pintar();
 }

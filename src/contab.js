@@ -183,6 +183,16 @@ function libroAuxiliar(movs, cuentas, prefijo, desde, hasta, terceroId) {
   return { inicial, filas, final: saldo, debitos: r2(filas.reduce((s, m) => s + m.debito, 0)), creditos: r2(filas.reduce((s, m) => s + m.credito, 0)) };
 }
 
+// Libro auxiliar de un rango de cuentas: desde la cuenta 1 hasta la 2 (o desde la 1 hasta la 1 = toda la clase 1).
+// Devuelve una sección por cada cuenta auxiliar del rango que tenga saldo anterior o movimientos.
+function auxiliarRango(movs, cuentas, desdeCta, hastaCta, desde, hasta, terceroId) {
+  const lo = String(desdeCta || '').padEnd(8, '0'), hi = String(hastaCta || desdeCta || '').padEnd(8, '9');
+  const [a, b] = lo <= hi ? [lo, hi] : [String(hastaCta).padEnd(8, '0'), String(desdeCta).padEnd(8, '9')];
+  const codigos = [...new Set(movs.map(m => m.cuenta))].filter(c => c >= a && c <= b).sort();
+  const secciones = codigos.map(c => ({ cuenta: c, ...libroAuxiliar(movs, cuentas, c, desde, hasta, terceroId) })).filter(x => x.inicial || x.filas.length);
+  return { secciones, debitos: r2(secciones.reduce((s, x) => s + x.debitos, 0)), creditos: r2(secciones.reduce((s, x) => s + x.creditos, 0)) };
+}
+
 /* ---------- Estados financieros (NIIF para Pymes) ---------- */
 // Agrupa por rubro NIIF. Valores con signo: activo y gastos en positivo al débito; pasivo, patrimonio e ingresos al crédito.
 function porRubro(movs, cuentas, desde, hasta) {
@@ -248,4 +258,4 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
