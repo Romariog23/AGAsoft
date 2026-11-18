@@ -115,6 +115,7 @@ function route() {
   const q = new URLSearchParams(qs);
   renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : v);
   const m = $('main');
+  document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
   try {
     if (v === 'inicio') return vInicio(m);
@@ -137,16 +138,56 @@ function route() {
   } catch (e) { fail(e); }
 }
 
+// Primer ingreso: antes de entrar al software se piden los datos de la empresa y su resolución de facturación.
 function sinEmpresa(m) {
-  m.innerHTML = `<section class="panel stack empty">
-    <h2>Crea tu primera empresa</h2>
-    <p class="sub">AGAsoft lleva las ventas de cada empresa por separado: sus clientes, productos, numeraciones y documentos.</p>
-    <div class="row"><button class="primary" id="nuevaEmp">Crear empresa</button>
-    ${store.mode === 'local' ? '<button id="ejemplo">Probar con datos de ejemplo</button>' : ''}</div>
-    ${store.mode === 'local' ? '<p class="hint">Estás en modo demostración: lo que crees se guarda solo en este navegador.</p>' : ''}
+  document.body.classList.add('onboarding');
+  m.innerHTML = `<section class="onb stack">
+    <div class="onb-steps"><span class="on">1. Datos de la empresa</span><span>2. Resolución de facturación</span></div>
+    <h2>Bienvenido a AGAsoft${S.perfil?.nombre ? ', ' + esc(S.perfil.nombre.split(' ')[0]) : ''}</h2>
+    <p class="sub">Antes de empezar, registra la empresa tal como aparece en el RUT. Estos datos salen en las facturas y en los informes.</p>
+    <form id="onbF" class="panel stack" novalidate>${camposEmpresa()}<p class="err" id="onbErr" hidden></p>
+      <div class="row end"><button class="primary" id="onbOk">Guardar y continuar</button></div></form>
+    ${store.mode === 'local' ? '<p class="hint">Modo demostración: lo que registres se guarda solo en este navegador. <button type="button" class="ghost sm" id="ejemplo">Mejor, cargar una empresa de ejemplo</button></p>' : ''}
   </section>`;
-  $('nuevaEmp').onclick = formEmpresa;
+  const f = $('onbF'); activarNit(f);
+  f.onsubmit = async ev => {
+    ev.preventDefault(); $('onbErr').hidden = true; const btn = $('onbOk'); btn.disabled = true;
+    try { await guardarEmpresa(new FormData(f)); pasoResolucion(m); }
+    catch (e) { $('onbErr').textContent = e.message; $('onbErr').hidden = false; }
+    finally { btn.disabled = false; }
+  };
   if ($('ejemplo')) $('ejemplo').onclick = cargarEjemplo;
+}
+function pasoResolucion(m) {
+  document.body.classList.add('onboarding');
+  const y = hoy();
+  m.innerHTML = `<section class="onb stack">
+    <div class="onb-steps"><span class="done">1. Datos de la empresa</span><span class="on">2. Resolución de facturación</span></div>
+    <h2>Resolución de facturación de la DIAN</h2>
+    <p class="sub">Copia los datos de la resolución que autoriza la numeración de tus facturas. Si todavía no la tienes, puedes hacerlo después en <b>Numeraciones</b>.</p>
+    <form id="resF" class="panel stack" novalidate>
+      <div class="grid2">${campo('prefijo', 'Prefijo', 'FE', 'maxlength="4" class="mono"')}${campo('resolucion', 'Número de resolución', '', 'required class="mono" inputmode="numeric" placeholder="18764000000000"')}</div>
+      <div class="grid3">${campo('fecha_resolucion', 'Fecha de la resolución', '', 'type="date"')}${campo('vigencia_desde', 'Vigente desde', '', 'type="date"')}${campo('vigencia_hasta', 'Vigente hasta', '', 'type="date"')}</div>
+      <div class="grid3">${campo('desde', 'Rango desde', 1, 'type="number" min="1" class="mono"')}${campo('hasta', 'Rango hasta', '', 'type="number" min="1" class="mono" required')}${campo('siguiente', 'Siguiente factura a emitir', 1, 'type="number" min="1" class="mono"')}</div>
+      <p class="hint">Si ya facturabas en otro programa (Alegra, World Office…), pon en "Siguiente factura" el número que sigue a la última que emitiste.</p>
+      <p class="err" id="resErr" hidden></p>
+      <div class="row end"><button type="button" class="ghost" id="despues">Lo hago después</button><button class="primary" id="resOk">Guardar y entrar</button></div></form>
+  </section>`;
+  const entrar = msg => { document.body.classList.remove('onboarding'); toast(msg); location.hash = '#/inicio'; route(); };
+  $('despues').onclick = () => entrar('Empresa lista. Registra la resolución en Numeraciones antes de facturar.');
+  $('resF').onsubmit = async ev => {
+    ev.preventDefault(); $('resErr').hidden = true;
+    const fd = new FormData($('resF'));
+    const row = { empresa_id: S.eid, tipo: 'FV', prefijo: String(fd.get('prefijo')).trim().toUpperCase(), resolucion: String(fd.get('resolucion')).trim(), fecha_resolucion: fd.get('fecha_resolucion') || null,
+      vigencia_desde: fd.get('vigencia_desde') || null, vigencia_hasta: fd.get('vigencia_hasta') || null, desde: Math.round(num(fd.get('desde'))) || 1, hasta: Math.round(num(fd.get('hasta'))), siguiente: Math.round(num(fd.get('siguiente'))) || 1, activa: true };
+    const err = !/^[A-Z0-9]{0,4}$/.test(row.prefijo) ? 'El prefijo lleva máximo 4 letras o números.' : !row.resolucion ? 'Escribe el número de la resolución.' : row.hasta < row.desde ? 'Revisa el rango: "hasta" debe ser mayor que "desde".'
+      : row.siguiente < row.desde || row.siguiente > row.hasta ? 'La siguiente factura debe estar dentro del rango.' : row.vigencia_desde && row.vigencia_hasta && row.vigencia_hasta < row.vigencia_desde ? 'La vigencia termina antes de empezar.' : '';
+    if (err) { $('resErr').textContent = err; $('resErr').hidden = false; return; }
+    const btn = $('resOk'); btn.disabled = true;
+    try { await store.save('numeraciones', row); await cargarEmpresa(); entrar('Todo listo. Ya puedes crear clientes, productos y facturas.'); }
+    catch (e) { $('resErr').textContent = e.message; $('resErr').hidden = false; } finally { btn.disabled = false; }
+  };
+  void y;
 }
 async function cargarEjemplo() {
   try {
@@ -191,38 +232,48 @@ const campoSel = (k, label, list, val) => `<div><label for="f_${k}">${label}</la
 const check = (k, label, val) => `<label class="check"><input type="checkbox" name="${k}" ${val ? 'checked' : ''}> ${label}</label>`;
 
 /* ---------- Empresa ---------- */
-function formEmpresa(e = {}) {
-  const f = dialogo(`<h2>${e.id ? 'Datos de la empresa' : 'Nueva empresa'}</h2>
-    ${campo('nombre', 'Razón social o nombre', e.nombre, 'required maxlength="200"')}
+function camposEmpresa(e = {}) {
+  return `${campo('nombre', 'Razón social o nombre', e.nombre, 'required maxlength="200"')}
     <div class="grid2">${campo('nit', 'NIT', e.nit ? `${e.nit}-${e.dv}` : '', 'required inputmode="numeric" class="mono" placeholder="900123456-8"')}
     ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], e.tipo_persona)}</div>
     <p class="hint" id="nitHint"></p>
     <div class="grid2">${campoSel('regimen', 'Régimen', REGIMENES, e.regimen)}
-    ${campo('actividad', 'Actividad económica (CIIU)', e.actividad, 'maxlength="60"')}</div>
+    ${campo('actividad', 'Actividad económica (CIIU)', e.actividad, 'maxlength="60" inputmode="numeric" placeholder="6920"')}</div>
     ${check('responsable_iva', 'Es responsable de IVA (cobra IVA en sus facturas)', e.id ? e.responsable_iva : true)}
     ${campo('responsabilidades', 'Responsabilidades fiscales (casilla 53 del RUT)', e.responsabilidades, 'placeholder="O-13, O-15, R-99-PN"')}
     <div class="grid2">${campo('direccion', 'Dirección', e.direccion)}${campo('ciudad', 'Ciudad', e.ciudad)}</div>
-    <div class="grid2">${campo('telefono', 'Teléfono', e.telefono, 'type="tel"')}${campo('correo', 'Correo', e.correo, 'type="email"')}</div>
-    <div><label for="f_pie">Texto al pie de las facturas (opcional)</label><textarea id="f_pie" name="pie_factura" rows="2" maxlength="600">${esc(e.pie_factura)}</textarea></div>
-    ${pie(e.id ? 'Guardar' : 'Crear empresa')}`, async fd => {
-    const nit = parseNit(fd.get('nit'));
-    if (nit.error) throw new Error(nit.error);
-    const row = { nombre: fd.get('nombre').trim(), nit: nit.nit, dv: nit.dv, tipo_persona: fd.get('tipo_persona'), regimen: fd.get('regimen'), actividad: fd.get('actividad').trim(),
-      responsable_iva: fd.get('responsable_iva') === 'on', responsabilidades: fd.get('responsabilidades').trim(), direccion: fd.get('direccion').trim(),
-      ciudad: fd.get('ciudad').trim(), telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
-    if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
-    const g = await store.save('empresas', e.id ? { ...row, id: e.id } : row);
-    if (!e.id) {
-      // Numeraciones internas listas para notas y recibos; la de facturas la pone el usuario con su resolución DIAN.
-      for (const [tipo, prefijo] of [['NC', 'NC'], ['ND', 'ND'], ['RC', 'RC']]) await store.save('numeraciones', { empresa_id: g.id, tipo, prefijo, desde: 1, hasta: 999999999, siguiente: 1, activa: true, resolucion: '' });
-    }
-    S.eid = g.id; try { localStorage.setItem('agasoft-empresa', g.id); } catch (_) {}
-    await recargar(); toast(e.id ? 'Datos guardados.' : 'Empresa creada. Ahora registra la numeración de facturas.');
-    location.hash = e.id ? '#/empresa' : '#/numeraciones'; route();
-  });
-  const n = f.querySelector('[name=nit]'), h = $('nitHint');
+    <div class="grid2">${campo('telefono', 'Teléfono', e.telefono, 'type="tel"')}${campo('correo', 'Correo de facturación', e.correo, 'type="email"')}</div>
+    <div><label for="f_pie">Texto al pie de las facturas (opcional)</label><textarea id="f_pie" name="pie_factura" rows="2" maxlength="600">${esc(e.pie_factura)}</textarea></div>`;
+}
+function activarNit(f) {
+  const n = f.querySelector('[name=nit]'), h = f.querySelector('#nitHint');
   n.oninput = () => { const p = parseNit(n.value); h.textContent = !n.value.trim() ? '' : p.error || `Dígito de verificación: ${p.dv}`; h.className = p.error && n.value.trim() ? 'err' : 'hint'; };
   n.oninput();
+}
+async function guardarEmpresa(fd, e = {}) {
+  const nit = parseNit(fd.get('nit'));
+  if (nit.error) throw new Error(nit.error);
+  const row = { nombre: fd.get('nombre').trim(), nit: nit.nit, dv: nit.dv, tipo_persona: fd.get('tipo_persona'), regimen: fd.get('regimen'), actividad: fd.get('actividad').trim(),
+    responsable_iva: fd.get('responsable_iva') === 'on', responsabilidades: fd.get('responsabilidades').trim(), direccion: fd.get('direccion').trim(),
+    ciudad: fd.get('ciudad').trim(), telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
+  if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
+  if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y la ciudad: salen en las facturas.');
+  const g = await store.save('empresas', e.id ? { ...row, id: e.id } : row);
+  if (!e.id) {
+    // Numeraciones internas listas para notas y recibos; la de facturas la pone el usuario con su resolución DIAN.
+    for (const [tipo, prefijo] of [['NC', 'NC'], ['ND', 'ND'], ['RC', 'RC']]) await store.save('numeraciones', { empresa_id: g.id, tipo, prefijo, desde: 1, hasta: 999999999, siguiente: 1, activa: true, resolucion: '' });
+  }
+  S.eid = g.id; try { localStorage.setItem('agasoft-empresa', g.id); } catch (_) {}
+  await recargar();
+  return g;
+}
+function formEmpresa(e = {}) {
+  const f = dialogo(`<h2>${e.id ? 'Datos de la empresa' : 'Nueva empresa'}</h2>${camposEmpresa(e)}${pie(e.id ? 'Guardar' : 'Crear empresa')}`, async fd => {
+    await guardarEmpresa(fd, e);
+    toast(e.id ? 'Datos guardados.' : 'Empresa creada. Ahora registra la numeración de facturas.');
+    location.hash = e.id ? '#/empresa' : '#/numeraciones'; route();
+  }, { ancho: true });
+  activarNit(f);
 }
 function vEmpresa(m) {
   const e = emp();

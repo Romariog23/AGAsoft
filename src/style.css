@@ -190,6 +190,15 @@ main:focus{outline:none}
 .firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px}
 .firmas span{border-top:1px solid var(--fg);padding-top:4px;font-size:.82rem;text-align:center}
 
+/* Primer ingreso */
+body.onboarding .nav,body.onboarding #empSel,body.onboarding .menu-btn{display:none!important}
+body.onboarding .layout{grid-template-columns:minmax(0,1fr)}
+.onb{max-width:720px;width:100%;margin:0 auto}
+.onb-steps{display:flex;gap:8px;flex-wrap:wrap}
+.onb-steps span{font-size:.8rem;font-weight:600;padding:4px 10px;border-radius:99px;background:var(--surface-2);color:var(--muted)}
+.onb-steps span.on{background:var(--accent);color:var(--accent-fg)}
+.onb-steps span.done{background:var(--ok-soft);color:var(--ok)}
+
 /* Contabilidad */
 .filters>div{display:flex;flex-direction:column}
 .filters>div>input,.filters>div>select{flex:none;width:auto}
