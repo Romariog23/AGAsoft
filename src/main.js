@@ -109,7 +109,8 @@ const MENU = [
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
-  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'], ['importar', 'Importar plantillas'],
+  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
+  ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
 function renderNav(actual) {
@@ -136,7 +137,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' ? 'compras/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
+  renderNav(['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
   const m = $('main');
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
@@ -160,7 +161,7 @@ function route() {
     if (v === 'compraeditar') return vCompraEditor(m, { id: arg });
     if (v === 'cxp') return vCxp(m);
     if (v === 'proveedores') return vProveedores(m);
-    if (v === 'importar') return vImportar(m);
+    if (v === 'importar') return vImportar(m, arg);
     if (v === 'comp') return vComp(m, arg);
     if (v === 'compnuevo') return vCompEditor(m, { tipo: q.get('tipo') });
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
@@ -1727,14 +1728,16 @@ function vProveedores(m) {
 }
 
 /* ---------- Importar plantillas (datos descargados de la DIAN con el token) ---------- */
-function vImportar(m) {
-  m.innerHTML = `<header class="vhead"><div><h2>Importar plantillas</h2><p class="sub">Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.</p></div></header>
-    <section class="panel stack"><h3>Cómo se hace</h3><ol class="steps-list">
+function vImportar(m, solo) {
+  if (solo && !PLANTILLAS[solo]) solo = '';
+  m.innerHTML = `<header class="vhead"><div><h2>${solo ? 'Plantilla de ' + PLANTILLAS[solo].titulo.toLowerCase() : 'Importar plantillas'}</h2><p class="sub">Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.</p></div></header>
+    <section class="panel stack" ${solo ? 'hidden' : ''}><h3>Cómo se hace</h3><ol class="steps-list">
       <li>Con el <b>token de la DIAN</b> de la empresa, entra al catálogo de facturación electrónica y descarga en Excel los documentos <b>emitidos</b> (ventas) y <b>recibidos</b> (compras) del periodo.</li>
       <li>Descarga aquí la plantilla de AGAsoft que corresponda y pasa los datos a sus columnas, sin cambiar los títulos de la primera fila. Puedes dejar los dos ejemplos como guía y borrarlos al final.</li>
       <li>En Excel guarda la plantilla como <b>CSV</b> y súbela aquí. AGAsoft revisa todo y te muestra qué va a cargar antes de guardar nada.</li></ol>
       <p class="hint">Sube primero los terceros si los tienes. Si no, las facturas crean los clientes y proveedores que falten con el NIT y el nombre de la plantilla. Lo que ya existe (misma factura o mismo tercero) no se duplica.</p></section>
-    ${Object.entries(PLANTILLAS).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
+    ${solo ? '<p class="hint">Con el token de la DIAN descarga los documentos, pásalos a esta plantilla, guárdala como CSV y súbela. <a href="#/importar">Ver los pasos</a>.</p>' : ''}
+    ${Object.entries(PLANTILLAS).filter(([k]) => !solo || k === solo).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
       <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
       <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
   m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt)));
@@ -1764,7 +1767,7 @@ function previaImport(cual, rows) {
     <div class="row end"><button class="primary" id="go_${cual}" ${listos ? '' : 'disabled'}>Importar ${listos}</button></div></div>`;
   $('go_' + cual).onclick = async () => {
     const b = $('go_' + cual); b.disabled = true; b.textContent = 'Importando…';
-    try { const res = await ejecutarImport(cual, r); await cargarEmpresa(); vImportar($('main')); toast(res, /problema/.test(res)); }
+    try { const res = await ejecutarImport(cual, r); await cargarEmpresa(); route(); toast(res, /problema/.test(res)); }
     catch (e) { fail(e); b.disabled = false; b.textContent = `Importar ${listos}`; }
   };
 }
