@@ -40,9 +40,9 @@ let registro = false;
 $('aToggle').onclick = () => {
   registro = !registro;
   $('fNombre').hidden = !registro;
-  $('aSubmit').textContent = registro ? 'Solicitar acceso' : 'Entrar';
-  $('aToggle').textContent = registro ? 'Ya tengo cuenta: entrar' : 'No tengo cuenta: solicitar acceso';
-  $('authSub').textContent = registro ? 'Crea tu cuenta. El administrador debe aprobarla antes de que puedas usar AGAsoft.' : 'Entra con tu correo y tu clave.';
+  $('aSubmit').textContent = registro ? 'Empezar prueba gratis' : 'Entrar';
+  $('aToggle').textContent = registro ? 'Ya tengo cuenta: entrar' : 'No tengo cuenta: prueba gratis 15 días';
+  $('authSub').textContent = registro ? 'Crea tu cuenta y usa AGAsoft gratis durante 15 días. Al terminar escoges tu plan.' : 'Entra con tu correo y tu clave.';
   $('aPass').autocomplete = registro ? 'new-password' : 'current-password';
   $('eAuth').hidden = $('okAuth').hidden = true;
 };
@@ -56,7 +56,11 @@ $('authForm').addEventListener('submit', async ev => {
   if (registro && !nombre) return err('Escribe tu nombre.');
   $('aSubmit').disabled = true;
   try {
-    if (registro) { await store.signUp(email, pass, nombre); $('okAuth').textContent = 'Listo. Cuando el administrador apruebe tu cuenta, entra con este correo y esta clave.'; $('okAuth').hidden = false; }
+    if (registro) {
+      const r = await store.signUp(email, pass, nombre);
+      if (r?.session) return await iniciar();
+      $('okAuth').textContent = 'Listo: tienes 15 días gratis. Si te llegó un correo de confirmación, ábrelo; luego entra con este correo y esta clave.'; $('okAuth').hidden = false;
+    }
     else { await store.signIn(email, pass); await iniciar(); }
   } catch (e) { err(e.message); } finally { $('aSubmit').disabled = false; }
 });
@@ -76,6 +80,10 @@ async function iniciar() {
     $('authSub').textContent = 'Tu cuenta está pendiente de aprobación. Cuando el administrador la apruebe, vuelve a entrar.';
     await store.signOut(); return;
   }
+  if (S.perfil.prueba_hasta && S.perfil.prueba_hasta < hoy()) return finPrueba();
+  const dp = diasPrueba(S.perfil.prueba_hasta);
+  $('pruebaTag').hidden = dp === null;
+  if (dp !== null) { $('pruebaTag').textContent = dp ? `Prueba gratis: ${dp} día${dp === 1 ? '' : 's'}` : 'Prueba gratis: último día'; $('pruebaTag').classList.toggle('bad', dp <= 3); }
   $('auth').hidden = true; $('app').hidden = false;
   $('demoTag').hidden = store.mode !== 'local';
   $('salir').hidden = store.mode === 'local';
@@ -85,6 +93,51 @@ async function iniciar() {
   S.eid = S.empresas.find(e => e.id === guardada)?.id || S.empresas[0]?.id || null;
   await cargarEmpresa();
   route();
+}
+// Prueba gratis: días que le quedan (null si la cuenta no está en prueba).
+function diasPrueba(f) { return f ? Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5)) : null; }
+function opcionesPlan(planes, sel) {
+  return `<div class="planes-op" role="radiogroup" aria-label="Planes">${planes.map(p => `<label class="plan-op"><input type="radio" name="plan" value="${p.id}" ${p.id === sel ? 'checked' : ''}>
+    <span><b>${esc(p.nombre)}</b> · <span class="mono">${money(p.precio_mensual)}</span> al mes<br><small class="muted">${esc(p.descripcion)}</small></span></label>`).join('') || '<p class="muted">No hay planes disponibles. Comunícate con AGAsoft.</p>'}</div>`;
+}
+async function pedirPlan(cont) {
+  const id = cont.querySelector('input[name=plan]:checked')?.value;
+  if (!id) throw new Error('Escoge un plan.');
+  await store.solicitarPlan(id);
+}
+// Prueba vencida: la cuenta no entra a sus datos hasta que escoja un plan y el administrador lo apruebe.
+async function finPrueba() {
+  $('auth').hidden = false; $('app').hidden = true; $('authForm').hidden = true;
+  let card = $('planCard');
+  if (!card) { card = document.createElement('section'); card.id = 'planCard'; card.className = 'auth-card panel stack'; $('auth').append(card); }
+  let x = null, planes = [];
+  try { [x, planes] = await Promise.all([store.miPlan(), store.planesActivos()]); } catch (e) { fail(e); }
+  const pedido = x?.plan_solicitado;
+  card.innerHTML = `<div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft</h1></div>
+    <h2>Tu prueba gratis terminó</h2>
+    <p class="sub">Tus 15 días gratis terminaron el ${fFecha(S.perfil.prueba_hasta)}. Tus datos siguen guardados: escoge un plan y, cuando AGAsoft lo apruebe, sigues trabajando donde ibas.</p>
+    ${pedido ? `<p class="okmsg">Pediste el plan <b>${esc(pedido.nombre)}</b>. Cuando esté aprobado, vuelve a entrar.</p>` : ''}
+    ${opcionesPlan(planes, pedido?.id)}
+    <p class="err" id="ePlan" hidden></p>
+    <button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button>
+    <button class="ghost" id="salirP">Salir</button>`;
+  $('salirP').onclick = async () => { await store.signOut(); location.reload(); };
+  $('pedirP').onclick = async () => {
+    $('pedirP').disabled = true; $('ePlan').hidden = true;
+    try { await pedirPlan(card); S.perfil = await store.perfil(); await finPrueba(); toast('Plan pedido. AGAsoft lo revisa y lo aprueba.'); }
+    catch (e) { $('ePlan').textContent = e.message; $('ePlan').hidden = false; $('pedirP').disabled = false; }
+  };
+}
+async function cargarMiPlan() {
+  const box = $('miPlan'); if (!box) return;
+  try {
+    const [x, planes] = await Promise.all([store.miPlan(), store.planesActivos()]);
+    if (!$('miPlan')) return;
+    box.innerHTML = tuPlan(x, planes);
+    if ($('pedirP')) $('pedirP').onclick = async () => {
+      try { await pedirPlan(box); toast('Plan pedido. AGAsoft lo revisa y lo aprueba.'); cargarMiPlan(); } catch (e) { fail(e); }
+    };
+  } catch (_) { box.hidden = true; }
 }
 async function cargarEmpresa() {
   S.d = S.eid ? await store.loadEmpresa(S.eid) : null;
@@ -379,7 +432,7 @@ function vEmpresa(m) {
   <section class="panel stack danger"><h3>Zona de cuidado</h3>
     <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
   $('edit').onclick = () => formEmpresa(e);
-  if ($('miPlan')) store.miPlan().then(x => { if ($('miPlan')) $('miPlan').innerHTML = tuPlan(x); }).catch(() => { if ($('miPlan')) $('miPlan').hidden = true; });
+  cargarMiPlan();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
@@ -1803,13 +1856,18 @@ async function ejecutarImport(cual, r) {
   return msg + (errs.length ? ` ${errs.length} con problemas: ${errs.slice(0, 3).join('; ')}${errs.length > 3 ? '…' : ''}` : '');
 }
 
-// Plan de la cuenta y su uso (lo asigna el administrador en /admin).
-function tuPlan(x) {
+// Plan de la cuenta y su uso (lo asigna el administrador en /admin). En la prueba gratis, la cuenta escoge el plan que quiere.
+function tuPlan(x, planes = []) {
   if (!x) return '<h3>Tu plan</h3><p class="muted">Sin información.</p>';
   const p = x.plan, lim = (v, max) => `<span class="mono">${v}${max === null || max === undefined ? '' : ' de ' + max}</span>`;
+  const dp = diasPrueba(x.prueba_hasta), pedido = x.plan_solicitado;
+  const uso = `<dt>Contabilidades</dt><dd>${lim(x.empresas, p?.max_empresas)}</dd><dt>Documentos este mes</dt><dd>${lim(x.documentos_mes, p?.max_documentos_mes)}</dd>
+    <dt>Personas con acceso</dt><dd>${lim(x.usuarios, p?.max_usuarios)}</dd>`;
+  if (dp !== null) return `<h3>Tu plan</h3><dl class="kv"><dt>Plan</dt><dd><b>Prueba gratis</b> hasta el ${fFecha(x.prueba_hasta)} <span class="tag ${dp <= 3 ? 'bad' : 'el'}">${dp ? `Quedan ${dp} día${dp === 1 ? '' : 's'}` : 'Último día'}</span></dd>${uso}</dl>
+    <p class="sub">${pedido ? `Pediste el plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo aprueba y sigues sin interrupciones.` : 'Escoge el plan que quieres para cuando termine la prueba. AGAsoft lo aprueba y sigues sin interrupciones.'}</p>
+    ${opcionesPlan(planes, pedido?.id)}<div class="row"><button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button></div>`;
   return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(p.precio_mensual)} al mes</dd>
     <dt>Pagado hasta</dt><dd>${x.plan_vence ? fFecha(x.plan_vence) + (x.plan_vence < hoy() ? ' <span class="tag bad">Vencido</span>' : '') : 'Sin vencimiento'}</dd>
-    <dt>Contabilidades</dt><dd>${lim(x.empresas, p.max_empresas)}</dd><dt>Documentos este mes</dt><dd>${lim(x.documentos_mes, p.max_documentos_mes)}</dd>
-    <dt>Personas con acceso</dt><dd>${lim(x.usuarios, p.max_usuarios)}</dd></dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
+    ${uso}</dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
     <p class="hint">Para cambiar de plan o renovarlo, comunícate con AGAsoft.</p>`;
 }
