@@ -2,6 +2,7 @@
 // Funciones puras: totales, contabilización y cuentas por pagar.
 import { r2, num } from './calc.js';
 import { a8, esAuxiliar, parametrosDe } from './puc.js';
+import { cuentaIva } from './impuestos.js';
 
 const TIPOS_COMPRA = {
   FC: { nombre: 'Factura de proveedor', corto: 'Fact. prov.', plural: 'Facturas de proveedor', nuevo: 'Nueva factura de proveedor' },
@@ -20,7 +21,7 @@ function totalesCompra(lineas, ret = {}) {
 const totalEgreso = c => r2((c.aplicaciones || []).reduce((s, a) => s + num(a.valor), 0) + num(c.anticipo));
 
 const numCompra = c => `${c.tipo} ${c.numero}`;
-function asientoCompra(c, param) {
+function asientoCompra(c, param, tarifas) {
   if (!c || c.estado === 'anulado') return [];
   const P = parametrosDe(param), ref = numCompra(c), out = [];
   const mov = (cuenta, debito, credito, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'compra', cuenta: a8(cuenta), tercero_id: c.tercero_id || null, detalle, debito, credito }); };
@@ -34,10 +35,17 @@ function asientoCompra(c, param) {
   const t = totalesCompra(c.lineas, c);
   const det = `${nom} ${c.num_proveedor || c.numero}`;
   for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || det);
-  mov(P.iva_descontable, t.iva, 0, 'IVA descontable');
-  mov(c.cuenta_retefuente || P.retefuente_pagar, 0, t.retefuente, 'Retención en la fuente practicada');
-  mov(P.reteiva_pagar, 0, t.reteiva, 'ReteIVA practicado');
-  mov(P.reteica_pagar, 0, t.reteica, 'ReteICA practicado');
+  // IVA de cada línea a la cuenta de su tarifa (o la de los parámetros).
+  const ivaPor = {};
+  for (const l of c.lineas || []) { const ci = cuentaIva(tarifas, l.iva_pct, 'compra', P); ivaPor[ci] = r2((ivaPor[ci] || 0) + r2(r2(num(l.base)) * num(l.iva_pct) / 100)); }
+  for (const [ci, v] of Object.entries(ivaPor)) mov(ci, v, 0, 'IVA descontable');
+  // Retenciones que practica la empresa: la cuenta del concepto escogido (naturaleza crédito).
+  const R = c.retenciones || {};
+  const ret = (k, defecto, valor, nom) => { const r = R[k], cta = String(r?.cuenta || '').trim() || defecto, n = r?.nombre ? `${nom} · ${r.nombre}` : nom;
+    if ((r?.naturaleza || 'C') === 'C') mov(cta, 0, valor, n); else mov(cta, valor, 0, n); };
+  ret('retefuente', c.cuenta_retefuente || P.retefuente_pagar, t.retefuente, 'Retención en la fuente practicada');
+  ret('reteiva', P.reteiva_pagar, t.reteiva, 'ReteIVA practicado');
+  ret('reteica', P.reteica_pagar, t.reteica, 'ReteICA practicado');
   mov(String(c.cuenta_pago || '').trim() || P.proveedores, 0, t.neto, det);
   // Redondeo: la diferencia de centavos va a la primera línea.
   const dif = r2(out.reduce((s, m) => s + m.debito - m.credito, 0));

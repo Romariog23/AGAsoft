@@ -163,3 +163,35 @@ test('recibo de caja con forma de pago configurada', () => {
   const r = asiento({ ...rc, cuenta_pago: '11200501' }, { ...S, docs: S.documentos });
   assert.ok(cuadra(r)); assert.equal(r.find(m => m.cuenta === '11200501').debito, 600000); assert.ok(!r.some(m => m.cuenta === '11100501'));
 });
+
+test('retención con concepto: cuenta propia y la nota crédito al contrario', () => {
+  const ret = { retefuente: { concepto: 'x', nombre: 'Servicios', cuenta: '13551502', naturaleza: 'D' } };
+  const a = asiento({ ...fv, retenciones: ret }, { ...S, docs: S.documentos });
+  assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '13551502').debito, t.retefuente);
+  const n = asiento({ ...nc, retefuente_pct: 4, retefuente: 2000 }, { ...S, docs: [{ ...fv, retenciones: ret }] });
+  assert.ok(n.find(m => m.cuenta === '13551502').credito > 0);
+});
+test('IVA con cuenta propia por tarifa', () => {
+  const a = asiento(fv, { ...S, docs: S.documentos, tarifas: [{ tarifa: 19, cuenta_venta: '24080102' }] });
+  assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '24080102').credito, 190000);
+});
+test('cierre contable del año', async () => {
+  const { cierreAnual } = await import('../src/contab.js');
+  const ms = movimientos({ ...S, docs: S.documentos });
+  const r = cierreAnual(ms, '2026', '36050501', '36100501');
+  const d = r.lineas.reduce((s, l) => s + l.debito, 0), c = r.lineas.reduce((s, l) => s + l.credito, 0);
+  assert.ok(Math.abs(d - c) < 0.001); assert.ok(r.resultado > 0);
+  assert.equal(r.lineas.at(-1).cuenta, '36050501'); assert.equal(r.lineas.at(-1).credito, r.resultado);
+  // Con el cierre, el año queda en cero.
+  const ci = r.lineas.map(l => ({ ...l, fecha: r.fecha, tipo: 'CI' }));
+  const tot = [...ms, ...ci].filter(m => /^[4-7]/.test(m.cuenta)).reduce((s, m) => s + m.debito - m.credito, 0);
+  assert.ok(Math.abs(tot) < 0.001);
+});
+test('medios magnéticos: 1007 ingresos y 1008 saldos por tercero', async () => {
+  const { formato } = await import('../src/exogena.js');
+  const ms = movimientos({ ...S, docs: S.documentos });
+  const f7 = formato('1007', ms, '2026');
+  assert.ok(f7.some(f => f.tercero_id === 't1' && f.concepto === '4001' && f.ingreso > 0));
+  const f8 = formato('1008', ms, '2026');
+  assert.equal(f8.find(f => f.concepto === '1315').tercero_id, 't1');
+});
