@@ -70,3 +70,12 @@ test('nómina: el egreso paga saldos de nómina por cuenta', () => {
   assert.deepEqual(ce.map(m => [m.cuenta, m.debito, m.credito]), [['25050501', 2760000, 0], ['11100501', 0, 2760000]]);
   assert.equal(porPagarLaboral([...ms, ...ce], 't1').find(x => x.cuenta === '25050501'), undefined);
 });
+
+test('pensionado: sin pensión ni solidaridad, salud completa', () => {
+  const P = paramNomina({ nomina: { exonerada: false } });
+  const l = liquidar({ id: 'e', tercero_id: 't', salario: 8000000, pensionado: true, eps_id: 'eps' }, {}, P);
+  const k = l.items.map(i => i.k);
+  assert.ok(!k.includes('pension') && !k.includes('pension_emp') && !k.includes('solidaridad'));
+  assert.equal(l.items.find(i => i.k === 'salud').valor, 320000);
+  assert.equal(l.items.find(i => i.k === 'salud_emp').valor, 680000);
+});

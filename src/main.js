@@ -1400,7 +1400,7 @@ const pNom = () => paramNomina(emp()?.contabilidad);
 const siguienteNomina = () => Math.max(0, ...nominas().map(n => Number(n.numero) || 0)) + 1;
 const nomArea = a => (AREAS.find(x => x[0] === a) || AREAS[0])[1];
 const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); return d.toISOString().slice(0, 10); };
-const faltaTablaNomina = e => /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
+const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
 const optsTerceros = (sel, excluir) => `<option value="">—</option>` + [...S.d.terceros].filter(t => t.id !== excluir).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 
 function vEmpleados(m) {
@@ -1432,8 +1432,9 @@ function formEmpleado(e) {
     <div class="grid2">${campo('salario', 'Salario mensual', num(e.salario) || '', 'type="number" min="0" step="1" class="mono" required')}${campo('fecha_ingreso', 'Fecha de ingreso', e.fecha_ingreso || '', 'type="date"')}</div>
     <div class="grid2">${campoSel('area', 'Área (define la cuenta del gasto)', AREAS.map(([k, n, c]) => [k, `${n} · ${c}`]), e.area || 'admin')}${campoSel('riesgo', 'Clase de riesgo ARL', RIESGOS.map(([k, n]) => [k, n]), e.riesgo || '1')}</div>
     <p>${check('auxilio', `Tiene derecho a auxilio de transporte (solo aplica si gana hasta 2 salarios mínimos: ${money(2 * P.smmlv)})`, e.auxilio !== false)}</p>
+    <p>${check('pensionado', 'Es pensionado (no se le descuenta ni se le paga pensión ni fondo de solidaridad; la salud sí se liquida completa)', e.pensionado === true)}</p>
     <h3>Entidades</h3>
-    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsTerceros(e.eps_id, e.tercero_id)}</select></div><div><label for="f_pen">Fondo de pensiones</label><select id="f_pen" name="pension_id">${optsTerceros(e.pension_id, e.tercero_id)}</select></div></div>
+    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsTerceros(e.eps_id, e.tercero_id)}</select></div><div><label for="f_pen">Fondo de pensiones <span class="hint">(no aplica si es pensionado)</span></label><select id="f_pen" name="pension_id">${optsTerceros(e.pension_id, e.tercero_id)}</select></div></div>
     <div class="grid2"><div><label for="f_ces">Fondo de cesantías</label><select id="f_ces" name="cesantias_id">${optsTerceros(e.cesantias_id, e.tercero_id)}</select></div><div><label for="f_caja">Caja de compensación</label><select id="f_caja" name="caja_id">${optsTerceros(e.caja_id, e.tercero_id)}</select></div></div>
     <p class="hint">Si una entidad no está en la lista, créala primero en Proveedores con su NIT. La ARL, el ICBF y el SENA son de la empresa: van en Configuración de nómina.</p>
     <div class="grid2">${campo('banco', 'Banco', e.banco || '', 'maxlength="60"')}${campo('cuenta_bancaria', 'Cuenta bancaria', e.cuenta_bancaria || '', 'maxlength="40" class="mono"')}</div>
@@ -1445,7 +1446,7 @@ function formEmpleado(e) {
     if (empleados().some(x => x.id !== e.id && x.tercero_id === tercero_id)) throw new Error('Esa persona ya es empleado.');
     const ent = k => fd.get(k) || null;
     const row = { empresa_id: S.eid, tercero_id, cargo: String(fd.get('cargo') || '').trim(), contrato: fd.get('contrato'), salario, fecha_ingreso: fd.get('fecha_ingreso') || null, area: fd.get('area'), riesgo: fd.get('riesgo'),
-      auxilio: fd.get('auxilio') === 'on', eps_id: ent('eps_id'), pension_id: ent('pension_id'), cesantias_id: ent('cesantias_id'), caja_id: ent('caja_id'), banco: String(fd.get('banco') || '').trim(), cuenta_bancaria: String(fd.get('cuenta_bancaria') || '').trim(),
+      auxilio: fd.get('auxilio') === 'on', ...(fd.get('pensionado') === 'on' || e.pensionado !== undefined ? { pensionado: fd.get('pensionado') === 'on' } : {}), eps_id: ent('eps_id'), pension_id: ent('pension_id'), cesantias_id: ent('cesantias_id'), caja_id: ent('caja_id'), banco: String(fd.get('banco') || '').trim(), cuenta_bancaria: String(fd.get('cuenta_bancaria') || '').trim(),
       ...(e.id ? { fecha_retiro: fd.get('fecha_retiro') || null, activo: fd.get('activo') === 'on' } : { activo: true }) };
     try { await store.save('empleados', e.id ? { ...row, id: e.id } : row); } catch (x) { throw new Error(faltaTablaNomina(x)); }
     await cargarEmpresa(); toast('Empleado guardado.'); route();
