@@ -164,6 +164,28 @@ do $$ declare t text; begin
   end loop;
 end $$;
 
+/* ============ Contabilidad: PUC con homologación NIIF ============ */
+create table if not exists public.cuentas (
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid not null references public.empresas(id) on delete cascade,
+  codigo text not null check (codigo ~ '^[0-9]{1,12}$'),
+  nombre text not null check (length(trim(nombre)) > 0),
+  naturaleza text not null default 'D' check (naturaleza in ('D', 'C')),
+  niif_rubro text,
+  niif_codigo text not null default '',
+  activa boolean not null default true,
+  creado_en timestamptz not null default now(),
+  unique (empresa_id, codigo)
+);
+alter table public.cuentas enable row level security;
+drop policy if exists cuentas_ver on public.cuentas;
+create policy cuentas_ver on public.cuentas for select to authenticated using (public.puede_ver(empresa_id));
+drop policy if exists cuentas_editar on public.cuentas;
+create policy cuentas_editar on public.cuentas for all to authenticated using (public.es_dueno(empresa_id)) with check (public.es_dueno(empresa_id));
+-- Cuentas que usa la contabilización automática (clientes, IVA, ingresos, retenciones, caja, bancos…).
+alter table public.empresas add column if not exists contabilidad jsonb not null default '{}'::jsonb;
+alter table public.productos add column if not exists cuenta_ingreso text not null default '';
+
 /* ============ Documentos de venta ============ */
 create table if not exists public.documentos (
   id uuid primary key default gen_random_uuid(),

@@ -3,7 +3,7 @@
 //  - "local": datos solo en este navegador, para probar sin configurar nada (modo demostración).
 import { createClient } from '@supabase/supabase-js';
 
-const TABLAS = ['terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros'];
+const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const ahora = () => new Date().toISOString();
 
@@ -24,6 +24,7 @@ function localStore() {
   let db;
   try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (_) { db = null; }
   if (!db) db = { empresas: [], ...Object.fromEntries(TABLAS.map(t => [t, []])) };
+  for (const t of ['empresas', ...TABLAS]) db[t] = db[t] || [];
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) { /* sin almacenamiento: queda en memoria */ } };
   const user = { id: 'demo', email: 'demo@agasoft.local' };
   const api = {
@@ -40,6 +41,7 @@ function localStore() {
       if (t === 'empresas') nuevo.owner = user.id;
       list.push(nuevo); persist(); return { ...nuevo };
     },
+    async saveMany(t, rows) { for (const r of rows) db[t].push({ creado_en: ahora(), ...r, id: uid() }); persist(); },
     async remove(t, id) {
       db[t] = db[t].filter(r => r.id !== id);
       if (t === 'documentos') { db.items = db.items.filter(r => r.documento_id !== id); db.aplicaciones = db.aplicaciones.filter(r => r.recibo_id !== id); }
@@ -100,6 +102,7 @@ function supabaseStore(url, key) {
       if (id) return ok(await sb.from(t).update(campos).eq('id', id).select().single());
       return ok(await sb.from(t).insert(campos).select().single());
     },
+    async saveMany(t, rows) { for (let i = 0; i < rows.length; i += 500) ok(await sb.from(t).insert(rows.slice(i, i + 500))); },
     async remove(t, id) {
       if (t === 'documentos') { ok(await sb.rpc('borrar_borrador', { p_id: id })); return; }
       ok(await sb.from(t).delete().eq('id', id));

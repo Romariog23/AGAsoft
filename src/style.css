@@ -190,6 +190,38 @@ main:focus{outline:none}
 .firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px}
 .firmas span{border-top:1px solid var(--fg);padding-top:4px;font-size:.82rem;text-align:center}
 
+/* Contabilidad */
+.filters>div{display:flex;flex-direction:column}
+.filters>div>input,.filters>div>select{flex:none;width:auto}
+.filters .grow{flex:1 1 220px}
+.filters .per{align-self:flex-end;flex-direction:row}
+.par{margin-top:12px}
+.span-all{grid-column:1 / -1}
+details>summary{cursor:pointer}
+.puc tr.lv1 td,.bal tr.lv1 td{font-weight:800;background:var(--surface-2)}
+.puc tr.lv2 td,.bal tr.lv2 td{font-weight:700}
+.puc tr.lv4 td:nth-child(2),.bal tr.lv4 td:nth-child(2){padding-left:16px}
+.puc tr.lv6 td:nth-child(2),.bal tr.lv6 td:nth-child(2){padding-left:28px;color:var(--muted)}
+.puc tr.lv8 td:nth-child(2),.bal tr.lv8 td:nth-child(2){padding-left:40px;color:var(--muted)}
+.inf-head{margin-bottom:12px}
+.inf-per{font-size:1rem!important;font-family:var(--f-body)}
+.inf{display:flex;flex-direction:column;gap:4px;max-width:760px;margin-top:12px}
+.inf-g{display:flex;flex-direction:column;gap:4px;margin-bottom:18px}
+.inf h3{font-size:.9rem;color:var(--fg);border-bottom:2px solid var(--accent);padding-bottom:4px}
+.inf h4{margin:10px 0 2px;font-size:.85rem;color:var(--muted);font-weight:700}
+.inf-l>summary,.inf-l.plain,.inf-l.sub,.inf-l.tot{display:flex;justify-content:space-between;gap:16px;padding:5px 8px;border-radius:6px}
+.inf-l>summary{list-style:none}
+.inf-l>summary::-webkit-details-marker{display:none}
+.inf-l>summary::before{content:"▸";color:var(--muted);margin-right:-8px;width:12px}
+.inf-l[open]>summary::before{content:"▾"}
+.inf-l>summary span:first-of-type{flex:1}
+.inf-l>summary:hover{background:var(--surface-2)}
+.inf-c{display:flex;justify-content:space-between;gap:16px;padding:3px 8px 3px 30px;font-size:.85rem;color:var(--muted);text-decoration:none}
+.inf-c:hover{color:var(--fg)}
+.inf-l.sub{border-top:1px solid var(--line);font-weight:600}
+.inf-l.tot{font-weight:700;background:var(--surface-2)}
+.inf-l.big{font-size:1.08rem;background:var(--accent-soft)}
+
 /* Diálogo y aviso */
 dialog{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--surface);color:var(--fg);width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
 dialog.wide{width:min(720px,calc(100vw - 32px))}

@@ -2,6 +2,8 @@ import './style.css';
 import { crearStore, numeracionPara } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
+import { planInicial, RUBROS, RUBRO, PARAMETROS, parametrosPorDefecto, nivelDe } from './puc.js';
+import { asiento, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -78,6 +80,9 @@ async function iniciar() {
 }
 async function cargarEmpresa() {
   S.d = S.eid ? await store.loadEmpresa(S.eid) : null;
+  if (S.d && !S.d.cuentas.length) {
+    try { await store.saveMany('cuentas', planInicial().map(c => ({ ...c, empresa_id: S.eid }))); S.d.cuentas = (await store.loadEmpresa(S.eid)).cuentas; } catch (_) { /* sin permiso para crear el plan */ }
+  }
   $('empSel').innerHTML = S.empresas.map(e => `<option value="${e.id}" ${e.id === S.eid ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('') + '<option value="__nueva">+ Nueva empresa</option>';
   $('empSel').hidden = !S.empresas.length;
 }
@@ -94,6 +99,7 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
+  ['-', 'Contabilidad'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['puc', 'Plan de cuentas PUC y NIIF'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['productos', 'Productos y servicios'], ['numeraciones', 'Numeraciones'], ['empresa', 'Empresa'],
 ];
 function renderNav(actual) {
@@ -122,6 +128,11 @@ function route() {
     if (v === 'numeraciones') return vNumeraciones(m);
     if (v === 'empresa') return vEmpresa(m);
     if (v === 'usuarios') return vUsuarios(m);
+    if (v === 'puc') return vPuc(m);
+    if (v === 'balance') return vBalance(m);
+    if (v === 'auxiliar') return vAuxiliar(m, q);
+    if (v === 'esf') return vEsf(m);
+    if (v === 'er') return vEr(m);
     vInicio(m);
   } catch (e) { fail(e); }
 }
@@ -603,6 +614,7 @@ function vDoc(m, id) {
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
+    ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>Los pagos de este recibo dejan de aplicarse a las facturas.</p>
@@ -692,12 +704,13 @@ function formProducto(p = {}) {
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
     <div class="grid2">${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}${campoSel('iva_pct', 'IVA', [['19', '19%'], ['5', '5%'], ['0', 'Excluido o exento (0%)']], String(num(p.iva_pct ?? 19)))}</div>
+    <div><label for="f_cta">Cuenta de ingreso</label><select id="f_cta" name="cuenta_ingreso"><option value="">La de la empresa (${esc(param().ingresos)})</option>${S.d.cuentas.filter(c => /^4[12]/.test(c.codigo) && c.codigo.length >= 6).map(c => `<option value="${c.codigo}" ${c.codigo === p.cuenta_ingreso ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>
     ${p.id ? check('activo', 'Activo (aparece al facturar)', p.activo !== false) : ''}
     ${pie()}`, async fd => {
     const codigo = String(fd.get('codigo')).trim(), nombre = String(fd.get('nombre')).trim();
     if (!codigo || !nombre) throw new Error('Escribe el código y el nombre.');
     if (S.d.productos.some(x => x.id !== p.id && x.codigo.toLowerCase() === codigo.toLowerCase())) throw new Error('Ya existe un producto con ese código.');
-    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), activo: p.id ? fd.get('activo') === 'on' : true };
+    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', activo: p.id ? fd.get('activo') === 'on' : true };
     await store.save('productos', p.id ? { ...row, id: p.id } : row); await cargarEmpresa(); toast('Guardado.'); route();
   });
 }
@@ -821,6 +834,171 @@ async function vUsuarios(m) {
       <td class="r">${p.id === S.user.id ? '' : `<button class="sm ${p.aprobado ? 'ghost' : 'primary'}" data-ap="${p.id}" data-v="${!p.aprobado}">${p.aprobado ? 'Quitar acceso' : 'Aprobar'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     $('lst').onclick = async ev => { const b = ev.target.closest('[data-ap]'); if (!b) return; try { await store.setPerfil(b.dataset.ap, { aprobado: b.dataset.v === 'true' }); vUsuarios(m); } catch (e) { fail(e); } };
   } catch (e) { $('lst').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+/* ---------- Contabilidad ---------- */
+const param = () => ({ ...parametrosPorDefecto(), ...(emp()?.contabilidad || {}) });
+const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos });
+const movs = () => movimientos({ ...S.d, param: param() });
+const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
+const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
+const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: hoy() };
+const linkDoc = m => `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
+const valor = v => v ? money(v) : '';
+function tablaAsiento(ms) {
+  if (!ms.length) return '<p class="muted">Este documento no genera movimientos.</p>';
+  const d = ms.reduce((s, m) => s + m.debito, 0), c = ms.reduce((s, m) => s + m.credito, 0);
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+    ${ms.map(m => `<tr><td class="mono"><a href="#/auxiliar?cuenta=${m.cuenta}">${m.cuenta}</a></td><td>${esc(nomCta(m.cuenta))}</td><td>${esc(m.tercero_id ? terc(m.tercero_id)?.nombre : '')}</td><td>${esc(m.detalle)}</td><td class="r mono">${valor(m.debito)}</td><td class="r mono">${valor(m.credito)}</td></tr>`).join('')}
+    <tr class="strong"><td colspan="4">Sumas iguales</td><td class="r mono">${money(d)}</td><td class="r mono">${money(c)}</td></tr></tbody></table></div>`;
+}
+function filtroFechas(id, conDesde, onChange) {
+  setTimeout(() => {
+    const box = $(id); if (!box) return;
+    box.querySelectorAll('input[type=date]').forEach(i => i.onchange = () => { F[i.name] = i.value; onChange(); });
+    box.querySelectorAll('[data-per]').forEach(b => b.onclick = () => {
+      const h = hoy(), y = h.slice(0, 4), mth = h.slice(0, 7);
+      const per = { mes: [mth + '-01', h], ano: [y + '-01-01', h], anterior: [(y - 1) + '-01-01', (y - 1) + '-12-31'] }[b.dataset.per];
+      [F.desde, F.hasta] = per; box.querySelector('[name=desde]') && (box.querySelector('[name=desde]').value = F.desde); box.querySelector('[name=hasta]').value = F.hasta; onChange();
+    });
+  });
+  return `<div class="row filters" id="${id}">${conDesde ? `<div><label for="${id}d">Desde</label><input id="${id}d" type="date" name="desde" value="${F.desde}"></div>` : ''}
+    <div><label for="${id}h">${conDesde ? 'Hasta' : 'Fecha de corte'}</label><input id="${id}h" type="date" name="hasta" value="${F.hasta}"></div>
+    <div class="row per">${conDesde ? '<button type="button" class="sm" data-per="mes">Este mes</button>' : ''}<button type="button" class="sm" data-per="ano">Este año</button><button type="button" class="sm" data-per="anterior">Año anterior</button></div></div>`;
+}
+const cabInforme = (titulo, sub) => `<header class="rep-head inf-head"><div><h2>${esc(emp().nombre)}</h2><p>NIT ${fmtNit(emp().nit)}-${emp().dv}</p></div><div class="rep-num"><span>${esc(titulo.toUpperCase())}</span><b class="inf-per">${sub}</b></div></header>`;
+
+function vPuc(m) {
+  let q = '', soloMov = false;
+  const P = param();
+  m.innerHTML = `<header class="vhead"><div><h2>Plan de cuentas PUC y NIIF</h2><p class="sub">PUC para comerciantes (Decreto 2650 de 1993). Cada cuenta se homologa a un rubro de los estados financieros NIIF para Pymes.</p></div><button class="primary" id="nueva">Nueva cuenta auxiliar</button></header>
+  <details class="panel"><summary><b>Cuentas de la contabilización automática</b> <span class="muted">· a dónde van facturas, notas y recibos</span></summary>
+    <form id="parF" class="grid2 par">${Object.entries(PARAMETROS).map(([k, [, label]]) => `<div><label for="par_${k}">${label}</label><input id="par_${k}" name="${k}" list="ctasAux" class="mono" value="${esc(P[k])}"><p class="hint" data-n="${k}">${esc(nomCta(P[k]))}</p></div>`).join('')}
+      <div class="row end span-all"><button class="primary">Guardar cuentas</button></div></form>
+    <datalist id="ctasAux">${S.d.cuentas.filter(c => c.codigo.length >= 6).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist></details>
+  <div class="row filters"><input id="q" type="search" placeholder="Buscar por código o nombre"><label class="check"><input type="checkbox" id="sm"> Solo cuentas con movimiento</label></div>
+  <section class="panel" id="lst"></section>`;
+  const conMov = new Set(movs().flatMap(x => [1, 2, 4, 6, 8].map(n => x.cuenta.slice(0, n))));
+  const pintar = () => {
+    const idx = idxCuentas();
+    const l = [...S.d.cuentas].filter(c => (!q || c.codigo.startsWith(q) || c.nombre.toLowerCase().includes(q)) && (!soloMov || conMov.has(c.codigo))).sort((a, b) => a.codigo.localeCompare(b.codigo));
+    $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl puc"><thead><tr><th>Código</th><th>Nombre</th><th>Nat.</th><th>Rubro NIIF</th><th>Código NIIF</th><th></th></tr></thead><tbody>
+      ${l.slice(0, 600).map(c => { const r = rubroDe(c.codigo, idx); const propio = !!c.niif_rubro; return `<tr class="lv${c.codigo.length}"><td class="mono">${c.codigo}</td><td>${esc(c.nombre)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
+        <td class="${propio ? '' : 'muted'}">${r ? esc(RUBRO[r]?.nombre) : '—'}${r && RUBRO[r]?.estado !== '—' ? ` <span class="tag">${RUBRO[r].estado}</span>` : ''}</td><td class="mono">${esc(c.niif_codigo)}</td>
+        <td class="r nowrap">${conMov.has(c.codigo) ? `<a class="btn ghost sm" href="#/auxiliar?cuenta=${c.codigo}">Auxiliar</a>` : ''}<button class="ghost sm" data-ed="${c.id}">Editar</button></td></tr>`; }).join('')}
+      </tbody></table></div>${l.length > 600 ? '<p class="hint">Se muestran las primeras 600 cuentas. Usa el buscador.</p>' : ''}`;
+  };
+  $('q').oninput = () => { q = $('q').value.trim().toLowerCase(); pintar(); };
+  $('sm').onchange = () => { soloMov = $('sm').checked; pintar(); };
+  $('lst').onclick = ev => { const b = ev.target.closest('[data-ed]'); if (b) formCuenta(S.d.cuentas.find(c => c.id === b.dataset.ed)); };
+  $('nueva').onclick = () => formCuenta();
+  $('parF').oninput = ev => { const k = ev.target.name; const h = m.querySelector(`[data-n="${k}"]`); if (h) h.textContent = nomCta(ev.target.value.trim()); };
+  $('parF').onsubmit = async ev => {
+    ev.preventDefault();
+    const fd = new FormData($('parF')); const idx = idxCuentas(); const nuevo = {};
+    for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); nuevo[k] = v; }
+    try { await store.save('empresas', { id: S.eid, contabilidad: nuevo }); await recargar(); toast('Cuentas guardadas. Los informes ya usan estas cuentas.'); } catch (e) { fail(e); }
+  };
+  pintar();
+}
+function formCuenta(c = {}) {
+  const nueva = !c.id;
+  const usada = c.codigo && movs().some(x => x.cuenta.startsWith(c.codigo));
+  const f = dialogo(`<h2>${nueva ? 'Nueva cuenta' : `Cuenta ${esc(c.codigo)}`}</h2>
+    ${nueva ? `${campo('codigo', 'Código', '', 'required inputmode="numeric" class="mono" pattern="[0-9]{6,12}" placeholder="11100501"')}<p class="hint" id="ctaPadre">Debe empezar por una cuenta que ya exista. Ej.: 111005 + 01 para una cuenta bancaria.</p>` : ''}
+    ${campo('nombre', 'Nombre', c.nombre, 'required maxlength="120"')}
+    <div class="grid2">${campoSel('naturaleza', 'Naturaleza', [['D', 'Débito'], ['C', 'Crédito']], c.naturaleza || 'D')}
+    ${campo('niif_codigo', 'Código en el plan NIIF (opcional)', c.niif_codigo, 'class="mono" maxlength="20"')}</div>
+    <div><label for="f_rub">Rubro NIIF (línea del estado financiero)</label><select id="f_rub" name="niif_rubro"><option value="">Igual que la cuenta padre</option>
+      ${['ESF', 'ER', '—'].map(e => `<optgroup label="${e === 'ESF' ? 'Estado de situación financiera' : e === 'ER' ? 'Estado de resultados' : 'Otros'}">${RUBROS.filter(r => r.estado === e).map(r => `<option value="${r.id}" ${r.id === c.niif_rubro ? 'selected' : ''}>${esc(r.seccion)} · ${esc(r.nombre)}</option>`).join('')}</optgroup>`).join('')}</select></div>
+    ${!nueva && !usada && c.codigo.length > 4 ? '<div class="row"><button value="del" class="ghost">Borrar cuenta</button></div>' : ''}
+    ${pie()}`, async (fd, btn) => {
+    if (btn === 'del') { await store.remove('cuentas', c.id); await cargarEmpresa(); toast('Cuenta borrada.'); route(); return; }
+    const row = { empresa_id: S.eid, nombre: String(fd.get('nombre')).trim(), naturaleza: fd.get('naturaleza'), niif_rubro: fd.get('niif_rubro') || null, niif_codigo: String(fd.get('niif_codigo') || '').trim() };
+    if (!row.nombre) throw new Error('Escribe el nombre de la cuenta.');
+    if (nueva) {
+      const cod = String(fd.get('codigo')).trim();
+      if (!/^\d{6,12}$/.test(cod) || cod.length % 2) throw new Error('El código lleva 6, 8, 10 o 12 dígitos.');
+      if (idxCuentas()[cod]) throw new Error('Ya existe una cuenta con ese código.');
+      if (!idxCuentas()[cod.slice(0, cod.length - 2)]) throw new Error(`Primero debe existir la cuenta ${cod.slice(0, cod.length - 2)}.`);
+      row.codigo = cod; row.activa = true;
+    }
+    await store.save('cuentas', nueva ? row : { ...row, id: c.id }); await cargarEmpresa(); toast('Cuenta guardada.'); route();
+  });
+  if (nueva) {
+    const i = f.querySelector('[name=codigo]');
+    i.oninput = () => { const cod = i.value.trim(); const p = idxCuentas()[cod.slice(0, cod.length - 2)]; $('ctaPadre').textContent = cod.length >= 6 ? (p ? `Queda dentro de ${p.codigo} ${p.nombre}.` : `No existe la cuenta ${cod.slice(0, cod.length - 2)}.`) : 'Debe empezar por una cuenta que ya exista.'; if (p) f.querySelector('[name=naturaleza]').value = p.naturaleza; };
+  }
+}
+
+function vBalance(m) {
+  let nivel = '4';
+  m.innerHTML = `<header class="vhead"><h2>Balance de prueba</h2><button id="csv">Descargar CSV</button></header>
+    ${filtroFechas('fb', true, () => pintar())}
+    <div class="row filters"><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['99', 'Auxiliar (todo)']], nivel)}</select></div>
+    <section class="panel" id="out"></section>`;
+  let b;
+  const pintar = () => {
+    b = balancePrueba(movs(), S.d.cuentas, F.desde, F.hasta);
+    const l = b.filas.filter(f => f.codigo.length <= Number(nivel));
+    $('out').innerHTML = cabInforme('Balance de prueba', `${fFecha(F.desde)} a ${fFecha(F.hasta)}`) + (l.length ? `<div class="tbl-wrap"><table class="tbl bal"><thead><tr><th>Código</th><th>Cuenta</th><th class="r">Saldo anterior</th><th class="r">Débitos</th><th class="r">Créditos</th><th class="r">Saldo final</th></tr></thead><tbody>
+      ${l.map(f => `<tr class="lv${f.codigo.length} click" data-go="#/auxiliar?cuenta=${f.codigo}"><td class="mono">${f.codigo}</td><td>${esc(f.nombre)}</td><td class="r mono">${valor(f.inicial)}</td><td class="r mono">${valor(f.debito)}</td><td class="r mono">${valor(f.credito)}</td><td class="r mono">${valor(f.final)}</td></tr>`).join('')}
+      <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(b.debitos)}</td><td class="r mono">${money(b.creditos)}</td><td></td></tr></tbody></table></div>
+      ${Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.</p>` : '<p class="muted">No hay movimientos en este periodo. Los movimientos salen de las facturas, notas y recibos emitidos.</p>');
+  };
+  $('niv').onchange = () => { nivel = $('niv').value; pintar(); };
+  $('csv').onclick = () => descargar(`balance-${emp().nit}-${F.hasta}.csv`, '﻿' + [['Código', 'Cuenta', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']].concat(b.filas.filter(f => f.codigo.length <= Number(nivel)).map(f => [f.codigo, f.nombre, f.inicial, f.debito, f.credito, f.final].map(v => typeof v === 'number' ? String(v).replace('.', ',') : v))).map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  pintar();
+}
+
+function vAuxiliar(m, q) {
+  let cuenta = q.get('cuenta') || param().clientes, tercero = '';
+  const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
+  m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
+    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAll" class="mono" value="${esc(cuenta)}"></div>
+      <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
+    <datalist id="ctasAll">${S.d.cuentas.filter(c => conMov.some(x => x.startsWith(c.codigo))).map(c => `<option value="${c.codigo}">${esc(c.nombre)}</option>`).join('')}</datalist>
+    ${filtroFechas('fa', true, () => pintar())}
+    <section class="panel" id="out"></section>`;
+  const pintar = () => {
+    const a = libroAuxiliar(movs(), S.d.cuentas, cuenta, F.desde, F.hasta, tercero);
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 6 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+      <tr class="muted"><td colspan="${cuenta.length < 6 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 6 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
+      <tr class="strong"><td colspan="${cuenta.length < 6 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
+  };
+  $('cta').onchange = () => { cuenta = $('cta').value.trim().split(' ')[0]; history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar(); };
+  $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
+  pintar();
+}
+
+function lineaInforme(x) {
+  return x.cuentas?.length ? `<details class="inf-l"><summary><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></summary>
+    ${x.cuentas.map(c => `<a class="inf-c" href="#/auxiliar?cuenta=${c.codigo}"><span><span class="mono">${c.codigo}</span> ${esc(c.nombre)}</span><span class="mono">${money(c.valor)}</span></a>`).join('')}</details>`
+    : `<div class="inf-l plain"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>`;
+}
+function vEsf(m) {
+  m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}<section class="panel" id="out"></section>`;
+  const pintar = () => {
+    const e = situacionFinanciera(movs(), S.d.cuentas, F.hasta);
+    $('out').innerHTML = cabInforme('Estado de situación financiera', `A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. Toca un rubro para ver las cuentas del PUC que lo forman.</p>
+      <div class="inf">${e.grupos.map(g => `<section class="inf-g"><h3>${g.titulo}</h3>${g.secciones.map(sx => sx.lineas.length ? `${sx.titulo ? `<h4>${sx.titulo}</h4>` : ''}${sx.lineas.map(lineaInforme).join('')}<div class="inf-l sub"><span>Total ${(sx.titulo || g.titulo).toLowerCase()}</span><span class="mono">${money(sx.lineas.reduce((s, x) => s + x.valor, 0))}</span></div>` : '').join('') || '<p class="muted">Sin saldos.</p>'}
+        <div class="inf-l tot"><span>Total ${g.titulo.toLowerCase()}</span><span class="mono">${money(g.total)}</span></div></section>`).join('')}
+        <div class="inf-l tot big"><span>Total pasivo y patrimonio</span><span class="mono">${money(e.pasivo + e.patrimonio)}</span></div></div>
+      ${e.cuadra ? '<p class="okmsg">El activo es igual al pasivo más el patrimonio.</p>' : `<p class="err">No cuadra: diferencia de ${money(e.activo - e.pasivo - e.patrimonio)}. Revisa la homologación de las cuentas.</p>`}
+      <p class="hint">El resultado del ejercicio incluye los ingresos, costos y gastos que aún no se han cerrado contra la cuenta 36.</p>`;
+  };
+  pintar();
+}
+function vEr(m) {
+  m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}<section class="panel" id="out"></section>`;
+  const pintar = () => {
+    const r = estadoResultados(movs(), S.d.cuentas, F.desde, F.hasta);
+    $('out').innerHTML = cabInforme('Estado de resultados', `Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
+      <div class="inf">${r.secciones.map(sx => sx.total ? `<div class="inf-l tot ${sx.final ? 'big' : ''}"><span>${sx.total}</span><span class="mono">${money(sx.valor)}</span></div>`
+        : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
+  };
+  pintar();
 }
 
 iniciar().catch(e => { document.body.insertAdjacentHTML('afterbegin', `<p class="err" style="padding:16px">No se pudo iniciar AGAsoft: ${esc(e.message)}</p>`); });
