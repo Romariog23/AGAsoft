@@ -759,7 +759,7 @@ function importarCSV(cual) {
   });
   f.querySelector('[name=archivo]').onchange = async ev => {
     const file = ev.target.files[0]; if (!file) return;
-    let txt = await file.text(); if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
+    let txt = await file.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
     const rows = parseCSV(txt); const head = rows[0].map(norm); const map = {};
     for (const [k, alias] of Object.entries(COLS[cual])) { const i = head.findIndex(h => alias.includes(h)); if (i >= 0) map[k] = i; }
     f._filas = rows.slice(1).map(r => Object.fromEntries(Object.entries(map).map(([k, i]) => [k, (r[i] || '').trim()])));
