@@ -2,6 +2,7 @@ import './style.css';
 import { crearStore, numeracionPara } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
+import { COLOMBIA } from './colombia.js';
 import { planInicial, RUBROS, RUBRO, PARAMETROS, parametrosPorDefecto, nivelDe } from './puc.js';
 import { asiento, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -143,7 +144,7 @@ function sinEmpresa(m) {
   document.body.classList.add('onboarding');
   m.innerHTML = `<section class="onb stack">
     <div class="onb-steps"><span class="on">1. Datos de la empresa</span><span>2. Resolución de facturación</span></div>
-    <h2>Bienvenido a AGAsoft${S.perfil?.nombre ? ', ' + esc(S.perfil.nombre.split(' ')[0]) : ''}</h2>
+    <h2>Te damos la bienvenida a AGAsoft${store.mode !== 'local' && S.perfil?.nombre ? ', ' + esc(S.perfil.nombre.split(' ')[0]) : ''}</h2>
     <p class="sub">Antes de empezar, registra la empresa tal como aparece en el RUT. Estos datos salen en las facturas y en los informes.</p>
     <form id="onbF" class="panel stack" novalidate>${camposEmpresa()}<p class="err" id="onbErr" hidden></p>
       <div class="row end"><button class="primary" id="onbOk">Guardar y continuar</button></div></form>
@@ -229,6 +230,22 @@ function confirmar(titulo, texto, boton = 'Confirmar') {
 }
 const campo = (k, label, val, extra = '') => `<div><label for="f_${k}">${label}</label><input id="f_${k}" name="${k}" value="${esc(val ?? '')}" ${extra}></div>`;
 const campoSel = (k, label, list, val) => `<div><label for="f_${k}">${label}</label><select id="f_${k}" name="${k}">${opts(list, val)}</select></div>`;
+const ordenar = l => [...l].sort((a, b) => a.localeCompare(b, 'es'));
+const DEPTOS = ordenar(Object.keys(COLOMBIA));
+const ubic = x => [x.direccion, x.ciudad, x.departamento && x.departamento !== x.ciudad ? x.departamento : ''].filter(Boolean).join(', ');
+// Departamento y municipio de Colombia en listas desplegables; el municipio depende del departamento.
+function campoUbicacion(x = {}) {
+  let dep = x.departamento || DEPTOS.find(d => COLOMBIA[d].includes(x.ciudad)) || '';
+  const munis = dep ? ordenar(COLOMBIA[dep] || []) : [];
+  if (x.ciudad && dep && !munis.includes(x.ciudad)) munis.unshift(x.ciudad);
+  setTimeout(() => {
+    const d = document.querySelector('[data-depto]'), c = document.querySelector('[data-muni]');
+    if (!d || !c) return;
+    d.onchange = () => { const l = ordenar(COLOMBIA[d.value] || []); c.innerHTML = `<option value="">${d.value ? 'Escoge el municipio…' : 'Primero el departamento'}</option>` + l.map(m => `<option>${esc(m)}</option>`).join(''); c.disabled = !d.value; if (l.length === 1) c.value = l[0]; };
+  });
+  return `<div class="grid2"><div><label for="f_depto">Departamento</label><select id="f_depto" name="departamento" data-depto><option value="">Escoge el departamento…</option>${DEPTOS.map(d => `<option ${d === dep ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
+    <div><label for="f_muni">Municipio</label><select id="f_muni" name="ciudad" data-muni ${dep ? '' : 'disabled'}><option value="">${dep ? 'Escoge el municipio…' : 'Primero el departamento'}</option>${munis.map(m => `<option ${m === x.ciudad ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div></div>`;
+}
 const check = (k, label, val) => `<label class="check"><input type="checkbox" name="${k}" ${val ? 'checked' : ''}> ${label}</label>`;
 
 /* ---------- Empresa ---------- */
@@ -240,7 +257,8 @@ function camposEmpresa(e = {}) {
     <div class="grid2">${campoSel('regimen', 'Régimen', REGIMENES, e.regimen)}
     ${campo('actividad', 'Actividad económica (CIIU)', e.actividad, 'maxlength="60" inputmode="numeric" placeholder="6920"')}</div>
     ${check('responsable_iva', 'Es responsable de IVA (cobra IVA en sus facturas)', e.id ? e.responsable_iva : true)}
-    <div class="grid2">${campo('direccion', 'Dirección', e.direccion)}${campo('ciudad', 'Ciudad', e.ciudad)}</div>
+    ${campo('direccion', 'Dirección', e.direccion)}
+    ${campoUbicacion(e)}
     <div class="grid2">${campo('telefono', 'Teléfono', e.telefono, 'type="tel"')}${campo('correo', 'Correo de facturación', e.correo, 'type="email"')}</div>
     <div><label for="f_pie">Texto al pie de las facturas (opcional)</label><textarea id="f_pie" name="pie_factura" rows="2" maxlength="600">${esc(e.pie_factura)}</textarea></div>`;
 }
@@ -254,9 +272,9 @@ async function guardarEmpresa(fd, e = {}) {
   if (nit.error) throw new Error(nit.error);
   const row = { nombre: fd.get('nombre').trim(), nit: nit.nit, dv: nit.dv, tipo_persona: fd.get('tipo_persona'), regimen: fd.get('regimen'), actividad: fd.get('actividad').trim(),
     responsable_iva: fd.get('responsable_iva') === 'on', direccion: fd.get('direccion').trim(),
-    ciudad: fd.get('ciudad').trim(), telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
+    departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
   if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
-  if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y la ciudad: salen en las facturas.');
+  if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y escoge el departamento y el municipio: salen en las facturas.');
   const g = await store.save('empresas', e.id ? { ...row, id: e.id } : row);
   if (!e.id) {
     // Numeraciones internas listas para notas y recibos; la de facturas la pone el usuario con su resolución DIAN.
@@ -283,7 +301,7 @@ function vEmpresa(m) {
       <dt>NIT</dt><dd class="mono">${fmtNit(e.nit)}-${e.dv}</dd>
       <dt>Régimen</dt><dd>${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || e.regimen)}</dd>
       <dt>IVA</dt><dd>${e.responsable_iva ? 'Responsable de IVA' : 'No responsable de IVA'}</dd>
-      <dt>Dirección</dt><dd>${esc([e.direccion, e.ciudad].filter(Boolean).join(', ')) || '—'}</dd>
+      <dt>Dirección</dt><dd>${esc(ubic(e)) || '—'}</dd>
       <dt>Contacto</dt><dd>${esc([e.telefono, e.correo].filter(Boolean).join(' · ')) || '—'}</dd>
     </dl>
   </section>
@@ -614,13 +632,13 @@ function representacion(d) {
     ${d.estado === 'anulado' ? `<p class="aviso bad">ANULADO${d.anulado_motivo ? ': ' + esc(d.anulado_motivo) : ''}</p>` : ''}
     <header class="rep-head">
       <div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
-        <p>${esc([e.direccion, e.ciudad].filter(Boolean).join(', '))}${e.telefono ? ' · Tel. ' + esc(e.telefono) : ''}${e.correo ? ' · ' + esc(e.correo) : ''}</p>
+        <p>${esc(ubic(e))}${e.telefono ? ' · Tel. ' + esc(e.telefono) : ''}${e.correo ? ' · ' + esc(e.correo) : ''}</p>
 ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}</span><b class="mono">${esc(numDoc(d))}</b></div>
     </header>
     ${d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? ', vigente hasta ' + fFecha(n.vigencia_hasta) : ''}.</p>` : ''}
     <section class="rep-grid">
-      <div><h3>${d.tipo === 'RC' ? 'Recibimos de' : 'Adquiriente'}</h3><p><b>${esc(t.nombre)}</b><br>${esc(docId(t))}<br>${esc([t.direccion, t.ciudad].filter(Boolean).join(', '))}${t.telefono ? '<br>Tel. ' + esc(t.telefono) : ''}${t.correo ? '<br>' + esc(t.correo) : ''}</p></div>
+      <div><h3>${d.tipo === 'RC' ? 'Recibimos de' : 'Adquiriente'}</h3><p><b>${esc(t.nombre)}</b><br>${esc(docId(t))}<br>${esc(ubic(t))}${t.telefono ? '<br>Tel. ' + esc(t.telefono) : ''}${t.correo ? '<br>' + esc(t.correo) : ''}</p></div>
       <div><dl class="kv">
         <dt>Fecha</dt><dd>${fFecha(d.fecha)}</dd>
         ${d.tipo === 'FV' ? `<dt>Forma de pago</dt><dd>${d.forma_pago === 'credito' ? 'Crédito' : 'Contado'}</dd>${d.forma_pago === 'credito' ? `<dt>Vence</dt><dd>${fFecha(d.vence)}</dd>` : ''}` : ''}
@@ -705,7 +723,8 @@ function formTercero(t = {}, despues) {
     <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campo('numero', 'Número', t.numero ? (t.tipo_id === '31' ? `${t.numero}-${t.dv}` : t.numero) : '', 'required class="mono" inputmode="numeric"')}</div>
     <p class="hint" id="numHint"></p>
     ${campo('nombre', 'Nombre o razón social', t.nombre, 'required maxlength="200"')}
-    <div class="grid2">${campo('direccion', 'Dirección', t.direccion)}${campo('ciudad', 'Ciudad', t.ciudad)}</div>
+    ${campo('direccion', 'Dirección', t.direccion)}
+    ${campoUbicacion(t)}
     <div class="grid2">${campo('telefono', 'Teléfono', t.telefono, 'type="tel"')}${campo('correo', 'Correo para enviar facturas', t.correo, 'type="email"')}</div>
     <div class="grid2">${campo('plazo_dias', 'Plazo de pago (días, 0 = contado)', t.plazo_dias ?? 0, 'type="number" min="0" max="365"')}<div class="checkcell">${check('responsable_iva', 'Responsable de IVA', t.responsable_iva)}</div></div>
     <fieldset><legend>Retenciones que este cliente le practica a la empresa</legend><div class="grid3">
@@ -719,7 +738,7 @@ function formTercero(t = {}, despues) {
     else { numero = numero.replace(/[.\s]/g, ''); if (!/^[0-9A-Za-z-]{3,20}$/.test(numero)) throw new Error('Revisa el número de documento.'); }
     const nombre = String(fd.get('nombre')).trim(); if (!nombre) throw new Error('Escribe el nombre del cliente.');
     if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un cliente con ese documento.');
-    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, nombre, direccion: fd.get('direccion').trim(), ciudad: fd.get('ciudad').trim(), telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
+    const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, nombre, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
       plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')) };
     const g = await store.save('terceros', t.id ? { ...row, id: t.id } : row);
     toast('Cliente guardado.');

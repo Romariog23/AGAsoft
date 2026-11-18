@@ -2,11 +2,11 @@
 export function datosEjemplo(hoy) {
   const y = hoy.slice(0, 4);
   return {
-    empresa: { nombre: 'Comercializadora Ejemplo S.A.S.', nit: '900123456', dv: 8, tipo_persona: 'juridica', regimen: 'ordinario', responsable_iva: true, responsabilidades: 'O-13, O-15, O-47', actividad: '4659', direccion: 'Calle 10 # 20-30', ciudad: 'Barranquilla', telefono: '605 300 0000', correo: 'facturacion@ejemplo.co', pie_factura: 'Esta factura se asimila en todos sus efectos a una letra de cambio (art. 774 del Código de Comercio).' },
+    empresa: { nombre: 'Comercializadora Ejemplo S.A.S.', nit: '900123456', dv: 8, tipo_persona: 'juridica', regimen: 'ordinario', responsable_iva: true, responsabilidades: 'O-13, O-15, O-47', actividad: '4659', direccion: 'Calle 10 # 20-30', departamento: 'Atlántico', ciudad: 'Barranquilla', telefono: '605 300 0000', correo: 'facturacion@ejemplo.co', pie_factura: 'Esta factura se asimila en todos sus efectos a una letra de cambio (art. 774 del Código de Comercio).' },
     terceros: [
-      { tipo_id: '31', numero: '860002964', dv: 4, nombre: 'Distribuidora Andina Ltda.', direccion: 'Carrera 7 # 71-21', ciudad: 'Bogotá', telefono: '601 555 1234', correo: 'pagos@andina.example', responsable_iva: true, retefuente_pct: 2.5, reteiva_pct: 15, reteica_milaje: 4.14, plazo_dias: 30 },
-      { tipo_id: '31', numero: '800197268', dv: 4, nombre: 'Gran Contribuyente Demo S.A.', direccion: 'Avenida 30 # 45-10', ciudad: 'Medellín', telefono: '604 444 0000', correo: 'cxp@grancontribuyente.example', responsable_iva: true, retefuente_pct: 4, reteiva_pct: 15, reteica_milaje: 0, plazo_dias: 60 },
-      { tipo_id: '13', numero: '1045678901', dv: null, nombre: 'María Pérez', direccion: 'Calle 84 # 50-12', ciudad: 'Barranquilla', telefono: '300 123 4567', correo: 'maria@correo.example', responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0, plazo_dias: 0 },
+      { tipo_id: '31', numero: '860002964', dv: 4, nombre: 'Distribuidora Andina Ltda.', direccion: 'Carrera 7 # 71-21', departamento: 'Bogotá, D.C.', ciudad: 'Bogotá, D.C.', telefono: '601 555 1234', correo: 'pagos@andina.example', responsable_iva: true, retefuente_pct: 2.5, reteiva_pct: 15, reteica_milaje: 4.14, plazo_dias: 30 },
+      { tipo_id: '31', numero: '800197268', dv: 4, nombre: 'Gran Contribuyente Demo S.A.', direccion: 'Avenida 30 # 45-10', departamento: 'Antioquia', ciudad: 'Medellín', telefono: '604 444 0000', correo: 'cxp@grancontribuyente.example', responsable_iva: true, retefuente_pct: 4, reteiva_pct: 15, reteica_milaje: 0, plazo_dias: 60 },
+      { tipo_id: '13', numero: '1045678901', dv: null, nombre: 'María Pérez', direccion: 'Calle 84 # 50-12', departamento: 'Atlántico', ciudad: 'Barranquilla', telefono: '300 123 4567', correo: 'maria@correo.example', responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0, plazo_dias: 0 },
     ],
     productos: [
       { codigo: 'ASE-01', nombre: 'Asesoría contable mensual', unidad: 'MES', precio: 1200000, iva_pct: 19, activo: true },
