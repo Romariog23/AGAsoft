@@ -1,6 +1,6 @@
 # AGAsoft
 
-Software contable para Colombia. Primer módulo: **ventas**.
+Software contable para Colombia: **ventas** y **contabilidad PUC / NIIF**.
 
 - Factura de venta con IVA por línea (0 %, 5 %, 19 %), descuentos y retenciones que practica el cliente (retefuente, reteIVA, reteICA).
 - Nota crédito (devoluciones, anulación, rebajas, descuentos) y nota débito, siempre amarradas a una factura emitida.
@@ -10,6 +10,12 @@ Software contable para Colombia. Primer módulo: **ventas**.
 - Clientes y productos, con importación desde CSV (Excel, Alegra, World Office).
 - Varias empresas por usuario. El dueño da acceso por correo como *responsable* (crea y emite) o *consulta* (solo ve). El administrador aprueba usuarios nuevos.
 - Representación gráfica imprimible o en PDF.
+
+**Contabilidad**
+- Plan Único de Cuentas para comerciantes (Decreto 2650) cargado en cada empresa, con cuentas auxiliares propias.
+- Cada cuenta se homologa a un rubro de NIIF para Pymes (se puede cambiar cuenta por cuenta) y opcionalmente a un código NIIF.
+- Facturas, notas y recibos se contabilizan solos según las cuentas que configures (clientes, IVA, ingresos, retenciones, caja, bancos, anticipos). Cada producto puede tener su propia cuenta de ingreso.
+- Informes: estado de situación financiera y estado de resultados (NIIF), balance de prueba por niveles y libro auxiliar por cuenta y tercero.
 
 **Todavía no se conecta con la DIAN.** Los documentos llevan el aviso "Documento de prueba". La conexión (proveedor tecnológico o directa) se agrega en una siguiente etapa.
 
@@ -37,6 +43,8 @@ En Supabase > Authentication > Providers > Email puedes apagar "Confirm email" s
 | Archivo | Qué hace |
 |---|---|
 | `src/calc.js` | Cálculos puros: NIT y DV, totales, retenciones, cartera, valor en letras, catálogos DIAN |
+| `src/puc.js` | PUC y homologación a rubros NIIF |
+| `src/contab.js` | Asientos automáticos, balance de prueba, auxiliar y estados financieros |
 | `src/store.js` | Datos: modo Supabase o modo demostración (navegador) |
 | `src/main.js` | Pantallas |
 | `supabase/schema.sql` | Tablas, permisos por empresa y funciones para guardar, emitir y anular |
