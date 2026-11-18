@@ -4,6 +4,7 @@ import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, e
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
+import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -108,7 +109,7 @@ const MENU = [
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
-  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
+  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'], ['importar', 'Importar plantillas'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['puc', 'Plan de cuentas PUC y NIIF'],
 ];
 function renderNav(actual) {
@@ -159,6 +160,7 @@ function route() {
     if (v === 'compraeditar') return vCompraEditor(m, { id: arg });
     if (v === 'cxp') return vCxp(m);
     if (v === 'proveedores') return vProveedores(m);
+    if (v === 'importar') return vImportar(m);
     if (v === 'comp') return vComp(m, arg);
     if (v === 'compnuevo') return vCompEditor(m, { tipo: q.get('tipo') });
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
@@ -1301,17 +1303,6 @@ document.addEventListener('change', ev => { const el = ev.target; if (el.matches
 function cuentasAux() {
   return S.d.cuentas.filter(c => c.activa !== false && esAuxiliar(c.codigo)).sort((a, b) => a.codigo.localeCompare(b.codigo));
 }
-// Valores como vienen de Excel en Colombia: "1.234.567,89", "$ 1,234,567.89", "-850000".
-function parseValor(v) {
-  let s = String(v ?? '').replace(/[$\s]/g, '').replace(/^\((.*)\)$/, '-$1');
-  if (!s) return 0;
-  const coma = s.lastIndexOf(','), punto = s.lastIndexOf('.');
-  if (coma >= 0 && punto >= 0) s = coma > punto ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
-  else if (coma >= 0) s = /,\d{3}(,\d{3})*$/.test(s) && !/,\d{1,2}$/.test(s) && s.split(',').length > 2 ? s.replace(/,/g, '') : s.replace(/\./g, '').replace(',', '.');
-  else if (punto >= 0 && /^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
-  return num(s);
-}
-
 function vComprobantes(m) {
   let q = '', tipo = '', anulados = false;
   m.innerHTML = `<header class="vhead"><div><h2>Comprobantes contables</h2><p class="sub">Notas de contabilidad para ajustes, depreciaciones, provisiones y cierres, y los saldos iniciales de la empresa.</p></div>
@@ -1733,4 +1724,71 @@ function vProveedores(m) {
   $('nuevo').onclick = () => formTercero({}, null, 'proveedor');
   $('lst').onclick = ev => { const b = ev.target.closest('[data-ed]'); if (b) formTercero(terc(b.dataset.ed), null, 'proveedor'); };
   pintar();
+}
+
+/* ---------- Importar plantillas (datos descargados de la DIAN con el token) ---------- */
+function vImportar(m) {
+  m.innerHTML = `<header class="vhead"><div><h2>Importar plantillas</h2><p class="sub">Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.</p></div></header>
+    <section class="panel stack"><h3>Cómo se hace</h3><ol class="steps-list">
+      <li>Con el <b>token de la DIAN</b> de la empresa, entra al catálogo de facturación electrónica y descarga en Excel los documentos <b>emitidos</b> (ventas) y <b>recibidos</b> (compras) del periodo.</li>
+      <li>Descarga aquí la plantilla de AGAsoft que corresponda y pasa los datos a sus columnas, sin cambiar los títulos de la primera fila. Puedes dejar los dos ejemplos como guía y borrarlos al final.</li>
+      <li>En Excel guarda la plantilla como <b>CSV</b> y súbela aquí. AGAsoft revisa todo y te muestra qué va a cargar antes de guardar nada.</li></ol>
+      <p class="hint">Sube primero los terceros si los tienes. Si no, las facturas crean los clientes y proveedores que falten con el NIT y el nombre de la plantilla. Lo que ya existe (misma factura o mismo tercero) no se duplica.</p></section>
+    ${Object.entries(PLANTILLAS).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
+      <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
+      <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
+  m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt)));
+  m.querySelectorAll('[data-sub]').forEach(inp => inp.onchange = async () => {
+    const cual = inp.dataset.sub, file = inp.files[0]; inp.value = ''; if (!file) return;
+    let txt = await file.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
+    previaImport(cual, parseCSV(txt));
+  });
+}
+function previaImport(cual, rows) {
+  const out = $('prev_' + cual);
+  const { filas, faltan } = leerFilas(cual, rows);
+  if (faltan.length) { out.innerHTML = `<p class="err">No encontré las columnas: ${faltan.map(esc).join(', ')}. Usa la plantilla de AGAsoft sin cambiar los títulos.</p>`; return; }
+  if (!filas.length) { out.innerHTML = '<p class="err">El archivo no tiene filas con datos.</p>'; return; }
+  const ctx = { terceros: S.d.terceros, documentos: S.d.documentos, cuentas: S.d.cuentas, productos: S.d.productos, compras: compras() };
+  const r = cual === 'terceros' ? prepararTerceros(filas, ctx) : cual === 'ventas' ? prepararVentas(filas, ctx) : prepararCompras(filas, ctx, totalesCompra);
+  const total = r.docs.reduce((s, d) => s + num((d.doc || d.compra).total), 0);
+  const nomT = n => r.terceros.find(t => t.numero === n)?.nombre || S.d.terceros.find(t => t.numero === n)?.nombre || n;
+  const listos = cual === 'terceros' ? r.terceros.length + r.marcar.length : r.docs.length;
+  out.innerHTML = `<div class="stack imp-prev">
+    <p><b>${listos}</b> ${cual === 'terceros' ? 'terceros listos' : 'documentos listos'}${cual !== 'terceros' ? ` por <b>${money(total)}</b>` : ''}${cual !== 'terceros' && r.terceros.length ? ` y <b>${r.terceros.length}</b> terceros nuevos` : ''}.${r.errores.length ? ` <span class="tag bad">${r.errores.length} con problemas</span>` : ''}</p>
+    ${r.docs.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Fecha</th><th>Tercero</th><th class="r">Total</th></tr></thead><tbody>
+      ${r.docs.slice(0, 50).map(d => { const x = d.doc || d.compra; return `<tr><td class="mono">${esc(d.doc ? `${x.prefijo} ${x.numero}` : `${x.tipo} ${x.num_proveedor}`)}</td><td>${fFecha(x.fecha)}</td><td>${esc(nomT(d.tercero))}</td><td class="r mono">${money(x.total)}</td></tr>`; }).join('')}
+      </tbody></table></div>${r.docs.length > 50 ? `<p class="hint">Y ${r.docs.length - 50} más.</p>` : ''}` : ''}
+    ${cual === 'terceros' && r.terceros.length ? `<p class="hint">Nuevos: ${r.terceros.slice(0, 20).map(t => esc(t.nombre)).join(', ')}${r.terceros.length > 20 ? '…' : ''}</p>` : ''}
+    ${r.errores.length ? `<details class="imp-err" open><summary>No se importan (${r.errores.length})</summary><ul>${r.errores.slice(0, 100).map(e => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+    <div class="row end"><button class="primary" id="go_${cual}" ${listos ? '' : 'disabled'}>Importar ${listos}</button></div></div>`;
+  $('go_' + cual).onclick = async () => {
+    const b = $('go_' + cual); b.disabled = true; b.textContent = 'Importando…';
+    try { const res = await ejecutarImport(cual, r); await cargarEmpresa(); vImportar($('main')); toast(res, /problema/.test(res)); }
+    catch (e) { fail(e); b.disabled = false; b.textContent = `Importar ${listos}`; }
+  };
+}
+async function ejecutarImport(cual, r) {
+  const ids = new Map(S.d.terceros.map(t => [t.numero, t.id])), errs = [];
+  for (const t of r.terceros) {
+    try {
+      const g = await store.save('terceros', { empresa_id: S.eid, tipo_id: t.tipo_id, numero: t.numero, dv: t.dv, nombre: t.nombre, direccion: t.direccion || '', ciudad: t.ciudad || '', telefono: t.telefono || '', correo: t.correo || '',
+        es_cliente: t.es_cliente !== false, es_proveedor: !!t.es_proveedor, plazo_dias: 0, responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 });
+      ids.set(t.numero, g.id);
+    } catch (e) { errs.push(`${t.nombre}: ${e.message}`); }
+  }
+  for (const x of r.marcar) { try { await store.save('terceros', x); } catch (e) { errs.push(e.message); } }
+  let ok = 0;
+  const sig = { FC: siguienteCompra('FC'), DS: siguienteCompra('DS') };
+  for (const d of r.docs) {
+    const tid = ids.get(d.tercero); if (!tid) { errs.push(`No se pudo crear el tercero ${d.tercero}`); continue; }
+    try {
+      if (d.doc) await store.importarDoc({ ...d.doc, empresa_id: S.eid, tercero_id: tid }, d.items);
+      else { await store.save('compras', { ...d.compra, empresa_id: S.eid, tercero_id: tid, numero: sig[d.compra.tipo] }); sig[d.compra.tipo]++; }
+      ok++;
+    } catch (e) { errs.push(`${d.doc ? `${d.doc.prefijo} ${d.doc.numero}` : d.compra.num_proveedor}: ${/importar_documento/.test(e.message) ? 'falta correr en Supabase el archivo supabase/008_importar.sql' : e.message}`); }
+  }
+  const nT = r.terceros.length + r.marcar.length;
+  const msg = cual === 'terceros' ? `${nT - errs.length} terceros importados.` : `${ok} documentos importados${r.terceros.length ? ` y ${r.terceros.length} terceros nuevos` : ''}.`;
+  return msg + (errs.length ? ` ${errs.length} con problemas: ${errs.slice(0, 3).join('; ')}${errs.length > 3 ? '…' : ''}` : '');
 }
