@@ -96,6 +96,7 @@ async function cargar() {
 const planDe = c => S.planes.find(p => p.id === c.plan_id);
 const pedidoDe = c => c.plan_solicitado && S.planes.find(p => p.id === c.plan_solicitado);
 const diasA = f => Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5));
+const en15 = () => new Date(new Date(hoy() + 'T12:00:00').getTime() + 15 * 864e5).toISOString().slice(0, 10);
 const enPrueba = c => !!c.prueba_hasta && c.prueba_hasta >= hoy();
 // Por aprobar: registros sin aprobar (cuentas antiguas) y pruebas vencidas.
 const porAprobar = c => !c.es_admin && (!c.aprobado || (!!c.prueba_hasta && c.prueba_hasta < hoy()));
@@ -181,16 +182,18 @@ function formCuenta(c, aprobar) {
     ${pedido ? `<p class="okmsg">Pidió el plan ${esc(pedido.nombre)}${c.solicitado_en ? ' el ' + fFecha(c.solicitado_en.slice(0, 10)) : ''}.</p>` : ''}
     ${c.prueba_hasta ? `<p class="hint">Prueba gratis ${c.prueba_hasta < hoy() ? 'vencida el' : 'hasta el'} ${fFecha(c.prueba_hasta)}. Al guardar con un plan, la prueba termina y la cuenta queda con ese plan.</p>` : ''}
     <div><label for="f_plan">Plan</label><select id="f_plan" name="plan_id"><option value="">${c.prueba_hasta ? 'Seguir en prueba gratis' : 'Sin plan (sin límites)'}</option>${S.planes.filter(p => p.activo || p.id === sel).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.nombre)} · ${money(p.precio_mensual)}/mes</option>`).join('')}</select></div>
+    ${!c.prueba_hasta ? `<label class="check"><input type="checkbox" name="dar_prueba"> Dar prueba gratis de 15 días (hasta el ${fFecha(en15())})</label><p class="hint">Quita el plan y la cuenta usa AGAsoft gratis 15 días. Al terminar escoge su plan y tú lo apruebas.</p>` : ''}
     ${c.prueba_hasta ? `<div><label for="f_prueba">Prueba gratis hasta</label><input id="f_prueba" name="prueba_hasta" type="date" value="${c.prueba_hasta}"><p class="hint">Si sigue en prueba, puedes darle más días aquí.</p></div>` : ''}
     <div><label for="f_vence">Pagado hasta</label><input id="f_vence" name="plan_vence" type="date" value="${c.plan_id || aprobar ? sugerido : (c.plan_vence || '')}"><p class="hint">Después de esta fecha la cuenta puede ver sus datos pero no registrar documentos nuevos. Déjalo vacío si no vence.</p></div>
     <div><label for="f_notas">Notas internas</label><input id="f_notas" name="notas" maxlength="200" value="${esc(c.notas)}" placeholder="Forma de pago, contacto…"></div>`, async fd => {
     const campos = { plan_id: fd.get('plan_id') || null, plan_vence: fd.get('plan_vence') || null, notas: String(fd.get('notas') || '').trim() };
     if (aprobar) campos.aprobado = true;
-    if (c.prueba_hasta) {
+    if (fd.get('dar_prueba') === 'on') Object.assign(campos, { plan_id: null, plan_vence: null, aprobado: true, prueba_hasta: en15(), plan_solicitado: null, solicitado_en: null });
+    else if (c.prueba_hasta) {
       if (campos.plan_id) Object.assign(campos, { prueba_hasta: null, plan_solicitado: null, solicitado_en: null });
       else { campos.prueba_hasta = fd.get('prueba_hasta') || c.prueba_hasta; campos.plan_vence = null; if (aprobar && campos.prueba_hasta < hoy()) throw new Error('Escoge un plan, o dale más días de prueba.'); }
     }
-    await api.setCuenta(c.id, campos); toast(aprobar ? 'Cuenta aprobada.' : 'Plan guardado.'); await cargar();
+    await api.setCuenta(c.id, campos); toast(campos.prueba_hasta && !c.prueba_hasta ? 'Prueba gratis de 15 días activada.' : aprobar ? 'Cuenta aprobada.' : 'Plan guardado.'); await cargar();
   });
 }
 
