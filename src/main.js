@@ -9,7 +9,7 @@ import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
@@ -1366,32 +1366,39 @@ function vBalance(m) {
 }
 
 function vAuxiliar(m, q) {
-  let cuenta = q.get('cuenta') || param().clientes, tercero = '';
+  // Rango de cuentas: desde la 1 hasta la 2, o desde la 1 hasta la 1 para una sola.
+  let desdeC = q.get('cuenta') || param().clientes, hastaC = q.get('hasta') || desdeC, tercero = '';
   const conMov = [...new Set(movs().map(x => x.cuenta))].sort();
+  const lista = `<datalist id="ctasAuxL">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' (sin movimientos)'}"></option>`).join('')}</datalist>`;
+  const caja = (id, lab, v) => `<div class="grow"><label for="${id}">${lab}</label><input id="${id}" list="ctasAuxL" class="mono" style="width:100%;max-width:100%" value="${esc(v)}" autocomplete="off" placeholder="Código o nombre de la cuenta"><p class="hint" id="${id}Nom">${esc(nomCta(v))}</p></div>`;
   m.innerHTML = `<header class="vhead"><h2>Libro auxiliar</h2></header>
-    <div class="row filters"><div class="grow"><label for="cta">Cuenta</label><input id="cta" list="ctasAuxL" class="mono" style="width:100%;max-width:100%" value="${esc(cuenta)}" autocomplete="off" placeholder="Escribe el código o el nombre de la cuenta">
-      <datalist id="ctasAuxL">${[...S.d.cuentas].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(c => `<option value="${c.codigo} ${esc(c.nombre)}${conMov.some(x => x.startsWith(c.codigo)) ? '' : ' (sin movimientos)'}"></option>`).join('')}</datalist>
-      <p class="hint" id="ctaNom">${esc(cuenta)} ${esc(nomCta(cuenta))}</p><p class="hint">Cualquier cuenta: clase, grupo, cuenta, subcuenta o auxiliar. Escribe el código (por ejemplo 1105 o 11050501) o parte del nombre.</p></div>
+    <div class="row filters">${caja('cta', 'Desde la cuenta', desdeC)}${caja('cta2', 'Hasta la cuenta', hastaC)}
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
-    
+    ${lista}<p class="hint">Escribe el código de cualquier nivel (por ejemplo 1105 o 11050501) o parte del nombre. Para una sola cuenta pon la misma en los dos campos; desde 1 hasta 1 es toda la clase 1.</p>
     ${filtroFechas('fa', true, () => pintar())}
     <section class="panel" id="out"></section>`;
+  const rango = () => desdeC === hastaC ? `${esc(desdeC)} ${esc(nomCta(desdeC))}` : `Desde ${esc(desdeC)} ${esc(nomCta(desdeC))} hasta ${esc(hastaC)} ${esc(nomCta(hastaC))}`;
   const pintar = () => {
-    const a = libroAuxiliar(movs(), S.d.cuentas, cuenta, F.desde, F.hasta, tercero);
-    $('out').innerHTML = cabInforme('Libro auxiliar', `${esc(cuenta)} ${esc(nomCta(cuenta))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th>${cuenta.length < 8 ? '<th>Cuenta</th>' : ''}<th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
-      <tr class="muted"><td colspan="${cuenta.length < 8 ? 7 : 6}">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
-      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td>${cuenta.length < 8 ? `<td class="mono">${x.cuenta}</td>` : ''}<td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>`}
-      <tr class="strong"><td colspan="${cuenta.length < 8 ? 5 : 4}">Totales</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr></tbody></table></div>`;
+    const r = auxiliarRango(movs(), S.d.cuentas, desdeC, hastaC, F.desde, F.hasta, tercero);
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${rango()}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+      ${r.secciones.map(a => `<tr class="strong"><td colspan="7"><span class="mono">${a.cuenta}</span> ${esc(nomCta(a.cuenta))}</td></tr>
+      <tr class="muted"><td colspan="6">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td><td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('')}
+      <tr><td colspan="4" class="muted">Total ${a.cuenta}</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Sin movimientos en el periodo.</td></tr>'}
+      ${r.secciones.length > 1 ? `<tr class="strong"><td colspan="4">Totales del rango</td><td class="r mono">${money(r.debitos)}</td><td class="r mono">${money(r.creditos)}</td><td></td></tr>` : ''}</tbody></table></div>`;
   };
-  const irCuenta = () => {
-    const v = $('cta').value.trim().split(' ')[0];
-    if (!v) return;
-    if (!S.d.cuentas.some(c => c.codigo === v)) { $('ctaNom').textContent = `La cuenta ${v} no existe en el plan de cuentas.`; return; }
-    cuenta = v; $('cta').value = v; $('ctaNom').textContent = `${v} ${nomCta(v)}`;
-    history.replaceState(null, '', '#/auxiliar?cuenta=' + cuenta); pintar();
+  const leer = id => {
+    const v = $(id).value.trim().split(' ')[0];
+    if (!v) return null;
+    if (!S.d.cuentas.some(c => c.codigo === v)) { $(id + 'Nom').textContent = `La cuenta ${v} no existe en el plan de cuentas.`; return null; }
+    $(id).value = v; $(id + 'Nom').textContent = nomCta(v); return v;
   };
-  $('cta').onchange = irCuenta;
-  $('cta').onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); irCuenta(); } };
+  const ir = id => {
+    const v = leer(id); if (!v) return;
+    if (id === 'cta') { const igual = desdeC === hastaC; desdeC = v; if (igual) { hastaC = v; $('cta2').value = v; $('cta2Nom').textContent = nomCta(v); } } else hastaC = v;
+    history.replaceState(null, '', `#/auxiliar?cuenta=${desdeC}${hastaC !== desdeC ? '&hasta=' + hastaC : ''}`); pintar();
+  };
+  for (const id of ['cta', 'cta2']) { $(id).onchange = () => ir(id); $(id).onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ir(id); } }; }
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   pintar();
 }

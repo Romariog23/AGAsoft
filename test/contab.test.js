@@ -148,3 +148,13 @@ test('forma de pago de compra a un pasivo', async () => {
   const a = asientoCompra(fc, {}); assert.ok(cuadra(a)); assert.equal(a.find(m => m.cuenta === '21050501').credito, 119000);
   assert.equal(cuentasPorPagar([fc], '2026-11-18').length, 0);
 });
+
+test('auxiliar por rango de cuentas', async () => {
+  const { auxiliarRango } = await import('../src/contab.js');
+  const ms = movimientos({ ...S, docs: S.documentos });
+  const r = auxiliarRango(ms, plan, '1', '1', null, '2026-12-31');
+  assert.ok(r.secciones.length >= 2); assert.ok(r.secciones.every(x => x.cuenta.startsWith('1')));
+  assert.deepEqual(auxiliarRango(ms, plan, '1305', '1305', null, '2026-12-31').secciones.map(x => x.cuenta), ['13050501']);
+  const r2 = auxiliarRango(ms, plan, '1', '2', null, '2026-12-31');
+  assert.ok(r2.secciones.some(x => x.cuenta.startsWith('2')) && !r2.secciones.some(x => x.cuenta.startsWith('4')));
+});
