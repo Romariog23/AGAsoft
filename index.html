@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AGAsoft</title>
+<meta name="description" content="Software contable AGAsoft: facturas, notas crédito y débito, recibos de caja y cartera.">
+<meta name="theme-color" content="#0b2938">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+<div class="auth-wrap" id="auth" hidden>
+  <form class="auth-card panel stack" id="authForm" novalidate>
+    <div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft</h1></div>
+    <p class="sub" id="authSub">Entra con tu correo y tu clave.</p>
+    <div id="fNombre" hidden><label for="aNombre">Tu nombre</label><input id="aNombre" autocomplete="name"></div>
+    <div><label for="aEmail">Correo</label><input id="aEmail" type="email" autocomplete="email" required></div>
+    <div><label for="aPass">Clave</label><input id="aPass" type="password" autocomplete="current-password" minlength="8" required></div>
+    <p class="err" id="eAuth" hidden></p>
+    <p class="okmsg" id="okAuth" hidden></p>
+    <button type="submit" class="primary" id="aSubmit">Entrar</button>
+    <button type="button" class="ghost" id="aToggle">No tengo cuenta: solicitar acceso</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <button class="ghost menu-btn" id="menuBtn" aria-label="Menú" aria-expanded="false">☰</button>
+    <a class="brand" href="#/inicio"><span class="mark" aria-hidden="true">AGA</span><span class="brand-name">AGAsoft</span></a>
+    <select id="empSel" aria-label="Empresa"></select>
+    <span class="spacer"></span>
+    <span class="tag demo" id="demoTag" hidden title="Los datos se guardan solo en este navegador">Modo demostración</span>
+    <span class="who" id="who"></span>
+    <button class="ghost" id="salir">Salir</button>
+  </header>
+  <div class="layout">
+    <nav id="nav" class="nav"></nav>
+    <main id="main" tabindex="-1"></main>
+  </div>
+</div>
+
+<div id="print" aria-hidden="true"></div>
+<dialog id="dlg"><form method="dialog" id="dlgForm" class="stack"></form></dialog>
+<div id="toast" role="status" hidden></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
