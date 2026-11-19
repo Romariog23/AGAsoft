@@ -77,7 +77,7 @@ export function liquidar(emp, nov, P) {
   const dias = Math.max(0, Math.min(30, nov?.dias === undefined || nov?.dias === '' ? diasPeriodo : num(nov.dias)));
   const sal = num(emp.salario), v = k => r2(Math.max(0, num(nov?.[k])));
   const out = { empleado_id: emp.id, tercero_id: emp.tercero_id, area: emp.area || 'admin', dias, items: [] };
-  // Sin la entidad configurada, el saldo queda sin tercero (se avisa al liquidar).
+  // Sin la entidad configurada, el saldo queda a nombre del empleado (se avisa al liquidar).
   const entidad = e => ({ eps: emp.eps_id, pension: emp.pension_id, caja: emp.caja_id, arl: P.arl_id, icbf: P.icbf_id, sena: P.sena_id }[e] || null);
   const add = (k, valor) => {
     valor = r2(valor); if (!valor) return;
@@ -129,8 +129,9 @@ export function asientoNomina(n) {
   for (const l of n.lineas || []) {
     for (const i of l.items || []) {
       if (i.tipo === 'dev') mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre);
-      else if (i.tipo === 'ded') mov(i.cuenta, 0, i.valor, i.tercero_id, i.nombre);
-      else { mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre); mov(i.contra, 0, i.valor, i.tercero_id, i.nombre); }
+      // Sin la entidad configurada, el pasivo queda a nombre del empleado (toda línea lleva tercero) y se paga escogiendo la entidad.
+      else if (i.tipo === 'ded') mov(i.cuenta, 0, i.valor, i.tercero_id || l.tercero_id, i.nombre);
+      else { mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre); mov(i.contra, 0, i.valor, i.tercero_id || l.tercero_id, i.nombre); }
     }
     mov(n.cuenta_neto || CUENTA_NETO, 0, l.neto, l.tercero_id, 'Neto a pagar');
   }
