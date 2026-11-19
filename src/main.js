@@ -1,4 +1,5 @@
 import './style.css';
+import { jsonFE, erroresFE, RUTA_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
@@ -203,7 +204,7 @@ const MENU = [
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -255,6 +256,7 @@ function route() {
     if (v === 'nominacfg') return vNominaCfg(m);
     if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
+    if (v === 'disenofactura') return vDisenoFactura(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'comprobantes') return vComprobantes(m);
@@ -469,6 +471,10 @@ function vEmpresa(m) {
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
+  ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
+    <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div>
+    <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
+    <p class="hint">Mientras esté apagado, las facturas electrónicas no muestran el botón de envío (siguen con el aviso de pendiente de transmitir).</p></section>` : ''}
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
@@ -478,6 +484,17 @@ function vEmpresa(m) {
   cargarMiPlan();
   pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
+  if ($('feProbar')) $('feProbar').onclick = async () => {
+    const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
+    try {
+      const r = await store.fe('probar');
+      $('feOut').innerHTML = `<p class="${r.conexion === 'ok' ? 'ok-txt' : 'err'}">${r.conexion === 'ok' ? 'Conexión correcta' : 'MATIAS no aceptó el token (HTTP ' + r.http + ')'} · ambiente de ${esc(r.ambiente)}</p>
+        <details><summary>Ver respuesta completa</summary><pre class="mono fe-pre">${esc(JSON.stringify(r, null, 2))}</pre></details>
+        <button type="button" id="feCopiar">Copiar respuesta</button>`;
+      $('feCopiar').onclick = () => navigator.clipboard?.writeText(JSON.stringify(r, null, 2)).then(() => toast('Copiado.'));
+    } catch (e) { $('feOut').innerHTML = `<p class="err">${esc(e.message)}</p>`; } finally { b.disabled = false; }
+  };
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
@@ -919,22 +936,29 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
 function saldoDe(fid) { return cartera(S.d.documentos, S.d.aplicaciones).find(c => c.factura.id === fid)?.saldo ?? 0; }
 
 /* ---------- Ver documento emitido (representación gráfica) ---------- */
-function representacion(d) {
+function representacion(d, opc = {}) {
   const e = emp(), t = terc(d.tercero_id) || {}, its = itemsDe(d.id), T = TIPOS[d.tipo];
   const n = S.d.numeraciones.find(x => x.id === d.numeracion_id);
   const f = (d.tipo === 'NC' || d.tipo === 'ND') && d.ref_id && docById(d.ref_id);
   const tot = d.tipo === 'RC' ? null : totales(its, d);
   const conc = d.tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND;
-  return `<article class="rep">
-    ${d.tipo !== 'RC' && d.electronica ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
+  const D = opc.diseno || disenoFactura(e), pie = opc.pie ?? e.pie_factura, ev = d.tipo !== 'RC' && d.electronica ? envioAceptado(d.id) : null;
+  const bloqueFE = ev ? `<section class="rep-fe"><div class="rep-qr">${qrSvg(contenidoQR(ev), D.plantilla === 'compacta' ? 104 : 124)}</div>
+      <div><p><b>${d.tipo === 'FV' ? 'Factura electrónica' : 'Documento electrónico'} validada por la DIAN</b>${ev.ambiente !== 'produccion' ? ' <span class="tag warn">Ambiente de pruebas</span>' : ''}</p>
+        <p class="rep-small">${d.tipo === 'FV' ? 'CUFE' : 'CUDE'}: <span class="mono fe-cufe">${esc(ev.cufe)}</span></p>
+        <p class="rep-small">Fecha de validación: ${fFecha(ev.creado_en.slice(0, 10))}. Escanea el código QR para consultar el documento en la DIAN.</p></div></section>` : '';
+  const bloqueRes = d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small rep-res">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? `, vigente hasta ${fFecha(n.vigencia_hasta)}` : ''}.</p>` : '';
+  const arriba = D.ubic_fe === 'arriba';
+  return `<article class="rep rep-${D.plantilla}${D.codigo ? '' : ' sin-cod'}${D.descuento ? '' : ' sin-desc'}" style="--rep-color:${D.color}">
+    ${d.tipo !== 'RC' && d.electronica && !envioAceptado(d.id) ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
     ${d.estado === 'anulado' ? `<p class="aviso bad">ANULADO${d.anulado_motivo ? ': ' + esc(d.anulado_motivo) : ''}</p>` : ''}
     <header class="rep-head">
-      <div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
+      <div class="rep-emp">${D.logo ? `<img class="rep-logo" src="${D.logo}" alt="Logo de ${esc(e.nombre)}">` : ''}<div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
         <p>${esc(ubic(e))}${e.telefono ? ' · Tel. ' + esc(e.telefono) : ''}${e.correo ? ' · ' + esc(e.correo) : ''}</p>
-${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
+${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></div>
       <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}${d.tipo === 'FV' && d.electronica ? ' ELECTRÓNICA' : ''}</span><b class="mono">${esc(numDoc(d))}</b></div>
     </header>
-    ${d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? ', vigente hasta ' + fFecha(n.vigencia_hasta) : ''}.</p>` : ''}
+    ${arriba ? bloqueFE + bloqueRes : ''}
     <section class="rep-grid">
       <div><h3>${d.tipo === 'RC' ? 'Recibimos de' : 'Adquiriente'}</h3><p><b>${esc(t.nombre)}</b><br>${esc(docId(t))}<br>${esc(ubic(t))}${t.telefono ? '<br>Tel. ' + esc(t.telefono) : ''}${t.correo ? '<br>' + esc(t.correo) : ''}</p></div>
       <div><dl class="kv">
@@ -964,9 +988,83 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       ${tot.neto !== tot.total ? `<dt class="strong">Neto a pagar</dt><dd class="mono strong">${money(tot.neto)}</dd>` : ''}</dl></section>`}
     ${d.observaciones ? `<p class="rep-obs"><b>Observaciones:</b> ${esc(d.observaciones)}</p>` : ''}
     ${d.tipo === 'RC' ? '<div class="firmas"><span>Elaboró</span><span>Recibí conforme</span></div>' : ''}
-    ${d.tipo === 'FV' && e.pie_factura ? `<p class="rep-small">${esc(e.pie_factura)}</p>` : ''}
+    ${!arriba && (bloqueFE || bloqueRes) ? `<footer class="rep-pie">${bloqueFE}${bloqueRes}</footer>` : ''}
+    ${d.tipo === 'FV' && pie ? `<p class="rep-small rep-pie-txt">${esc(pie)}</p>` : ''}
     <p class="rep-small">Elaborado con AGAsoft.</p>
   </article>`;
+}
+/* ---------- Diseño de la factura ---------- */
+const PLANTILLAS_FAC = [['clasica', 'Clásica', 'Sobria, con línea de color bajo el encabezado.'], ['moderna', 'Moderna', 'Encabezado en bloque de color y totales resaltados.'], ['compacta', 'Compacta', 'Letra más pequeña: cabe más en una hoja.']];
+const COLORES_FAC = ['#0b2938', '#1f4e79', '#0f766e', '#3f6b12', '#7a1f2b', '#6b21a8', '#9a5b00', '#262626'];
+function disenoFactura(e) {
+  const f = e?.contabilidad?.factura || {};
+  return { plantilla: PLANTILLAS_FAC.some(p => p[0] === f.plantilla) ? f.plantilla : 'clasica', color: /^#[0-9a-f]{6}$/i.test(f.color || '') ? f.color : '#0b2938',
+    ubic_fe: f.ubic_fe === 'arriba' ? 'arriba' : 'pie', codigo: f.codigo !== false, descuento: f.descuento !== false, logo: String(f.logo || '').startsWith('data:image/') ? f.logo : '' };
+}
+// Reduce el logo a máx. 600×240 px para que pese poco (se guarda con la empresa).
+function leerLogo(file) {
+  return new Promise((ok, mal) => {
+    if (!/^image\/(png|jpe?g|webp|svg\+xml)$/.test(file.type)) return mal(new Error('El logo debe ser una imagen PNG, JPG, WEBP o SVG.'));
+    if (file.size > 5e6) return mal(new Error('La imagen pesa más de 5 MB.'));
+    const r = new FileReader(); r.onerror = () => mal(new Error('No se pudo leer la imagen.'));
+    r.onload = () => { const img = new Image(); img.onerror = () => mal(new Error('No se pudo abrir la imagen.')); img.onload = () => {
+      const k = Math.min(1, 600 / (img.naturalWidth || 600), 240 / (img.naturalHeight || 240)), w = Math.max(1, Math.round((img.naturalWidth || 600) * k)), h = Math.max(1, Math.round((img.naturalHeight || 240) * k));
+      const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
+      let url = c.toDataURL('image/png'); if (url.length > 280000) url = c.toDataURL('image/jpeg', 0.85);
+      if (url.length > 400000) return mal(new Error('El logo quedó muy pesado. Prueba con una imagen más sencilla.'));
+      ok(url); }; img.src = r.result; };
+    r.readAsDataURL(file);
+  });
+}
+function docMuestra() {
+  const n = S.d.numeraciones.find(x => x.tipo === 'FV' && x.electronica && x.activa) || { id: 'n-muestra', prefijo: 'FE', resolucion: '18764000000000', fecha_resolucion: '2026-01-15', desde: 1, hasta: 5000, vigencia_hasta: '2028-01-15' };
+  const t = { id: 't-muestra', tipo_id: '31', numero: '860002964', dv: 4, nombre: 'Distribuidora Andina S.A.S.', direccion: 'Carrera 7 # 71-21', ciudad: 'Bogotá, D.C.', departamento: 'Bogotá, D.C.', telefono: '601 555 1234', correo: 'pagos@andina.example' };
+  const d = { id: 'd-muestra', tipo: 'FV', estado: 'emitido', electronica: true, prefijo: n.prefijo, numero: 1024, numeracion_id: n.id, fecha: hoy(), vence: hoy(), tercero_id: t.id, forma_pago: 'credito', medio_pago: 'transferencia', observaciones: '', retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 };
+  const items = [{ id: 'i1', documento_id: d.id, orden: 0, codigo: 'SER-01', descripcion: 'Asesoría contable mensual', cantidad: 1, precio: 1500000, descuento_pct: 0, iva_pct: 19 },
+    { id: 'i2', documento_id: d.id, orden: 1, codigo: 'SER-02', descripcion: 'Elaboración de nómina', cantidad: 2, precio: 250000, descuento_pct: 10, iva_pct: 19 }];
+  const ev = { id: 'e-muestra', documento_id: d.id, estado: 'aceptado', ambiente: 'pruebas', cufe: 'a3f9c1e07b2d4f6a8c5e91b0d3f7a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7', creado_en: new Date().toISOString() };
+  return { n, t, d, items, ev };
+}
+function vDisenoFactura(m) {
+  const e = emp(); let D = disenoFactura(e), pie = e.pie_factura || '';
+  m.innerHTML = `<header class="vhead"><div><h2>Diseño de la factura</h2><p class="sub">Así se ven tus facturas y notas en pantalla, al imprimir y en el PDF. Los cambios se ven a la derecha antes de guardar.</p></div>
+    <div class="row"><button class="primary" id="dfGuardar">Guardar diseño</button></div></header>
+  <div class="df-grid"><form class="panel stack df-form" id="dfForm" onsubmit="return false">
+    <div><h3>Logo</h3><div class="df-logo" id="dfLogoBox"></div>
+      <div class="row"><label class="btn" for="dfLogo">Subir logo</label><input id="dfLogo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden><button type="button" id="dfQuitar" class="ghost">Quitar</button></div>
+      <p class="hint">PNG con fondo transparente se ve mejor. Se ajusta solo al tamaño de la factura.</p></div>
+    <div><h3>Plantilla</h3><div class="df-plantillas">${PLANTILLAS_FAC.map(([k, n, t]) => `<label class="df-pl"><input type="radio" name="plantilla" value="${k}"><b>${n}</b><span>${t}</span></label>`).join('')}</div></div>
+    <div><h3>Color</h3><div class="df-colores">${COLORES_FAC.map(c => `<button type="button" class="df-color" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<input type="color" id="dfColor" aria-label="Otro color"></div></div>
+    <div><h3>QR, CUFE y resolución</h3><select id="dfUbic"><option value="pie">En el pie de página</option><option value="arriba">Arriba, debajo del encabezado</option></select></div>
+    <div><h3>Columnas</h3><label class="check"><input type="checkbox" id="dfCod"> Mostrar el código del producto</label><label class="check"><input type="checkbox" id="dfDesc"> Mostrar la columna de descuento</label></div>
+    <div><h3>Texto del pie de la factura</h3><textarea id="dfPie" rows="3" maxlength="600" placeholder="Ej.: Cuenta de ahorros Bancolombia 123-456789-00. Gracias por su compra.">${esc(pie)}</textarea></div>
+  </form>
+  <section class="panel df-prev"><p class="hint">Vista previa con una factura de ejemplo</p><div id="dfPrev"></div></section></div>`;
+  const pintar = () => {
+    $('dfLogoBox').innerHTML = D.logo ? `<img src="${D.logo}" alt="Logo">` : '<span class="muted">Sin logo</span>'; $('dfQuitar').hidden = !D.logo;
+    m.querySelectorAll('[name=plantilla]').forEach(r => { r.checked = r.value === D.plantilla; r.closest('.df-pl').classList.toggle('on', r.checked); });
+    m.querySelectorAll('.df-color').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === D.color.toLowerCase())); $('dfColor').value = D.color;
+    $('dfUbic').value = D.ubic_fe; $('dfCod').checked = D.codigo; $('dfDesc').checked = D.descuento;
+    const x = docMuestra(), quitar = [];
+    const pon = (arr, obj) => { if (!arr.some(o => o.id === obj.id)) { arr.push(obj); quitar.push([arr, obj]); } };
+    S.d.fe_envios = S.d.fe_envios || [];
+    pon(S.d.terceros, x.t); pon(S.d.numeraciones, x.n); pon(S.d.documentos, x.d); x.items.forEach(i => pon(S.d.items, i)); pon(S.d.fe_envios, x.ev);
+    try { $('dfPrev').innerHTML = representacion(x.d, { diseno: D, pie }); } finally { for (const [arr, obj] of quitar) arr.splice(arr.indexOf(obj), 1); }
+  };
+  m.querySelectorAll('[name=plantilla]').forEach(r => r.onchange = () => { D = { ...D, plantilla: r.value }; pintar(); });
+  m.querySelectorAll('.df-color').forEach(b => b.onclick = () => { D = { ...D, color: b.dataset.c }; pintar(); });
+  $('dfColor').oninput = ev => { D = { ...D, color: ev.target.value }; pintar(); };
+  $('dfUbic').onchange = ev => { D = { ...D, ubic_fe: ev.target.value }; pintar(); };
+  $('dfCod').onchange = ev => { D = { ...D, codigo: ev.target.checked }; pintar(); };
+  $('dfDesc').onchange = ev => { D = { ...D, descuento: ev.target.checked }; pintar(); };
+  $('dfPie').oninput = ev => { pie = ev.target.value; pintar(); };
+  $('dfLogo').onchange = async ev => { const f = ev.target.files[0]; ev.target.value = ''; if (!f) return; try { D = { ...D, logo: await leerLogo(f) }; pintar(); } catch (e) { fail(e); } };
+  $('dfQuitar').onclick = () => { D = { ...D, logo: '' }; pintar(); };
+  $('dfGuardar').onclick = async () => {
+    try { await store.save('empresas', { id: S.eid, pie_factura: pie.trim(), contabilidad: { ...(emp()?.contabilidad || {}), factura: D } }); await recargar(); toast('Diseño guardado. Ya se usa en tus facturas y notas.'); }
+    catch (e) { fail(e); }
+  };
+  pintar();
 }
 function vDoc(m, id) {
   const d = docById(id);
@@ -981,9 +1079,21 @@ function vDoc(m, id) {
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
+    ${d.electronica && d.estado === 'emitido' && RUTA_FE[d.tipo] && (feActiva() || envios(d.id).length) ? panelDian(d) : ''}
     ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
+  if ($('feEnviar')) $('feEnviar').onclick = async () => {
+    const x = datosFE(d), errs = erroresFE(x);
+    if (errs.length) return fail(new Error(errs.join(' ')));
+    if (!await confirmar(`Enviar ${esc(nomDoc(d))} a la DIAN`, 'Se envía el documento por MATIAS. Si la DIAN lo acepta, queda con CUFE y ya no se puede modificar: cualquier corrección se hace con una nota.', 'Enviar')) return;
+    const b = $('feEnviar'); b.disabled = true; b.textContent = 'Enviando…';
+    try {
+      const r = await store.fe('enviar', { documento_id: d.id, ruta: RUTA_FE[d.tipo], body: jsonFE({ ...x, hora: new Date().toTimeString().slice(0, 8) }) });
+      await cargarEmpresa(); route();
+      if (r.estado === 'aceptado') toast(`${nomDoc(d)} aceptada por la DIAN.`); else fail(new Error(`La DIAN no aceptó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
+    } catch (e) { fail(e); b.disabled = false; b.textContent = 'Enviar a la DIAN'; }
+  };
   if ($('eliminar')) $('eliminar').onclick = async () => {
     const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones);
     if (motivo) return fail(new Error(motivo));
@@ -995,6 +1105,24 @@ function vDoc(m, id) {
     const mot = fd.get('motivo').trim(); if (!mot) throw new Error('Escribe el motivo.');
     await store.anular(d.id, mot); await cargarEmpresa(); toast(`Anulado: ${nomDoc(d)}.`); route();
   });
+}
+/* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
+// El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
+const feActiva = () => emp()?.contabilidad?.fe_activa === true;
+const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
+const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
+function datosFE(d) {
+  const ref = d.ref_id ? docById(d.ref_id) : null;
+  return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id),
+    numeracion: S.d.numeraciones.find(n => n.id === d.numeracion_id), ref, cufeRef: ref ? envioAceptado(ref.id)?.cufe || '' : '' };
+}
+function panelDian(d) {
+  const ok = envioAceptado(d.id), l = envios(d.id), falta = ok ? [] : erroresFE(datosFE(d));
+  return `<section class="panel stack noprint"><header class="vhead"><h3>DIAN</h3>${ok ? '<span class="tag ok">Aceptada</span>' : `<button class="primary" id="feEnviar">Enviar a la DIAN</button>`}</header>
+    ${ok ? `<dl class="kv"><dt>CUFE</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviada</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.pdf ? `<dt>PDF</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver el PDF de MATIAS</a></dd>` : ''}</dl>`
+      : `<p class="muted">${l.length ? 'La DIAN no ha aceptado este documento. Revisa los errores y vuelve a enviarlo con el mismo número.' : 'Todavía no se ha enviado a la DIAN.'}</p>${falta.length ? `<ul class="err">${falta.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`}
+    ${l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazada'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
+  </section>`;
 }
 function imprimir(d) {
   $('print').innerHTML = representacion(d);
