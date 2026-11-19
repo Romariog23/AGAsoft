@@ -529,11 +529,11 @@ function vInicio(m) {
   if (!d.terceros.length) faltan.push(['clientes', 'Crea tu primer cliente.']);
   if (!d.productos.length) faltan.push(['productos', 'Crea tus productos o servicios.']);
   if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Habilita tu facturación electrónica ante la DIAN (set de pruebas).']);
-  const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 8);
+  const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 5);
   const on = new Set(cfgInicio()), W = k => on.has(k);
   const medios = WIDGETS.filter(([k]) => W(k) && WIDGET_HTML[k]).map(([k]) => WIDGET_HTML[k]({ R, edades, em, cart }));
   m.innerHTML = `<header class="vhead"><div><h2>${esc(e.nombre)}</h2><p class="sub mono">NIT ${fmtNit(e.nit)}-${e.dv}</p></div>
-    <div class="row"><button id="iniCfg" title="Escoger qué se ve en el Inicio">Personalizar</button><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
+    <div class="row"><button id="iniCfg" title="Escoger qué se ve en el Inicio">Personalizar</button></div></header>
   ${faltan.length ? `<section class="panel stack callout"><h3>Para empezar a facturar</h3><ol class="steps-list">${faltan.map(([k, t]) => `<li><a href="#/${k}">${t}</a></li>`).join('')}</ol></section>` : ''}
   ${W('kpis') ? `<section class="kpis">
     <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b>${varPct !== null ? `<small class="${varPct >= 0 ? 'k-up' : 'k-down'}">${varPct >= 0 ? '▲' : '▼'} ${Math.abs(varPct)} % vs. ${MESES_NOM[+mesAnt.slice(5) - 1]}</small>` : ''}</div>
@@ -565,7 +565,7 @@ const WIDGETS = [
   ['pagar', 'Cuentas por pagar', false, 'Lo que les debes a tus proveedores.'],
   ['impuestos', 'Impuestos por pagar', false, 'IVA, retenciones e ICA según la contabilidad.'],
   ['nomina', 'Nómina', false, 'Última nómina, seguridad social y prestaciones por pagar.'],
-  ['ultimos', 'Últimos documentos', true, 'Los 8 documentos más recientes.'],
+  ['ultimos', 'Últimos documentos', true, 'Los 5 documentos más recientes.'],
 ];
 const cfgInicio = () => { try { const v = JSON.parse(localStorage.getItem('agasoft-inicio-' + S.eid) || 'null'); if (Array.isArray(v)) return v; } catch (_) { /* sin almacenamiento */ } return WIDGETS.filter(w => w[2]).map(w => w[0]); };
 const guardarInicio = l => { try { localStorage.setItem('agasoft-inicio-' + S.eid, JSON.stringify(l)); } catch (_) { /* sin almacenamiento */ } };
