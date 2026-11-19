@@ -79,3 +79,11 @@ test('pensionado: sin pensión ni solidaridad, salud completa', () => {
   assert.equal(l.items.find(i => i.k === 'salud').valor, 320000);
   assert.equal(l.items.find(i => i.k === 'salud_emp').valor, 680000);
 });
+
+test('borrador no contabiliza', () => {
+  const P = paramNomina({});
+  const l = liquidar({ id: 'e', tercero_id: 't', salario: 2000000 }, {}, P);
+  const n = { id: 'n', numero: 1, fecha: '2026-11-30', lineas: [l], cuenta_neto: P.cuenta_neto };
+  assert.equal(asientoNomina({ ...n, estado: 'borrador' }).length, 0);
+  assert.ok(asientoNomina({ ...n, estado: 'contabilizado' }).length > 0);
+});

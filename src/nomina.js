@@ -122,7 +122,8 @@ export const totalesNomina = lineas => ['devengado', 'deducciones', 'neto', 'apo
 
 // Movimientos contables de una nómina guardada (las cuentas quedan guardadas en cada línea).
 export function asientoNomina(n) {
-  if (!n || n.estado === 'anulado') return [];
+  // Solo la nómina contabilizada suma (el borrador y la anulada no).
+  if (!n || n.estado === 'anulado' || n.estado === 'borrador') return [];
   const ref = `NE ${n.numero}`, out = [];
   const mov = (cuenta, debito, credito, tercero_id, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: n.fecha, doc_id: n.id, tipo: 'NE', ref, origen: 'nomina', cuenta, tercero_id: tercero_id || null, detalle, debito, credito }); };
   for (const l of n.lineas || []) {
