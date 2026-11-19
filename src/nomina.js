@@ -243,8 +243,11 @@ export const MODOS_PAGO = [['salarios', 'Pago de salarios', /^2505/], ['ss', 'Pa
 // grupos: [{ tercero_pago, nombre, filas: [{ cuenta, tercero_id, saldo, pagar, contra }], mora }]
 // ajustar: la diferencia entre lo pagado y lo causado va a la cuenta contra y el pasivo queda en cero.
 //          Sin ajustar, solo se abona lo pagado y el resto del pasivo sigue pendiente.
-export function lineasPagoNomina({ grupos, banco, ajustar = false, cuentaMora = '53052001', detalle = 'Pago de nómina' }) {
+// terceroBanco: si se paga todo en una sola transacción (la PILA por un operador como SOI, Aportes en Línea o Asopagos),
+// sale una sola línea de banco a nombre de ese tercero; los pasivos de cada entidad se cancelan igual, cada uno con su tercero.
+export function lineasPagoNomina({ grupos, banco, ajustar = false, cuentaMora = '53052001', detalle = 'Pago de nómina', terceroBanco = '', detalleBanco = '' }) {
   if (!banco) throw new Error('Escoge la cuenta de banco o caja con que se paga.');
+  let unico = 0;
   const out = [], add = (cuenta, tercero_id, det, debito, credito) => out.push({ cuenta, tercero_id: tercero_id || null, detalle: det, debito: r2(debito), credito: r2(credito) });
   for (const g of grupos || []) {
     if (!g.tercero_pago) throw new Error(`Falta el tercero a quien se le paga${g.nombre ? ` (${g.nombre})` : ''}.`);
@@ -269,8 +272,10 @@ export function lineasPagoNomina({ grupos, banco, ajustar = false, cuentaMora = 
     }
     const mora = r2(num(g.mora));
     if (mora > 0) { add(cuentaMora, g.tercero_pago, `Intereses de mora · ${g.nombre || ''}`.trim(), mora, 0); total = r2(total + mora); }
-    if (total > 0) add(banco, g.tercero_pago, det, 0, total);
+    if (total > 0 && !terceroBanco) add(banco, g.tercero_pago, det, 0, total);
+    unico = r2(unico + total);
   }
+  if (terceroBanco && unico > 0) add(banco, terceroBanco, detalleBanco || detalle, 0, unico);
   const d = r2(out.reduce((s, l) => s + l.debito, 0)), c = r2(out.reduce((s, l) => s + l.credito, 0));
   if (!out.length || !c) throw new Error('No hay valores para pagar.');
   if (d !== c) throw new Error(`El pago no cuadra: débitos ${d} y créditos ${c}.`);

@@ -2171,7 +2171,11 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     m.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('primary', b.dataset.tab === modoPago));
     const ss = modoPago === 'ss', pr = modoPago === 'prest', sal = modoPago === 'salarios', r = armar(); filas = r.filas;
     $('pCsv').hidden = !sal;
-    $('pOpc').innerHTML = `${pr ? `<div class="row filters"><div><label for="pCo">Qué prestación</label><select id="pCo"><option value="">Todas</option>${PRESTACIONES.map(([p, t]) => `<option value="${p}" ${p === st.concepto ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>` : ''}
+    if (ss && st.operador === undefined) st.operador = emp()?.contabilidad?.operador_pila || '';
+    // El tercero del crédito al banco se escoge libre (operador, entidad o quien reciba el pago); los empleados no.
+    const operadores = S.d.terceros.filter(t => !esEmpleado(t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    $('pOpc').innerHTML = `${ss ? `<div class="row filters"><div class="grow"><label for="pOp">Tercero del pago al banco (operador de la PILA)</label><select id="pOp"><option value="">Pago directo a cada entidad</option>${operadores.map(t => `<option value="${t.id}" ${t.id === st.operador ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
+        <p class="hint">Con operador (SOI, Aportes en Línea, Asopagos…) sale un solo pago del banco a su nombre y cada entidad queda saldada en el mismo comprobante. Si no está en la lista, créalo en <a href="#/proveedores">Proveedores</a> con su NIT.</p></div></div>` : ''}${pr ? `<div class="row filters"><div><label for="pCo">Qué prestación</label><select id="pCo"><option value="">Todas</option>${PRESTACIONES.map(([p, t]) => `<option value="${p}" ${p === st.concepto ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>` : ''}
       ${sal ? '' : `<label class="check"><input type="checkbox" id="pAj" ${st.ajustar !== false ? 'checked' : ''}> Ajustar la diferencia contra el gasto (el pasivo queda en cero)</label>
         <p class="hint">${ss ? 'Escribe lo que liquidó la PILA para cada cuenta de cada entidad. Si es distinto a lo causado, la diferencia va al gasto con que se causó el aporte, y los intereses de mora a 53052001, en este mismo comprobante.' : 'Si pagas menos de lo provisionado (por ejemplo, unos días de vacaciones), quita el ajuste para que el resto siga pendiente. Las cesantías se consignan al fondo de cada empleado.'}</p>`}
       ${filas.some(f => f.reasig) ? '<p class="hint"><b>Aportes a nombre de empleados:</b> quedaron así porque la nómina se contabilizó antes de asignarle las entidades. Se pagan a la entidad que tiene asignada el empleado en su ficha: el pago cancela el pasivo del empleado y el banco sale a nombre de la entidad.</p>' : ''}
@@ -2217,15 +2221,17 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     filas.forEach((f, i) => { const c = m.querySelector(`[data-dif="${i}"]`); if (!c) return; const d = r2(f.pagar - f.saldo);
       c.textContent = !f.on || !d ? '' : ajustar ? (d > 0 ? '+' : '−') + money(Math.abs(d)) : d < 0 ? `${money(-d)} queda pendiente` : 'Mayor a lo que se debe'; });
     try {
-      const ls = lineasPagoNomina({ grupos, banco: $('pBa').value, ajustar, detalle: det });
+      const op = modoPago === 'ss' ? ($('pOp')?.value || '') : '';
+      const ls = lineasPagoNomina({ grupos, banco: $('pBa').value, ajustar, detalle: det, terceroBanco: op, detalleBanco: op ? `Pago planilla PILA · ${nomT(op)}` : '' });
       const tot = r2(ls.filter(l => l.cuenta === $('pBa').value).reduce((s, l) => s + l.credito, 0));
       $('pTot').innerHTML = `${grupos.length} ${modoPago === 'ss' ? (grupos.length === 1 ? 'entidad' : 'entidades') : 'pagos'} · Total que sale: <b class="mono">${money(tot)}</b>`;
       $('pAs').innerHTML = tablaAsiento(ls.map(l => ({ ...l })));
-      return { ls, det };
+      return { ls, det: op ? `Pago planilla PILA · ${nomT(op)}` : det, op };
     } catch (e) { $('pTot').innerHTML = `<span class="err">${esc(e.message)}</span>`; $('pAs').innerHTML = ''; return null; }
   };
   const enlazar = () => {
     if ($('pCo')) $('pCo').onchange = () => { st.concepto = $('pCo').value; pintar(); };
+    if ($('pOp')) $('pOp').onchange = () => { st.operador = $('pOp').value; calc(); };
     if ($('pAj')) $('pAj').onchange = () => { st.ajustar = $('pAj').checked; calc(); };
     if ($('pTodos')) $('pTodos').onchange = () => { m.querySelectorAll('[data-on]:not(:disabled)').forEach(x => x.checked = $('pTodos').checked); calc(); };
   };
@@ -2248,7 +2254,9 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     if (malas.length) throw new Error(`Usa cuentas auxiliares de 8 dígitos: ${malas.join(', ')}.`);
     const faltan = cuentasFaltantes(r.ls.map(l => l.cuenta), S.d.cuentas);
     if (faltan.length) await store.saveMany('cuentas', faltan.map(c => ({ ...c, empresa_id: S.eid })));
-    const fecha = $('pFe').value || hoy(), n = new Set(r.ls.map(l => l.tercero_id)).size;
+    const fecha = $('pFe').value || hoy();
+    // El operador escogido queda guardado para el próximo pago.
+    if (modoPago === 'ss' && (r.op || '') !== (emp()?.contabilidad?.operador_pila || '')) await guardarContab('operador_pila', r.op || '');
     const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'PN', numero: siguienteComp('PN'), fecha, descripcion: $('pDe').value.trim() || `${r.det} · ${fFecha(fecha)}`, lineas: r.ls, estado: 'contabilizado' });
     await cargarEmpresa(); toast(`Pago de nómina ${g.numero} guardado.`); location.hash = '#/comp/' + g.id;
     } catch (e) { $('pErr').textContent = /tipo_check/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/025_pago_nomina.sql.' : e.message; $('pErr').hidden = false; }

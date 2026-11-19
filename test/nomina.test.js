@@ -142,3 +142,11 @@ test('pago de nómina: cesantías al fondo con el pasivo a nombre del empleado',
     { tercero_pago: 'fondo', nombre: 'Ana', filas: [{ cuenta: '25100501', tercero_id: 't1', saldo: 250000, pagar: 250000 }] }] });
   assert.deepEqual(ls.map(l => [l.cuenta, l.tercero_id, l.debito, l.credito]), [['25100501', 't1', 250000, 0], ['11100501', 'fondo', 0, 250000]]);
 });
+
+test('pago de nómina: PILA por operador, una sola línea de banco', () => {
+  const ls = lineasPagoNomina({ banco: '11100501', ajustar: true, terceroBanco: 'soi', detalleBanco: 'Pago PILA', grupos: [
+    { tercero_pago: 'afp', nombre: 'Fondo', filas: [{ cuenta: '23803001', tercero_id: 'afp', saldo: 480000, pagar: 480000 }] },
+    { tercero_pago: 'eps', nombre: 'EPS', mora: 1000, filas: [{ cuenta: '23700501', tercero_id: 'eps', saldo: 120000, pagar: 120000 }] }] });
+  assert.deepEqual(ls.map(l => [l.cuenta, l.tercero_id, l.debito, l.credito]), [
+    ['23803001', 'afp', 480000, 0], ['23700501', 'eps', 120000, 0], ['53052001', 'eps', 1000, 0], ['11100501', 'soi', 0, 601000]]);
+});
