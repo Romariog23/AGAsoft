@@ -1,72 +1,56 @@
-// Facturación electrónica con MATIAS API (UBL 2.1). Arma el JSON de factura, nota crédito y nota débito.
-// Los catálogos de MATIAS usan ids propios: aquí se envían los códigos DIAN y los nombres en campos `_dian`
-// y la función de Supabase (supabase/functions/fe-matias) los cambia por los ids de MATIAS antes de enviar.
+// Facturación electrónica con Factus (proveedor tecnológico autorizado por la DIAN). Arma el JSON de factura,
+// nota crédito y nota débito con los códigos DIAN que usa Factus. La función de Supabase (supabase/functions/fe-factus)
+// pone el código DANE del municipio (_municipio) y el rango de numeración antes de enviar.
 import { r2, num, linea } from './calc.js';
 import qrcode from 'qrcode-generator';
 
-const TIPO_DOC_FE = { FV: 7, NC: 5, ND: 4 };
-const OPERACION_FE = { FV: 1, NC: 12, ND: 14 }; // 1 estándar; 12 y 14: nota que referencia una factura electrónica
-const RUTA_FE = { FV: '/invoice', NC: '/notes/credit', ND: '/notes/debit' };
+const TIPOS_FE = ['FV', 'NC', 'ND'];
 // Medios de pago DIAN: 10 efectivo, 47 transferencia, 42 consignación, 48 tarjeta crédito, 20 cheque.
-const MEDIO_FE = { efectivo: 10, transferencia: 47, consignacion: 42, tarjeta: 48, cheque: 20 };
+const MEDIO_FE = { efectivo: '10', transferencia: '47', consignacion: '42', tarjeta: '48', cheque: '20' };
 const dinero = v => r2(num(v)).toFixed(2);
 const soloDigitos = v => String(v || '').replace(/\D/g, '');
+// Referencia única del documento en Factus (la cuenta de Factus es de una sola empresa).
+const referenciaFE = d => `${d.tipo}-${d.prefijo || ''}${d.numero}`;
 
-// cufeRef: CUFE de la factura a la que se refiere una nota (de su envío aceptado).
-function jsonFE({ doc, items, tercero, numeracion, ref, cufeRef, hora }) {
+// numeroRef: número con que Factus validó la factura a la que se refiere una nota.
+function jsonFE({ doc, items, tercero, ref, numeroRef }) {
   const ls = (items || []).map(it => ({ it, l: linea(it) }));
-  const porTarifa = {};
-  for (const { it, l } of ls) { const k = num(it.iva_pct); porTarifa[k] = porTarifa[k] || { base: 0, iva: 0 }; porTarifa[k].base = r2(porTarifa[k].base + l.base); porTarifa[k].iva = r2(porTarifa[k].iva + l.iva); }
-  const base = r2(ls.reduce((s, x) => s + x.l.base, 0)), iva = r2(ls.reduce((s, x) => s + x.l.iva, 0)), total = r2(base + iva);
+  const total = r2(ls.reduce((s, x) => s + x.l.base + x.l.iva, 0));
   const juridica = (tercero.tipo_persona || (tercero.tipo_id === '31' ? 'juridica' : 'natural')) === 'juridica';
   const credito = doc.forma_pago === 'credito';
   const body = {
-    resolution_number: String(numeracion?.resolucion || ''),
-    prefix: doc.prefijo || numeracion?.prefijo || '',
-    document_number: Number(doc.numero),
-    date: doc.fecha,
-    time: hora || '12:00:00',
-    type_document_id: TIPO_DOC_FE[doc.tipo],
-    operation_type_id: OPERACION_FE[doc.tipo],
-    currency_id: 272, // COP
-    graphic_representation: 1,
-    send_email: tercero.correo ? 1 : 0,
-    notes: String(doc.observaciones || '').slice(0, 500),
+    reference_code: referenciaFE(doc),
+    observation: String(doc.observaciones || '').slice(0, 250),
+    payment_details: [{ payment_form: credito ? '2' : '1', payment_method_code: MEDIO_FE[doc.medio_pago] || '10', amount: dinero(total), ...(credito && doc.vence ? { due_date: doc.vence } : {}) }],
     customer: {
-      company_name: tercero.nombre,
-      dni: soloDigitos(tercero.numero) || String(tercero.numero),
-      ...(tercero.tipo_id === '31' && tercero.dv != null ? { dv: String(tercero.dv) } : {}),
-      email: tercero.correo || '',
+      identification_document_code: tercero.tipo_id || '13',
+      identification: soloDigitos(tercero.numero) || String(tercero.numero),
+      ...(tercero.tipo_id === '31' && tercero.dv != null && tercero.dv !== '' ? { dv: String(tercero.dv) } : {}),
+      legal_organization_code: juridica ? '1' : '2',
+      tribute_code: tercero.responsable_iva ? '01' : 'ZZ',
+      ...(juridica ? { company: tercero.nombre } : { names: tercero.nombre }),
       address: tercero.direccion || '',
-      mobile: soloDigitos(tercero.telefono),
-      type_organization_id: juridica ? 1 : 2,
-      tax_regime_id: tercero.responsable_iva ? 1 : 2,
-      tax_level_id: 5, // R-99-PN (no aplica)
-      country_id: 45,
-      _dian: { identity_document: tercero.tipo_id || '13', city: tercero.ciudad || '', department: tercero.departamento || '' },
+      email: tercero.correo || '',
+      phone: soloDigitos(tercero.telefono),
+      country_code: 'CO',
+      _municipio: { ciudad: tercero.ciudad || '', departamento: tercero.departamento || '' },
     },
-    lines: ls.map(({ it, l }) => ({
-      code: it.codigo || 'SIN-COD',
-      description: it.descripcion || it.codigo || 'Ítem',
-      invoiced_quantity: String(num(it.cantidad)),
-      base_quantity: String(num(it.cantidad)),
-      price_amount: dinero(it.precio),
-      line_extension_amount: dinero(l.base),
-      quantity_units_id: '70', // 94 = unidad (DIAN); MATIAS: confirmar con el catálogo
-      type_item_identifications_id: '4',
-      reference_price_id: '1',
-      free_of_charge_indicator: false,
-      ...(l.descuento ? { allowance_charges: [{ charge_indicator: false, allowance_charge_reason: 'Descuento', amount: dinero(l.descuento), base_amount: dinero(l.bruto) }] } : {}),
-      tax_totals: [{ tax_id: '1', tax_amount: dinero(l.iva), taxable_amount: dinero(l.base), percent: String(num(it.iva_pct)) }],
+    items: ls.map(({ it }) => ({
+      code_reference: it.codigo || 'SIN-COD',
+      name: it.descripcion || it.codigo || 'Ítem',
+      quantity: String(num(it.cantidad)),
+      discount_rate: num(it.descuento_pct).toFixed(2),
+      price: dinero(it.precio), // sin IVA y antes del descuento
+      unit_measure_code: '94', // unidad
+      standard_code: '999', // estándar de adopción del contribuyente
+      taxes: [{ code: '01', rate: num(it.iva_pct).toFixed(2) }],
     })),
-    tax_totals: Object.entries(porTarifa).map(([k, v]) => ({ tax_id: '1', tax_amount: dinero(v.iva), taxable_amount: dinero(v.base), percent: String(num(k)) })),
-    legal_monetary_totals: { line_extension_amount: dinero(base), tax_exclusive_amount: dinero(base), tax_inclusive_amount: dinero(total), allowance_total_amount: '0.00', charge_total_amount: '0.00', payable_amount: dinero(total) },
-    payments: [{ payment_method_id: credito ? 2 : 1, means_payment_id: MEDIO_FE[doc.medio_pago] || 10, value_paid: dinero(total), ...(credito && doc.vence ? { payment_due_date: doc.vence } : {}) }],
   };
-  if (doc.tipo !== 'FV') {
-    const numRef = `${ref?.prefijo || ''}${ref?.numero || ''}`;
-    body.billing_reference = { number: numRef, date: ref?.fecha || '', uuid: cufeRef || '', scheme_name: 'CUFE-SHA384' };
-    body.discrepancy_response = { reference_id: numRef, response_id: String(doc.concepto || (doc.tipo === 'NC' ? '1' : '4')) };
+  if (doc.tipo === 'FV') Object.assign(body, { document: '01', operation_type: '10' });
+  else {
+    body.bill_number = numeroRef || `${ref?.prefijo || ''}${ref?.numero || ''}`;
+    body.correction_concept_code = String(doc.concepto || (doc.tipo === 'NC' ? '2' : '4'));
+    body.customization_id = doc.tipo === 'NC' ? '20' : '30';
   }
   return body;
 }
@@ -74,10 +58,10 @@ function jsonFE({ doc, items, tercero, numeracion, ref, cufeRef, hora }) {
 // Lo que falta para poder enviar el documento a la DIAN (lista vacía si está listo).
 function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
   const out = [];
-  if (!TIPO_DOC_FE[doc.tipo]) out.push('Solo se envían facturas, notas crédito y notas débito.');
+  if (!TIPOS_FE.includes(doc.tipo)) out.push('Solo se envían facturas, notas crédito y notas débito.');
   if (!doc.electronica) out.push('El documento no es electrónico.');
   if (doc.estado !== 'emitido') out.push('Primero emite el documento.');
-  if (!String(numeracion?.resolucion || '').trim()) out.push('La numeración no tiene número de resolución.');
+  if (doc.tipo === 'FV' && !String(numeracion?.resolucion || '').trim()) out.push('La numeración no tiene número de resolución.');
   if (!tercero) out.push('El documento no tiene cliente.');
   else {
     if (!tercero.ciudad) out.push('Al cliente le falta el municipio.');
@@ -87,18 +71,18 @@ function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
   return out;
 }
 
-// Lee la respuesta de MATIAS: aceptado solo si IsValid es "true" y StatusCode "00" (un rechazo también llega con HTTP 200).
+// Lee la respuesta de Factus: aceptado solo si viene validado y con CUFE.
 function leerRespuestaFE(r) {
-  const res = r?.response || r?.ResponseDian || {};
-  const valido = String(res.IsValid ?? r?.IsValid ?? '').toLowerCase() === 'true' && String(res.StatusCode ?? r?.StatusCode ?? '') === '00';
-  const cufe = res.XmlDocumentKey || r?.XmlDocumentKey || r?.cufe || '';
-  const errores = [].concat(res.ErrorMessage?.string || res.ErrorMessage || r?.errors || r?.message || []).flat().map(x => typeof x === 'string' ? x : JSON.stringify(x)).filter(Boolean);
-  return { aceptado: valido, cufe, estado: valido ? 'aceptado' : 'rechazado', mensaje: res.StatusDescription || res.StatusMessage || r?.message || '', errores, pdf: r?.pdf?.url || r?.pdf?.path || '', uuid: r?.uuid || '' };
+  const d = r?.data || {}, valido = d.is_validated === true && !!d.cufe;
+  const errores = [];
+  const add = x => { if (x == null) return; if (Array.isArray(x)) x.forEach(add); else if (typeof x === 'object') Object.values(x).forEach(add); else errores.push(String(x)); };
+  add(d.errors); add(r?.errors);
+  return { aceptado: valido, cufe: d.cufe || '', numero: d.number || '', estado: valido ? 'aceptado' : 'rechazado', mensaje: r?.message || '', errores, qr: d.links?.qr || '', url: d.links?.public_url || '' };
 }
 
-// Contenido del QR de la representación gráfica: el que devuelve MATIAS (qr.qrDian) o, si no viene, la consulta del CUFE en la DIAN.
+// Contenido del QR de la representación gráfica: el enlace de la DIAN que devuelve Factus o, si no viene, la consulta del CUFE.
 function contenidoQR(envio) {
-  const q = envio?.respuesta?.qr?.qrDian || envio?.respuesta?.QRCode || '';
+  const q = envio?.respuesta?.data?.links?.qr || envio?.respuesta?.qr?.qrDian || '';
   if (typeof q === 'string' && q.length > 20 && !q.includes('omitidos')) return q;
   const host = envio?.ambiente === 'produccion' ? 'catalogo-vpfe.dian.gov.co' : 'catalogo-vpfe-hab.dian.gov.co';
   return `https://${host}/document/searchqr?documentkey=${envio?.cufe || ''}`;
@@ -111,4 +95,4 @@ function qrSvg(texto, tam = 132) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${k} ${k}" width="${tam}" height="${tam}" shape-rendering="crispEdges" role="img" aria-label="Código QR de la DIAN"><rect width="${k}" height="${k}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
 }
 
-export { contenidoQR, qrSvg, jsonFE, erroresFE, leerRespuestaFE, RUTA_FE, TIPO_DOC_FE };
+export { contenidoQR, qrSvg, jsonFE, erroresFE, leerRespuestaFE, referenciaFE, TIPOS_FE };
