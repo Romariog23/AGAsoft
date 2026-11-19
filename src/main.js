@@ -2100,6 +2100,9 @@ function vNominaPagos(m) {
 const pagadoPN = c => r2((c.lineas || []).filter(l => /^11/.test(l.cuenta)).reduce((s, l) => s + num(l.credito), 0));
 
 let modoPago = 'salarios';
+// Entidad configurada para el empleado según la cuenta del aporte (EPS, fondo de pensiones, caja; la ARL es de la empresa).
+const entidadSugerida = (tid, cuenta) => { const e = empleados().find(x => x.tercero_id === tid), P = pNom();
+  return (cuenta.startsWith('2380') ? e?.pension_id : cuenta === '23700601' ? P.arl_id : cuenta.startsWith('237010') ? e?.caja_id : cuenta.startsWith('237005') ? e?.eps_id : '') || ''; };
 // Cuenta para la diferencia: el gasto con que se causó en la última nómina o, si no hay (por ejemplo salud con empresa exonerada), el de fábrica en administración.
 const contraPago = (tid, cuenta) => cuentaContraSugerida(nominas(), tid, cuenta) || (k => k ? cuentaGasto(pNom(), k, 'admin') : '')(CONCEPTOS_NOM.find(x => (x.tipo === 'apo' || x.tipo === 'pro') && (String(pNom().cuentas?.[x.k]?.pasivo || '').trim() || x.pasivo) === cuenta)?.k);
 const CONTRA_PAGO = { ss: 'Valor de la PILA', prest: 'Valor a pagar', salarios: 'Valor a pagar' };
@@ -2128,8 +2131,14 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     }
     if (modoPago === 'ss') {
       const L = pasivosNomina(ms, fecha, CUENTAS_SS), malo = x => !x.tercero_id || esEmpleado(x.tercero_id);
-      return { filas: L.filter(x => !malo(x)).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => ({ grupo: x.tercero_id, tercero_id: x.tercero_id, tercero_pago: x.tercero_id, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) }))),
-        malos: L.filter(malo).filter(x => x.total > 0) };
+      const buenas = L.filter(x => !malo(x)).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => ({ grupo: x.tercero_id, tercero_id: x.tercero_id, tercero_pago: x.tercero_id, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) })));
+      // Saldos que quedaron a nombre del empleado (nóminas contabilizadas antes de asignarle las entidades):
+      // se cancela el pasivo del empleado y el banco sale a nombre de la entidad que se escoja.
+      const deEmpleado = L.filter(x => x.tercero_id && esEmpleado(x.tercero_id)).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => {
+          const ent = entidadSugerida(x.tercero_id, c.cuenta);
+          return { reasig: true, grupo: ent || 'sin|' + x.tercero_id + c.cuenta, tercero_id: x.tercero_id, tercero_pago: ent, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) && !!ent };
+        }));
+      return { filas: buenas.concat(deEmpleado), malos: L.filter(x => !x.tercero_id && x.total > 0) };
     }
     return { filas: pasivosNomina(ms, fecha, CUENTAS_PREST).filter(x => x.tercero_id).flatMap(x => x.cuentas.filter(c => c.saldo > 0 && (!st.concepto || c.cuenta.startsWith(st.concepto))).map(c => {
       const fondo = c.cuenta.startsWith('2510') ? empDe(x.tercero_id)?.cesantias_id : '';
@@ -2144,7 +2153,8 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     $('pOpc').innerHTML = `${pr ? `<div class="row filters"><div><label for="pCo">Qué prestación</label><select id="pCo"><option value="">Todas</option>${PRESTACIONES.map(([p, t]) => `<option value="${p}" ${p === st.concepto ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>` : ''}
       ${sal ? '' : `<label class="check"><input type="checkbox" id="pAj" ${st.ajustar !== false ? 'checked' : ''}> Ajustar la diferencia contra el gasto (el pasivo queda en cero)</label>
         <p class="hint">${ss ? 'Escribe lo que liquidó la PILA para cada cuenta de cada entidad. Si es distinto a lo causado, la diferencia va al gasto con que se causó el aporte, y los intereses de mora a 53052001, en este mismo comprobante.' : 'Si pagas menos de lo provisionado (por ejemplo, unos días de vacaciones), quita el ajuste para que el resto siga pendiente. Las cesantías se consignan al fondo de cada empleado.'}</p>`}
-      ${r.malos.length ? `<p class="err">Hay aportes que no están a nombre de una entidad: ${r.malos.map(x => `${esc(x.tercero_id ? nomT(x.tercero_id) : 'sin tercero')} (${money(x.total)})`).join(', ')}. Asigna la EPS, el fondo y la caja en <a href="#/empleados">Empleados</a> y la ARL y los parafiscales en <a href="#/nominacfg">Configuración de nómina</a>. Los saldos viejos pásalos a la entidad con una <a href="#/compnuevo?tipo=CC">nota de contabilidad</a>.</p>` : ''}`;
+      ${filas.some(f => f.reasig) ? '<p class="hint"><b>Aportes a nombre de empleados:</b> quedaron así porque la nómina se contabilizó antes de asignarle las entidades. Escoge en cada uno la entidad a la que se paga: el pago cancela el pasivo del empleado y el banco sale a nombre de la entidad. Para las próximas nóminas, asigna las entidades en <a href="#/empleados">Empleados</a>.</p>' : ''}
+      ${r.malos.length ? `<p class="err">Hay aportes sin tercero: ${money(r.malos.reduce((a, x) => a + x.total, 0))}. Asigna la EPS, el fondo y la caja en <a href="#/empleados">Empleados</a> y la ARL y los parafiscales en <a href="#/nominacfg">Configuración de nómina</a>. Los saldos viejos pásalos a la entidad con una <a href="#/compnuevo?tipo=CC">nota de contabilidad</a>.</p>` : ''}`;
     if (!filas.length) { $('pTab').innerHTML = `<p class="muted">No hay ${sal ? 'salarios' : ss ? 'aportes de seguridad social' : 'prestaciones'} por pagar a ${fFecha($('pFe').value)}.</p>`; calc(); enlazar(); return; }
     const cab = sal ? '<th>Empleado</th><th>Banco y cuenta</th><th class="r">Por pagar</th><th class="r">Valor a pagar</th>'
       : `<th>${ss ? 'Entidad' : 'Empleado'}</th><th>${ss ? 'Cuenta' : 'Prestación'}</th>${pr ? '<th>Se consigna a</th>' : ''}<th class="r">En libros</th><th class="r">${CONTRA_PAGO[modoPago]}</th><th class="r">Diferencia</th><th>Cuenta de la diferencia</th>`;
@@ -2155,9 +2165,9 @@ function vNominaPago(m, { modo, tercero, concepto }) {
       const chk = `<input type="checkbox" data-on="${i}" ${f.on ? 'checked' : ''} aria-label="Pagar">`;
       const val = `<input type="number" step="1" min="0" class="r mono w-val" data-v="${i}" value="${f.pagar}" aria-label="${CONTRA_PAGO[modoPago]}">`;
       let html = sal ? `<tr><td>${chk}</td><td>${quien}</td><td class="hint">${esc([e?.banco, e?.cuenta_bancaria].filter(Boolean).join(' · ') || 'Sin cuenta bancaria')}</td><td class="r mono">${money(f.saldo)}</td><td>${val}</td></tr>`
-        : `<tr><td>${chk}</td><td>${ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
+        : `<tr><td>${chk}</td><td>${f.reasig ? `${quien}<br><select data-ent="${i}" aria-label="Entidad a la que se paga" style="max-width:220px">${optsTerceros(f.tercero_pago, f.tercero_id)}</select>` : ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
           <td class="r mono">${money(f.saldo)}</td><td>${val}</td><td class="r mono" data-dif="${i}"></td><td><input class="mono" list="ctasPN" data-c="${i}" value="${esc(f.contra || '')}" placeholder="Cuenta auxiliar" autocomplete="off" aria-label="Cuenta de la diferencia"></td></tr>`;
-      const ultimo = ss && filas[i + 1]?.grupo !== f.grupo;
+      const ultimo = ss && !f.reasig && filas[i + 1]?.grupo !== f.grupo;
       if (ultimo) html += `<tr><td></td><td></td><td class="hint">Intereses de mora (si la PILA los trae)</td><td></td><td><input type="number" step="1" min="0" class="r mono w-val" data-mora="${esc(f.grupo)}" aria-label="Intereses de mora"></td><td></td><td class="mono hint">53052001</td></tr>`;
       return html;
     }).join('');
@@ -2169,12 +2179,13 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     m.querySelectorAll('[data-on]').forEach(x => filas[x.dataset.on].on = x.checked);
     m.querySelectorAll('[data-v]').forEach(x => filas[x.dataset.v].pagar = num(x.value));
     m.querySelectorAll('[data-c]').forEach(x => filas[x.dataset.c].contra = x.value.trim());
+    m.querySelectorAll('[data-ent]').forEach(x => { const f = filas[x.dataset.ent]; f.tercero_pago = x.value; f.grupo = x.value || 'sin|' + f.tercero_id + f.cuenta; });
     const ajustar = modoPago !== 'salarios' && !!$('pAj')?.checked, mora = {};
     m.querySelectorAll('[data-mora]').forEach(x => mora[x.dataset.mora] = num(x.value));
     const grupos = [];
     for (const f of filas.filter(x => x.on)) {
       let g = grupos.find(x => x.key === f.grupo);
-      if (!g) grupos.push(g = { key: f.grupo, tercero_pago: f.tercero_pago, nombre: modoPago === 'prest' ? `${nomT(f.tercero_id)}${f.tercero_pago !== f.tercero_id ? ' (' + nomT(f.tercero_pago) + ')' : ''}` : nomT(f.tercero_pago), filas: [], mora: mora[f.grupo] || 0 });
+      if (!g) grupos.push(g = { key: f.grupo, tercero_pago: f.tercero_pago, nombre: f.reasig && !f.tercero_pago ? `escoge la entidad de ${nomT(f.tercero_id)}` : modoPago === 'prest' ? `${nomT(f.tercero_id)}${f.tercero_pago !== f.tercero_id ? ' (' + nomT(f.tercero_pago) + ')' : ''}` : nomT(f.tercero_pago), filas: [], mora: mora[f.grupo] || 0 });
       g.filas.push({ cuenta: f.cuenta, tercero_id: f.tercero_id, saldo: f.saldo, pagar: f.pagar, contra: f.contra });
     }
     const det = modoPago === 'salarios' ? 'Pago de salarios' : modoPago === 'ss' ? 'Pago seguridad social' : `Pago ${st.concepto ? conPre(st.concepto).toLowerCase() : 'prestaciones'}`;
