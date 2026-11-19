@@ -94,7 +94,8 @@ function unLado(m) {
 }
 /* ---------- Comprobantes contables manuales ---------- */
 const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', plural: 'Notas de contabilidad' }, SI: { nombre: 'Saldos iniciales', corto: 'Saldos ini.', plural: 'Saldos iniciales' },
-  CI: { nombre: 'Cierre contable', corto: 'Cierre', plural: 'Cierres contables' } };
+  CI: { nombre: 'Cierre contable', corto: 'Cierre', plural: 'Cierres contables' },
+  PN: { nombre: 'Comprobante de pago de nómina', corto: 'Pago nómina', plural: 'Pagos de nómina' } };
 
 // Cierre del año: cancela los saldos de ingresos, gastos y costos (clases 4, 5, 6 y 7) de cada cuenta y tercero,
 // y lleva la diferencia a la utilidad (crédito) o a la pérdida del ejercicio (débito). Un cierre anterior del mismo año no cuenta.

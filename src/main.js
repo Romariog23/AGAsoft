@@ -8,7 +8,7 @@ import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { FORMATOS, CATALOGO, CALCULOS, calculoDe, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
-import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, PRESTACIONES, cuentaContraSugerida, lineasAjuste } from './nomina.js';
+import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, PRESTACIONES, cuentaContraSugerida, lineasAjuste, MODOS_PAGO, lineasPagoNomina } from './nomina.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
@@ -199,7 +199,7 @@ const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
-  ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
+  ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
@@ -229,7 +229,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
+  renderNav(['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
   const m = $('main');
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
@@ -255,6 +255,8 @@ function route() {
     if (v === 'nominadoc') return vNominaDoc(m, arg);
     if (v === 'nominacfg') return vNominaCfg(m);
     if (v === 'nominapasivos') return vNominaPasivos(m);
+    if (v === 'nominapagos') return vNominaPagos(m);
+    if (v === 'nominapago') return vNominaPago(m, { modo: q.get('modo'), tercero: q.get('tercero'), concepto: q.get('concepto') });
     if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'disenofactura') return vDisenoFactura(m);
@@ -1977,14 +1979,14 @@ function vNominaDoc(m, id) {
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : borr ? '<span class="tag">Borrador</span>' : ''}</h2>
       <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · ${borr ? `sin contabilizar (fecha ${fFecha(n.fecha)})` : `contabilizada el ${fFecha(n.fecha)}`}</p></div>
     <div class="row">${borr ? `<button id="eliminar">Eliminar</button><a class="btn" href="#/nominaeditar/${id}">Editar</a><button id="imprimir">Imprimir desprendibles</button><button class="primary" id="contab">Contabilizar</button>`
-      : `${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button>`}</div></header>
+      : `${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a><a class="btn" href="#/nominapago?modo=salarios">Pagar salarios</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button>`}</div></header>
     <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empleado</th><th class="r">Días</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto</th><th class="r">Aportes</th><th class="r">Provisiones</th><th></th></tr></thead><tbody>
       ${(n.lineas || []).map((l, i) => `<tr><td><b>${esc(terc(l.tercero_id)?.nombre || '')}</b></td><td class="r">${l.dias}</td><td class="r mono">${money(l.devengado)}</td><td class="r mono">${money(l.deducciones)}</td><td class="r mono"><b>${money(l.neto)}</b></td><td class="r mono">${money(l.aportes)}</td><td class="r mono">${money(l.provisiones)}</td>
-        <td class="r nowrap"><button class="sm" data-dp="${i}">Desprendible</button>${anulada || borr ? '' : `<a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${l.tercero_id}">Pagar</a>`}</td></tr>`).join('')}
+        <td class="r nowrap"><button class="sm" data-dp="${i}">Desprendible</button>${anulada || borr ? '' : `<a class="btn sm ghost" href="#/nominapago?modo=salarios&tercero=${l.tercero_id}">Pagar</a>`}</td></tr>`).join('')}
       <tr class="strong"><td>Total</td><td></td><td class="r mono">${tot('devengado')}</td><td class="r mono">${tot('deducciones')}</td><td class="r mono">${tot('neto')}</td><td class="r mono">${tot('aportes')}</td><td class="r mono">${tot('provisiones')}</td><td></td></tr></tbody></table></div>
       ${n.observaciones ? `<p><b>Observaciones:</b> ${esc(n.observaciones)}</p>` : ''}</section>
     <section class="panel stack"><h3>${borr ? 'Contabilización (así quedará al contabilizar)' : 'Contabilización'}</h3><div id="nAs"></div>${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
-      <p class="hint">El neto de cada empleado se paga con un comprobante de egreso. La seguridad social, los parafiscales y las prestaciones quedan en <a href="#/nominapasivos">Seguridad social y prestaciones</a>, donde se pagan y se ajustan.</p></section>`;
+      <p class="hint">El neto de los empleados se paga con un <a href="#/nominapago?modo=salarios">pago de nómina</a> (todos en un solo comprobante). La seguridad social, los parafiscales y las prestaciones quedan en <a href="#/nominapasivos">Seguridad social y prestaciones</a>, donde se ajustan y se pagan.</p></section>`;
   vistaAsientoNomina($('nAs'), { ...n, estado: 'contabilizado' });
   const imprimirN = ls => { $('print').innerHTML = ls.map(l => hojaDesprendible(n, l)).join(''); const t = document.title; document.title = `Nómina NE ${n.numero} - ${emp().nombre}`; window.print(); document.title = t; };
   $('imprimir').onclick = () => imprimirN(n.lineas || []);
@@ -2002,7 +2004,8 @@ function vNominaDoc(m, id) {
     toast('Borrador eliminado.'); location.hash = '#/nomina';
   });
   if ($('anular')) $('anular').onclick = () => {
-    const pagada = compras().some(c => c.tipo === 'CE' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.aplicaciones || []).some(a => a.cuenta && (n.lineas || []).some(l => l.tercero_id === c.tercero_id)));
+    const pagada = compras().some(c => c.tipo === 'CE' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.aplicaciones || []).some(a => a.cuenta && (n.lineas || []).some(l => l.tercero_id === c.tercero_id)))
+      || comps().some(c => c.tipo === 'PN' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.lineas || []).some(x => (n.lineas || []).some(l => l.tercero_id === x.tercero_id)));
     dialogo(`<h2>Anular nómina NE ${n.numero}</h2><p>Sus movimientos dejan de sumar en los informes. El número no se vuelve a usar.${pagada ? ' <b>Hay egresos que pagaron saldos de nómina a estos empleados después de esta fecha: revísalos.</b>' : ''}</p>
       <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
       const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
@@ -2027,12 +2030,12 @@ function vNominaPasivos(m) {
         <li>Si es menor, se devuelve ese gasto. Si el gasto era de un año ya cerrado, usa una cuenta de recuperaciones (4250).</li>
         <li>Los intereses de mora van a gastos financieros (530520). No son deducibles en renta.</li></ul>
       <p>Las prestaciones funcionan igual. Cuando consolidas las cesantías o pagas la prima, escribes el valor real y la diferencia con la provisión va al gasto del empleado.</p>
-      <p>Después de ajustar, el egreso a la entidad paga el saldo exacto y la cuenta queda en cero.</p></div></details>`;
+      <p>También puedes hacerlo todo de una vez en <a href="#/nominapago?modo=ss">Pagos de nómina</a>: escribes el valor de la PILA de cada entidad y el mismo comprobante paga, ajusta la diferencia y registra la mora.</p></div></details>`;
   const pintar = () => {
     m.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('primary', b.dataset.tab === tabPasivos));
     const ms = movs(), ss = tabPasivos === 'ss', L = pasivosNomina(ms, F.hasta, ss ? CUENTAS_SS : CUENTAS_PREST);
     const nomT = t => t ? terc(t)?.nombre || '(tercero borrado)' : '(sin tercero)';
-    const acc = x => x.tercero_id ? `<button class="sm" data-aj="${esc(x.tercero_id)}">Ajustar</button><a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${esc(x.tercero_id)}">Pagar</a>` : '<span class="hint">Asigna el tercero</span>';
+    const acc = x => x.tercero_id ? `<button class="sm" data-aj="${esc(x.tercero_id)}">Ajustar</button><a class="btn sm ghost" href="#/nominapago?modo=${ss ? 'ss' : 'prest'}&tercero=${esc(x.tercero_id)}">Pagar</a>` : '<span class="hint">Asigna el tercero</span>';
     const tot = L.reduce((s, x) => s + x.total, 0);
     if (!L.length) { $('pL').innerHTML = `<p class="muted">${ss ? 'No hay aportes de seguridad social ni parafiscales por pagar' : 'No hay prestaciones por pagar'} a ${fFecha(F.hasta)}.</p>`; return; }
     if (ss) {
@@ -2076,6 +2079,151 @@ function ajustarPasivo(x, ss, despues) {
   }, { ancho: true });
   const f = $('dlgForm'), dif = () => filas.forEach((r, i) => { const d = num(f.querySelector(`[name=r${i}]`).value) - r.saldo; f.querySelector(`[data-dif="${i}"]`).textContent = Math.abs(d) < 0.005 ? '' : (d > 0 ? '+' : '−') + money(Math.abs(d)); });
   f.addEventListener('input', dif); dif();
+}
+
+/* ---------- Pagos de nómina (comprobante PN) ---------- */
+function vNominaPagos(m) {
+  let anulados = false;
+  m.innerHTML = `<header class="vhead"><div><h2>Pagos de nómina</h2><p class="sub">Un solo comprobante paga a varios empleados o entidades, como la dispersión del banco. Cada línea queda a nombre de su tercero.</p></div>
+    <div class="row"><a class="btn" href="#/nominapago?modo=prest">Pagar prestaciones</a><a class="btn" href="#/nominapago?modo=ss">Pagar seguridad social</a><a class="btn primary" href="#/nominapago?modo=salarios">Pagar salarios</a></div></header>
+    <div class="row filters"><label class="check"><input type="checkbox" id="anu"> Ver anulados</label></div><section class="panel" id="lst"></section>`;
+  const pintar = () => {
+    const l = comps().filter(c => c.tipo === 'PN' && (anulados || c.estado !== 'anulado')).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
+    $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Descripción</th><th class="r">Pagado</th><th></th></tr></thead><tbody>
+      ${l.map(c => `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/comp/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="nowrap"><a href="#/comp/${c.id}">Pago de nómina ${c.numero}</a></td><td>${esc(c.descripcion)}</td><td class="r mono">${money(pagadoPN(c))}</td><td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="muted">Todavía no hay pagos de nómina. Después de contabilizar la nómina, paga aquí los salarios, la PILA y las prestaciones.</p>';
+  };
+  $('anu').onchange = () => { anulados = $('anu').checked; pintar(); };
+  pintar();
+}
+// Lo que salió del banco o la caja: los créditos que no son a pasivos ni a gastos (las cuentas 11).
+const pagadoPN = c => r2((c.lineas || []).filter(l => /^11/.test(l.cuenta)).reduce((s, l) => s + num(l.credito), 0));
+
+let modoPago = 'salarios';
+// Cuenta para la diferencia: el gasto con que se causó en la última nómina o, si no hay (por ejemplo salud con empresa exonerada), el de fábrica en administración.
+const contraPago = (tid, cuenta) => cuentaContraSugerida(nominas(), tid, cuenta) || (k => k ? cuentaGasto(pNom(), k, 'admin') : '')(CONCEPTOS_NOM.find(x => (x.tipo === 'apo' || x.tipo === 'pro') && (String(pNom().cuentas?.[x.k]?.pasivo || '').trim() || x.pasivo) === cuenta)?.k);
+const CONTRA_PAGO = { ss: 'Valor de la PILA', prest: 'Valor a pagar', salarios: 'Valor a pagar' };
+function vNominaPago(m, { modo, tercero, concepto }) {
+  if (MODOS_PAGO.some(([k]) => k === modo)) modoPago = modo;
+  const st = { concepto: PRESTACIONES.some(([p]) => p === concepto) ? concepto : '', solo: tercero || '' };
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/nominapagos">← Pagos de nómina</a><h2>Nuevo pago de nómina</h2>
+      <p class="sub">Escoge qué vas a pagar. Los saldos salen de la contabilidad a la fecha del pago.</p></div></header>
+    <div class="row tabs" role="tablist">${MODOS_PAGO.map(([k, t]) => `<button type="button" data-tab="${k}">${t.replace('Pago de ', '').replace(/^./, x => x.toUpperCase())}</button>`).join('')}</div>
+    <section class="panel stack">
+      <div class="grid3"><div><label for="pFe">Fecha del pago</label><input id="pFe" type="date" value="${hoy()}"></div>
+        <div><label for="pBa">Se paga desde <a class="hint" href="#/formaspago">Configurar</a></label><select id="pBa">${optsContado(fCompra(), fCompra().find(f => !f.credito && /^1110/.test(f.cuenta))?.cuenta || '')}</select></div>
+        <div><label for="pDe">Descripción</label><input id="pDe" maxlength="300" placeholder="Se llena sola si la dejas vacía"></div></div>
+      <div id="pOpc"></div><div id="pTab"></div></section>
+    <section class="panel"><details id="pAsD"><summary><b>Ver contabilización</b></summary><div id="pAs" class="stack"></div></details></section>
+    <div class="row" style="justify-content:flex-end;align-items:center;gap:12px"><span id="pTot"></span><button id="pCsv" hidden>Archivo para el banco</button><button class="primary" id="pGuardar">Guardar pago</button></div>
+    <p class="err" id="pErr" hidden></p>
+    <datalist id="ctasPN">${optsLista(cuentasAux())}</datalist>`;
+  let filas = [];
+  const nomT = t => terc(t)?.nombre || '(tercero borrado)';
+  const empDe = tid => empleados().find(e => e.tercero_id === tid);
+  const armar = () => {
+    const ms = movs(), fecha = $('pFe').value || hoy(), sel = t => !st.solo || st.solo === t;
+    if (modoPago === 'salarios') {
+      return { filas: pasivosNomina(ms, fecha, /^2505/).filter(x => x.tercero_id).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => ({ grupo: x.tercero_id, tercero_id: x.tercero_id, tercero_pago: x.tercero_id, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, on: sel(x.tercero_id) }))), malos: [] };
+    }
+    if (modoPago === 'ss') {
+      const L = pasivosNomina(ms, fecha, CUENTAS_SS), malo = x => !x.tercero_id || esEmpleado(x.tercero_id);
+      return { filas: L.filter(x => !malo(x)).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => ({ grupo: x.tercero_id, tercero_id: x.tercero_id, tercero_pago: x.tercero_id, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) }))),
+        malos: L.filter(malo).filter(x => x.total > 0) };
+    }
+    return { filas: pasivosNomina(ms, fecha, CUENTAS_PREST).filter(x => x.tercero_id).flatMap(x => x.cuentas.filter(c => c.saldo > 0 && (!st.concepto || c.cuenta.startsWith(st.concepto))).map(c => {
+      const fondo = c.cuenta.startsWith('2510') ? empDe(x.tercero_id)?.cesantias_id : '';
+      return { grupo: (fondo || x.tercero_id) + '|' + x.tercero_id, tercero_id: x.tercero_id, tercero_pago: fondo || x.tercero_id, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) };
+    })), malos: [] };
+  };
+  const conPre = c => PRESTACIONES.find(([p]) => c.startsWith(p))?.[1] || nomCta(c);
+  const pintar = () => {
+    m.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('primary', b.dataset.tab === modoPago));
+    const ss = modoPago === 'ss', pr = modoPago === 'prest', sal = modoPago === 'salarios', r = armar(); filas = r.filas;
+    $('pCsv').hidden = !sal;
+    $('pOpc').innerHTML = `${pr ? `<div class="row filters"><div><label for="pCo">Qué prestación</label><select id="pCo"><option value="">Todas</option>${PRESTACIONES.map(([p, t]) => `<option value="${p}" ${p === st.concepto ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>` : ''}
+      ${sal ? '' : `<label class="check"><input type="checkbox" id="pAj" ${st.ajustar !== false ? 'checked' : ''}> Ajustar la diferencia contra el gasto (el pasivo queda en cero)</label>
+        <p class="hint">${ss ? 'Escribe lo que liquidó la PILA para cada cuenta de cada entidad. Si es distinto a lo causado, la diferencia va al gasto con que se causó el aporte, y los intereses de mora a 53052001, en este mismo comprobante.' : 'Si pagas menos de lo provisionado (por ejemplo, unos días de vacaciones), quita el ajuste para que el resto siga pendiente. Las cesantías se consignan al fondo de cada empleado.'}</p>`}
+      ${r.malos.length ? `<p class="err">Hay aportes que no están a nombre de una entidad: ${r.malos.map(x => `${esc(x.tercero_id ? nomT(x.tercero_id) : 'sin tercero')} (${money(x.total)})`).join(', ')}. Asigna la EPS, el fondo y la caja en <a href="#/empleados">Empleados</a> y la ARL y los parafiscales en <a href="#/nominacfg">Configuración de nómina</a>. Los saldos viejos pásalos a la entidad con una <a href="#/compnuevo?tipo=CC">nota de contabilidad</a>.</p>` : ''}`;
+    if (!filas.length) { $('pTab').innerHTML = `<p class="muted">No hay ${sal ? 'salarios' : ss ? 'aportes de seguridad social' : 'prestaciones'} por pagar a ${fFecha($('pFe').value)}.</p>`; calc(); enlazar(); return; }
+    const cab = sal ? '<th>Empleado</th><th>Banco y cuenta</th><th class="r">Por pagar</th><th class="r">Valor a pagar</th>'
+      : `<th>${ss ? 'Entidad' : 'Empleado'}</th><th>${ss ? 'Cuenta' : 'Prestación'}</th>${pr ? '<th>Se consigna a</th>' : ''}<th class="r">En libros</th><th class="r">${CONTRA_PAGO[modoPago]}</th><th class="r">Diferencia</th><th>Cuenta de la diferencia</th>`;
+    let prev = '';
+    const filasHtml = filas.map((f, i) => {
+      const e = empDe(f.tercero_id), nuevo = f.grupo !== prev; prev = f.grupo;
+      const quien = `<b>${esc(nomT(f.tercero_id))}</b>`;
+      const chk = `<input type="checkbox" data-on="${i}" ${f.on ? 'checked' : ''} aria-label="Pagar">`;
+      const val = `<input type="number" step="1" min="0" class="r mono w-val" data-v="${i}" value="${f.pagar}" aria-label="${CONTRA_PAGO[modoPago]}">`;
+      let html = sal ? `<tr><td>${chk}</td><td>${quien}</td><td class="hint">${esc([e?.banco, e?.cuenta_bancaria].filter(Boolean).join(' · ') || 'Sin cuenta bancaria')}</td><td class="r mono">${money(f.saldo)}</td><td>${val}</td></tr>`
+        : `<tr><td>${chk}</td><td>${ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
+          <td class="r mono">${money(f.saldo)}</td><td>${val}</td><td class="r mono" data-dif="${i}"></td><td><input class="mono" list="ctasPN" data-c="${i}" value="${esc(f.contra || '')}" placeholder="Cuenta auxiliar" autocomplete="off" aria-label="Cuenta de la diferencia"></td></tr>`;
+      const ultimo = ss && filas[i + 1]?.grupo !== f.grupo;
+      if (ultimo) html += `<tr><td></td><td></td><td class="hint">Intereses de mora (si la PILA los trae)</td><td></td><td><input type="number" step="1" min="0" class="r mono w-val" data-mora="${esc(f.grupo)}" aria-label="Intereses de mora"></td><td></td><td class="mono hint">53052001</td></tr>`;
+      return html;
+    }).join('');
+    $('pTab').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="pTodos" checked aria-label="Todos"></th>${cab}</tr></thead><tbody>${filasHtml}</tbody></table></div>`;
+    $('pTodos').checked = filas.every(f => f.on);
+    enlazar(); calc();
+  };
+  const leer = () => {
+    m.querySelectorAll('[data-on]').forEach(x => filas[x.dataset.on].on = x.checked);
+    m.querySelectorAll('[data-v]').forEach(x => filas[x.dataset.v].pagar = num(x.value));
+    m.querySelectorAll('[data-c]').forEach(x => filas[x.dataset.c].contra = x.value.trim());
+    const ajustar = modoPago !== 'salarios' && !!$('pAj')?.checked, mora = {};
+    m.querySelectorAll('[data-mora]').forEach(x => mora[x.dataset.mora] = num(x.value));
+    const grupos = [];
+    for (const f of filas.filter(x => x.on)) {
+      let g = grupos.find(x => x.key === f.grupo);
+      if (!g) grupos.push(g = { key: f.grupo, tercero_pago: f.tercero_pago, nombre: modoPago === 'prest' ? `${nomT(f.tercero_id)}${f.tercero_pago !== f.tercero_id ? ' (' + nomT(f.tercero_pago) + ')' : ''}` : nomT(f.tercero_pago), filas: [], mora: mora[f.grupo] || 0 });
+      g.filas.push({ cuenta: f.cuenta, tercero_id: f.tercero_id, saldo: f.saldo, pagar: f.pagar, contra: f.contra });
+    }
+    const det = modoPago === 'salarios' ? 'Pago de salarios' : modoPago === 'ss' ? 'Pago seguridad social' : `Pago ${st.concepto ? conPre(st.concepto).toLowerCase() : 'prestaciones'}`;
+    return { grupos, ajustar, det };
+  };
+  const calc = () => {
+    if (!filas.length) { $('pTot').innerHTML = ''; $('pAs').innerHTML = ''; return null; }
+    const { grupos, ajustar, det } = leer();
+    filas.forEach((f, i) => { const c = m.querySelector(`[data-dif="${i}"]`); if (!c) return; const d = r2(f.pagar - f.saldo);
+      c.textContent = !f.on || !d ? '' : ajustar ? (d > 0 ? '+' : '−') + money(Math.abs(d)) : d < 0 ? `${money(-d)} queda pendiente` : 'Mayor a lo que se debe'; });
+    try {
+      const ls = lineasPagoNomina({ grupos, banco: $('pBa').value, ajustar, detalle: det });
+      const tot = r2(ls.filter(l => l.cuenta === $('pBa').value).reduce((s, l) => s + l.credito, 0));
+      $('pTot').innerHTML = `${grupos.length} ${modoPago === 'ss' ? (grupos.length === 1 ? 'entidad' : 'entidades') : 'pagos'} · Total que sale: <b class="mono">${money(tot)}</b>`;
+      $('pAs').innerHTML = tablaAsiento(ls.map(l => ({ ...l })));
+      return { ls, det };
+    } catch (e) { $('pTot').innerHTML = `<span class="err">${esc(e.message)}</span>`; $('pAs').innerHTML = ''; return null; }
+  };
+  const enlazar = () => {
+    if ($('pCo')) $('pCo').onchange = () => { st.concepto = $('pCo').value; pintar(); };
+    if ($('pAj')) $('pAj').onchange = () => { st.ajustar = $('pAj').checked; calc(); };
+    if ($('pTodos')) $('pTodos').onchange = () => { m.querySelectorAll('[data-on]').forEach(x => x.checked = $('pTodos').checked); calc(); };
+  };
+  $('pTab').addEventListener('input', calc); $('pTab').addEventListener('change', calc);
+  $('pBa').onchange = calc;
+  $('pFe').onchange = () => { st.solo = ''; pintar(); };
+  m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { modoPago = b.dataset.tab; st.solo = ''; pintar(); });
+  $('pCsv').onclick = () => {
+    const { grupos } = leer(), q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = [['Nombre', 'Tipo de documento', 'Documento', 'Banco', 'Cuenta', 'Valor'], ...grupos.map(g => { const t = terc(g.tercero_pago), e = empDe(g.tercero_pago);
+      return [t?.nombre, t?.tipo_id, t?.numero, e?.banco, e?.cuenta_bancaria, r2(g.filas.reduce((s, f) => s + f.pagar, 0))]; })];
+    const url = URL.createObjectURL(new Blob(['﻿' + rows.map(r => r.map(q).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = `pago-nomina-${$('pFe').value}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  $('pGuardar').onclick = async () => {
+    const b = $('pGuardar'); $('pErr').hidden = true; b.disabled = true;
+    try {
+    const r = calc(); if (!r) throw new Error('Revisa el pago: ' + ($('pTot').textContent || 'no hay nada para pagar.'));
+    const malas = [...new Set(r.ls.map(l => l.cuenta))].filter(c => !/^\d{8}$/.test(c));
+    if (malas.length) throw new Error(`Usa cuentas auxiliares de 8 dígitos: ${malas.join(', ')}.`);
+    const faltan = cuentasFaltantes(r.ls.map(l => l.cuenta), S.d.cuentas);
+    if (faltan.length) await store.saveMany('cuentas', faltan.map(c => ({ ...c, empresa_id: S.eid })));
+    const fecha = $('pFe').value || hoy(), n = new Set(r.ls.map(l => l.tercero_id)).size;
+    const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'PN', numero: siguienteComp('PN'), fecha, descripcion: $('pDe').value.trim() || `${r.det} · ${fFecha(fecha)}`, lineas: r.ls, estado: 'contabilizado' });
+    await cargarEmpresa(); toast(`Pago de nómina ${g.numero} guardado.`); location.hash = '#/comp/' + g.id;
+    } catch (e) { $('pErr').textContent = /tipo_check/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/025_pago_nomina.sql.' : e.message; $('pErr').hidden = false; }
+    finally { b.disabled = false; }
+  };
+  pintar();
 }
 
 /* ---------- Medios magnéticos ---------- */
@@ -2610,7 +2758,7 @@ function vComp(m, id) {
   if (!c) { m.innerHTML = '<p>No se encontró el comprobante.</p>'; return; }
   const anulado = c.estado === 'anulado';
   const ms = asientoComprobante({ ...c, estado: 'contabilizado' });
-  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${esc(nomComp(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
+  m.innerHTML = `<header class="vhead noprint"><div>${c.tipo === 'PN' ? '<a class="back" href="#/nominapagos">← Pagos de nómina</a>' : '<a class="back" href="#/comprobantes">← Comprobantes</a>'}<h2>${esc(nomComp(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
     <div class="row">${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compeditar/${c.id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     <section class="panel stack">${hojaComp(c, ms)}</section>
     ${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}`;

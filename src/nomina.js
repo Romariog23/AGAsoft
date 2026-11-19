@@ -232,3 +232,46 @@ export function lineasAjuste({ tercero_id, filas, mora = 0, cuentaMora = '530520
   }
   return out;
 }
+
+/* ---------- Comprobante de pago de nómina (PN) ---------- */
+// Un solo comprobante con varios terceros, como una dispersión bancaria. Tres modos:
+//  salarios: el neto (2505) de cada empleado; el banco sale a nombre del empleado.
+//  ss: aportes de la PILA (2370 y 2380) por entidad; el banco sale a nombre de la entidad.
+//  prest: cesantías, intereses, prima y vacaciones por empleado; las cesantías se consignan al fondo.
+export const MODOS_PAGO = [['salarios', 'Pago de salarios', /^2505/], ['ss', 'Pago de seguridad social (PILA)', CUENTAS_SS], ['prest', 'Pago de prestaciones sociales', CUENTAS_PREST]];
+// grupos: [{ tercero_pago, nombre, filas: [{ cuenta, tercero_id, saldo, pagar, contra }], mora }]
+// ajustar: la diferencia entre lo pagado y lo causado va a la cuenta contra y el pasivo queda en cero.
+//          Sin ajustar, solo se abona lo pagado y el resto del pasivo sigue pendiente.
+export function lineasPagoNomina({ grupos, banco, ajustar = false, cuentaMora = '53052001', detalle = 'Pago de nómina' }) {
+  if (!banco) throw new Error('Escoge la cuenta de banco o caja con que se paga.');
+  const out = [], add = (cuenta, tercero_id, det, debito, credito) => out.push({ cuenta, tercero_id: tercero_id || null, detalle: det, debito: r2(debito), credito: r2(credito) });
+  for (const g of grupos || []) {
+    if (!g.tercero_pago) throw new Error(`Falta el tercero a quien se le paga${g.nombre ? ` (${g.nombre})` : ''}.`);
+    const det = `${detalle}${g.nombre ? ' · ' + g.nombre : ''}`;
+    let total = 0;
+    for (const f of g.filas || []) {
+      const saldo = r2(num(f.saldo)), pagar = r2(num(f.pagar));
+      if (pagar < 0) throw new Error('Los valores a pagar no pueden ser negativos.');
+      if (!ajustar) {
+        if (!pagar) continue;
+        if (pagar > saldo + 0.005) throw new Error(`En ${f.cuenta}${g.nombre ? ` de ${g.nombre}` : ''} se paga más de lo que se debe (${saldo}). Marca "Ajustar la diferencia" o corrige el valor.`);
+        add(f.cuenta, f.tercero_id, det, pagar, 0);
+      } else {
+        if (saldo) add(f.cuenta, f.tercero_id, det, saldo > 0 ? saldo : 0, saldo < 0 ? -saldo : 0);
+        const d = r2(pagar - saldo);
+        if (d) {
+          if (!f.contra) throw new Error(`Escribe la cuenta para la diferencia de ${f.cuenta}${g.nombre ? ` de ${g.nombre}` : ''}.`);
+          add(f.contra, f.tercero_id, `Diferencia ${det}`, d > 0 ? d : 0, d < 0 ? -d : 0);
+        }
+      }
+      total = r2(total + pagar);
+    }
+    const mora = r2(num(g.mora));
+    if (mora > 0) { add(cuentaMora, g.tercero_pago, `Intereses de mora · ${g.nombre || ''}`.trim(), mora, 0); total = r2(total + mora); }
+    if (total > 0) add(banco, g.tercero_pago, det, 0, total);
+  }
+  const d = r2(out.reduce((s, l) => s + l.debito, 0)), c = r2(out.reduce((s, l) => s + l.credito, 0));
+  if (!out.length || !c) throw new Error('No hay valores para pagar.');
+  if (d !== c) throw new Error(`El pago no cuadra: débitos ${d} y créditos ${c}.`);
+  return out;
+}

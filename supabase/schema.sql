@@ -1287,3 +1287,10 @@ create table if not exists public.fe_cuentas (
 alter table public.fe_cuentas enable row level security;
 -- Sin políticas a propósito: desde el navegador no se puede leer ni escribir.
 revoke all on public.fe_cuentas from anon, authenticated;
+
+/* ============ Pago de nómina (también en 025_pago_nomina.sql) ============ */
+
+alter table public.comprobantes drop constraint if exists comprobantes_tipo_check;
+alter table public.comprobantes add constraint comprobantes_tipo_check check (tipo in ('CC', 'SI', 'CI', 'PN'));
+
+notify pgrst, 'reload schema';
