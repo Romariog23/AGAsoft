@@ -25,7 +25,7 @@ function asiento(d, ctx) {
 
   if (d.tipo === 'RC') {
     const caja = String(d.cuenta_pago || '').trim() || (d.medio_pago === 'efectivo' ? P.caja : P.bancos);
-    mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`, false);
+    mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`);
     const docs = Object.fromEntries((ctx.docs || []).map(x => [x.id, x]));
     for (const a of (ctx.aplicaciones || []).filter(a => a.recibo_id === d.id)) {
       const f = docs[a.factura_id];
