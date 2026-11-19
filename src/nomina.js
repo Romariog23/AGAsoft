@@ -143,7 +143,7 @@ const NOMBRES = {
   '33': 'Intereses sobre cesantías', '36': 'Prima de servicios', '39': 'Vacaciones', '48': 'Bonificaciones', '68': 'Aportes a administradoras de riesgos laborales',
   '69': 'Aportes a entidades promotoras de salud', '70': 'Aportes a fondos de pensiones', '72': 'Aportes a cajas de compensación familiar', '75': 'Aportes ICBF', '78': 'SENA',
   '237005': 'Aportes a entidades promotoras de salud', '237006': 'Aportes a administradoras de riesgos laborales', '237010': 'Aportes parafiscales', '237095': 'Otros descuentos de nómina',
-  '238030': 'Fondos de cesantías y pensiones', '136595': 'Otras cuentas por cobrar a trabajadores', '236505': 'Salarios y pagos laborales',
+  '238030': 'Fondos de cesantías y pensiones', '53': 'No operacionales', '5305': 'Financieros', '530520': 'Intereses', '136595': 'Otras cuentas por cobrar a trabajadores', '236505': 'Salarios y pagos laborales',
 };
 export function cuentasFaltantes(codigos, cuentas) {
   const hay = new Set((cuentas || []).map(c => c.codigo)), nuevas = [];
@@ -176,4 +176,59 @@ export function porPagarLaboral(movs, tercero_id) {
   const s = {};
   for (const m of movs || []) if (m.tercero_id === tercero_id && CUENTAS_LABORALES.test(m.cuenta)) s[m.cuenta] = r2((s[m.cuenta] || 0) + m.credito - m.debito);
   return Object.entries(s).filter(([, v]) => v > 0.009).map(([cuenta, saldo]) => ({ cuenta, saldo })).sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+}
+
+// Contabilización globalizada: una fila por cuenta con la suma de todos los empleados y entidades (como un mini balance).
+export function resumenPorCuenta(ms) {
+  const g = {};
+  for (const m of ms || []) {
+    const x = g[m.cuenta] = g[m.cuenta] || { cuenta: m.cuenta, debito: 0, credito: 0, ter: new Set() };
+    x.debito = r2(x.debito + m.debito); x.credito = r2(x.credito + m.credito); if (m.tercero_id) x.ter.add(m.tercero_id);
+  }
+  // Primero los débitos (gastos) y luego los créditos (pasivos), cada grupo por código.
+  return Object.values(g).map(({ ter, ...x }) => ({ ...x, terceros: ter.size })).sort((a, b) => (b.debito > b.credito) - (a.debito > a.credito) || a.cuenta.localeCompare(b.cuenta));
+}
+
+// Pasivos de nómina que no se pagan con el neto del mes: seguridad social y parafiscales (PILA) y prestaciones sociales.
+export const CUENTAS_SS = /^(2370|2380)/;
+export const CUENTAS_PREST = /^(2510|2515|2520|2525)/;
+export const PRESTACIONES = [['2510', 'Cesantías'], ['2515', 'Intereses sobre cesantías'], ['2520', 'Prima de servicios'], ['2525', 'Vacaciones']];
+// Saldo por tercero y cuenta a una fecha de corte (crédito − débito). Solo los terceros con saldo.
+export function pasivosNomina(movs, hasta, re) {
+  const s = {};
+  for (const m of movs || []) if (re.test(m.cuenta) && (!hasta || m.fecha <= hasta)) { const k = (m.tercero_id || '') + '|' + m.cuenta; s[k] = r2((s[k] || 0) + m.credito - m.debito); }
+  const por = {};
+  for (const [k, v] of Object.entries(s)) {
+    if (Math.abs(v) < 0.01) continue;
+    const [t, cuenta] = k.split('|'), x = por[t] = por[t] || { tercero_id: t || null, cuentas: [], total: 0 };
+    x.cuentas.push({ cuenta, saldo: v }); x.total = r2(x.total + v);
+  }
+  for (const x of Object.values(por)) x.cuentas.sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+  return Object.values(por).sort((a, b) => b.total - a.total);
+}
+// Cuenta de gasto con que se causó ese pasivo para ese tercero en la nómina más reciente (sirve para llevar ahí la diferencia).
+export function cuentaContraSugerida(nominas, tercero_id, pasivo) {
+  const ns = (nominas || []).filter(n => n.estado === 'contabilizado').sort((a, b) => b.fecha.localeCompare(a.fecha));
+  for (const n of ns) for (const l of n.lineas || []) for (const i of l.items || []) {
+    if (i.contra === pasivo && (i.tercero_id || l.tercero_id) === tercero_id) return i.cuenta;
+  }
+  return '';
+}
+// Líneas del comprobante que deja cada pasivo en su valor real (la PILA pagada o la prestación consolidada).
+// filas: [{ cuenta (pasivo), saldo (en libros), real, contra (cuenta de gasto o ingreso) }]; mora: intereses de mora de la PILA.
+export function lineasAjuste({ tercero_id, filas, mora = 0, cuentaMora = '53052001', detalle = 'Ajuste de nómina' }) {
+  const out = [], add = (cuenta, debito, credito, det) => out.push({ cuenta, tercero_id: tercero_id || null, detalle: det, debito: r2(debito), credito: r2(credito) });
+  for (const f of filas || []) {
+    const d = r2(num(f.real) - num(f.saldo));
+    if (!d) continue;
+    if (!f.contra) throw new Error(`Escribe la cuenta para la diferencia de ${f.cuenta}.`);
+    // Se pagó (o se debe) más de lo causado: más gasto. Menos: se devuelve el gasto (o va a recuperaciones).
+    if (d > 0) { add(f.contra, d, 0, detalle); add(f.cuenta, 0, d, detalle); } else { add(f.cuenta, -d, 0, detalle); add(f.contra, 0, -d, detalle); }
+  }
+  mora = r2(num(mora));
+  if (mora > 0) {
+    const pas = (filas || [])[0]?.cuenta; if (!pas) throw new Error('No hay a qué cuenta cargar los intereses de mora.');
+    add(cuentaMora, mora, 0, 'Intereses de mora seguridad social'); add(pas, 0, mora, 'Intereses de mora seguridad social');
+  }
+  return out;
 }
