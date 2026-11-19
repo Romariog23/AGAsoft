@@ -44,6 +44,14 @@ const fail = e => toast(e?.message || String(e), true);
 
 /* ---------- Inicio de sesión ---------- */
 let registro = false;
+// Página de entrada: los botones llevan al formulario (entrar o prueba gratis).
+const irForm = quiereRegistro => { if (registro !== quiereRegistro) $('aToggle').click(); $('authForm').scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => (quiereRegistro ? $('aNombre') : $('aEmail')).focus({ preventScroll: true }), 350); };
+$('lpEntrar').onclick = () => irForm(false);
+$('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
+// Planes públicos (si la base los deja ver sin sesión: supabase/022_planes_publicos.sql).
+(async () => { try { const ps = await store.planesActivos(); if (!ps?.length) return;
+  $('lpPlanesList').innerHTML = ps.map(p => `<article class="lp-plan"><h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b><span class="muted">al mes</span><p class="hint">${esc(p.descripcion || '')}</p></article>`).join('');
+  $('lpPlanes').hidden = false; $('lpNavPlanes').hidden = false; } catch (_) {} })();
 $('aToggle').onclick = () => {
   registro = !registro;
   $('fNombre').hidden = !registro;

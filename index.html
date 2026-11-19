@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>AGAsoft</title>
-<meta name="description" content="Software contable AGAsoft: facturas, notas crédito y débito, recibos de caja y cartera.">
+<meta name="description" content="AGAsoft: software contable en la nube para Colombia. Factura electrónica, compras, contabilidad automática, nómina e impuestos.">
 <meta name="theme-color" content="#0b2938">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -12,7 +12,27 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 </head>
 <body>
-<div class="auth-wrap" id="auth" hidden>
+<div class="auth-wrap landing" id="auth" hidden>
+  <header class="lp-top">
+    <a class="brand" href="#"><span class="mark" aria-hidden="true">AGA</span><span class="brand-name">AGAsoft</span></a>
+    <nav class="lp-nav" aria-label="Secciones"><a href="#lpFunciones">Funciones</a><a href="#lpPlanes" id="lpNavPlanes" hidden>Planes</a><a href="#lpAga">Quiénes somos</a></nav>
+    <span class="spacer"></span>
+    <button type="button" class="ghost" id="lpEntrar">Iniciar sesión</button>
+    <button type="button" class="primary" id="lpPrueba">Prueba gratis</button>
+  </header>
+  <section class="lp-hero">
+    <div class="lp-copy">
+      <p class="lp-eyebrow">Software contable en la nube para Colombia</p>
+      <h1 class="lp-title">Tu contabilidad al día, <span>sin enredos.</span></h1>
+      <p class="lp-lead">Factura, registra tus compras y paga tu nómina. AGAsoft arma los asientos contables solo y te deja listos los informes y los impuestos.</p>
+      <ul class="lp-checks">
+        <li><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 13.6 4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg>Factura electrónica y normal, notas crédito y débito, recibos de caja y cartera.</li>
+        <li><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 13.6 4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg>Compras, gastos, documento soporte, egresos y cuentas por pagar.</li>
+        <li><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 13.6 4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg>Contabilidad automática con el PUC, balance, estado de resultados y auxiliares.</li>
+        <li><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 13.6 4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg>Nómina, IVA, retenciones y medios magnéticos.</li>
+      </ul>
+      <p class="lp-cta"><button type="button" class="primary lg" id="lpPrueba2">Empieza gratis 15 días</button><a class="btn lg" href="#lpFunciones">Ver funciones</a></p>
+    </div>
   <form class="auth-card panel stack" id="authForm" novalidate>
     <div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft</h1></div>
     <p class="sub" id="authSub">Entra con tu correo y tu clave.</p>
@@ -24,6 +44,22 @@
     <button type="submit" class="primary" id="aSubmit">Entrar</button>
     <button type="button" class="ghost" id="aToggle">No tengo cuenta: prueba gratis 15 días</button>
   </form>
+  </section>
+  <section class="lp-sec" id="lpFunciones">
+    <p class="lp-eyebrow">Funciones</p><h2 class="lp-h2">Todo lo que necesita tu empresa, en un solo lugar</h2>
+    <div class="lp-feats"><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 4h12v2H4zm0 4h12v2H4zm0 4h8v2H4z"/></svg></span><h3>Ventas</h3><p>Facturas electrónicas y normales con borrador, notas crédito y débito, recibos de caja y cartera por edades.</p></article><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M3 5h14l-1.5 8h-11zM6 16a1.5 1.5 0 1 0 0 .01zm8 0a1.5 1.5 0 1 0 0 .01z"/></svg></span><h3>Compras y gastos</h3><p>Facturas de proveedor, documento soporte, retenciones, egresos y cuentas por pagar.</p></article><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 15h3V9H4zm4.5 0h3V5h-3zM13 15h3v-4h-3z"/></svg></span><h3>Contabilidad</h3><p>Asientos automáticos con el PUC, comprobantes, saldos iniciales, balance de prueba, ESF y estado de resultados.</p></article><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-6 7c0-3 2.7-5 6-5s6 2 6 5z"/></svg></span><h3>Nómina</h3><p>Empleados, liquidación mensual o quincenal, seguridad social, prestaciones y desprendibles.</p></article><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M5 3h7l3 3v11H5zm2 6h6v1.5H7zm0 3h6v1.5H7z"/></svg></span><h3>Impuestos</h3><p>IVA por tarifa, retenciones y medios magnéticos configurables por cuenta.</p></article><article class="lp-feat"><span class="lp-ico"><svg viewBox="0 0 20 20" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M3 17V7l5-3v13zm6 0V9h8v8zm2-6v1.5h1.5V11zm3 0v1.5h1.5V11z"/></svg></span><h3>Varias empresas</h3><p>Maneja todas tus empresas o las de tus clientes desde una sola cuenta, con acceso para tu equipo.</p></article></div>
+  </section>
+  <section class="lp-sec" id="lpPlanes" hidden>
+    <p class="lp-eyebrow">Planes</p><h2 class="lp-h2">Escoge el plan que se ajusta a ti</h2>
+    <div class="lp-planes" id="lpPlanesList"></div>
+    <p class="hint">Todos empiezan con 15 días gratis.</p>
+  </section>
+  <section class="lp-sec lp-aga" id="lpAga">
+    <div><p class="lp-eyebrow">Hecho por contadores</p><h2 class="lp-h2">Respaldado por AGA Growth Advisors</h2>
+      <p class="lp-lead">AGAsoft lo crea AGA Growth Advisors, firma de asesoría contable, financiera y tributaria para pymes en Barranquilla. Lo usamos con nuestros propios clientes.</p></div>
+    <div class="lp-contact"><a class="btn lg" href="https://aga-growth.com" target="_blank" rel="noopener">Conoce AGA Growth</a><a class="btn lg primary" href="https://wa.me/573204784126" target="_blank" rel="noopener">Escríbenos por WhatsApp</a></div>
+  </section>
+  <footer class="lp-foot"><span>© AGA Growth Advisors · AGAsoft</span><a href="https://aga-growth.com" target="_blank" rel="noopener">aga-growth.com</a></footer>
 </div>
 
 <div id="app" hidden>
