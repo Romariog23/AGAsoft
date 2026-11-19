@@ -363,3 +363,42 @@ button.bad{color:var(--bad)}
 .fe-cufe{word-break:break-all;font-size:.8rem}.ok-txt{color:var(--ok);font-weight:600}
 .rep-fe{display:flex;gap:16px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}.rep-fe p{margin:2px 0}.rep-qr svg{display:block}
 @media print{.rep-fe{border-color:#999}}
+
+/* Diseño de la factura: logo, plantillas y color */
+.rep{--rep-color:#0b2938}
+.rep-emp{display:flex;gap:14px;align-items:center}
+.rep-logo{max-height:72px;max-width:200px;object-fit:contain}
+.rep-head{border-bottom-color:var(--rep-color)}
+.rep-num b{color:var(--rep-color)}
+.rep-items thead th{color:var(--rep-color)}
+.rep-pie{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.rep-pie .rep-fe{margin:0}
+.rep.sin-cod .rep-items th:nth-child(2),.rep.sin-cod .rep-items td:nth-child(2),.rep.sin-desc .rep-items th:nth-child(6),.rep.sin-desc .rep-items td:nth-child(6){display:none}
+.rep-moderna .rep-head{background:var(--rep-color);color:#fff;border:0;border-radius:10px;padding:16px 18px}
+.rep-moderna .rep-head p,.rep-moderna .rep-num span{color:rgba(255,255,255,.85)}
+.rep-moderna .rep-num b{color:#fff}
+.rep-moderna .rep-logo{background:#fff;border-radius:8px;padding:6px}
+.rep-moderna .rep-items thead th{background:var(--rep-color);color:#fff;padding:6px 8px}
+.rep-moderna .tot .strong{color:var(--rep-color)}
+.rep-moderna .rep-fe{border-color:var(--rep-color)}
+.rep-compacta{gap:8px;font-size:.86rem}
+.rep-compacta .rep-head{padding-bottom:6px}.rep-compacta h2{font-size:1.1rem}.rep-compacta .rep-num b{font-size:1.2rem}
+.rep-compacta .rep-items td,.rep-compacta .rep-items th{padding-top:3px;padding-bottom:3px}
+.rep-compacta .rep-logo{max-height:52px}
+@media print{.rep,.rep *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.df-grid{display:grid;grid-template-columns:minmax(280px,360px) 1fr;gap:14px;align-items:start}
+@media (max-width:960px){.df-grid{grid-template-columns:1fr}}
+.df-form h3{margin-bottom:6px}
+.df-logo{display:flex;align-items:center;justify-content:center;height:90px;border:1px dashed var(--line);border-radius:10px;margin-bottom:8px;background:#fff}
+.df-logo img{max-height:76px;max-width:90%;object-fit:contain}
+.df-plantillas{display:grid;gap:8px}
+.df-pl{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer}
+.df-pl input{grid-row:span 2;margin-top:4px}.df-pl span{font-size:.8rem;color:var(--muted)}
+.df-pl.on{border-color:var(--accent);background:var(--accent-soft)}
+.df-colores{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.df-color{width:32px;height:32px;border-radius:50%;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line);padding:0;cursor:pointer}
+.df-color.on{box-shadow:0 0 0 3px var(--fg)}
+#dfColor{width:40px;height:34px;padding:2px;border-radius:8px}
+.df-prev{position:sticky;top:12px;background:#fff;color:#101211}
+.df-prev .rep{--muted:#5a605c;--line:#e3dccb;--fg:#101211}
+.rep-head>.rep-num{margin-left:auto}.rep-items td:nth-child(2){white-space:nowrap}
