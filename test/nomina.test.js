@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { liquidar, paramNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, pctSolidaridad, totalesNomina } from '../src/nomina.js';
+import { liquidar, paramNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, pctSolidaridad, totalesNomina, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, cuentaContraSugerida, lineasAjuste } from '../src/nomina.js';
 import { asientoCompra } from '../src/compras.js';
 import { planInicial } from '../src/puc.js';
 
@@ -86,4 +86,34 @@ test('borrador no contabiliza', () => {
   const n = { id: 'n', numero: 1, fecha: '2026-11-30', lineas: [l], cuenta_neto: P.cuenta_neto };
   assert.equal(asientoNomina({ ...n, estado: 'borrador' }).length, 0);
   assert.ok(asientoNomina({ ...n, estado: 'contabilizado' }).length > 0);
+});
+
+test('nómina: contabilización globalizada por cuenta y pasivos por tercero', () => {
+  const emp2 = { ...emp, id: 'e2', tercero_id: 't2' };
+  const n = { id: 'n1', numero: 1, fecha: '2026-01-31', estado: 'contabilizado', lineas: [liquidar(emp, {}, P), liquidar(emp2, {}, P)] };
+  const ms = asientoNomina(n), R = resumenPorCuenta(ms);
+  // Una fila por cuenta, con las mismas sumas que el asiento detallado.
+  assert.equal(R.length, new Set(ms.map(m => m.cuenta)).size);
+  assert.equal(R.reduce((s, r) => s + r.debito, 0), ms.reduce((s, m) => s + m.debito, 0));
+  const sueldos = R.find(r => r.cuenta === '51050601');
+  assert.equal(sueldos.debito, 6000000); assert.equal(sueldos.terceros, 2);
+  assert.ok(R[0].debito > 0 && R.at(-1).credito > 0);
+  // Pasivos: la EPS debe la salud de los dos empleados; las prestaciones quedan por empleado.
+  const ss = pasivosNomina(ms, '2026-12-31', CUENTAS_SS);
+  assert.equal(ss.find(x => x.tercero_id === 'eps').total, 240000);
+  const pr = pasivosNomina(ms, '2026-12-31', CUENTAS_PREST);
+  assert.equal(pr.find(x => x.tercero_id === 't1').total, 655000);
+  assert.equal(pasivosNomina(ms, '2025-12-31', CUENTAS_SS).length, 0);
+  assert.equal(cuentaContraSugerida([n], 'afp', '23803001'), '51057001');
+  assert.equal(cuentaContraSugerida([n], 't1', '25100501'), '51053001');
+});
+test('nómina: ajuste de la PILA a su valor real, con intereses de mora', () => {
+  const ls = lineasAjuste({ tercero_id: 'afp', filas: [{ cuenta: '23803001', saldo: 960000, real: 960100, contra: '51057001' }], mora: 5000 });
+  assert.deepEqual(ls.map(l => [l.cuenta, l.debito, l.credito]), [['51057001', 100, 0], ['23803001', 0, 100], ['53052001', 5000, 0], ['23803001', 0, 5000]]);
+  assert.ok(ls.every(l => l.tercero_id === 'afp'));
+  // Se causó de más: se devuelve el gasto.
+  const menos = lineasAjuste({ tercero_id: 'eps', filas: [{ cuenta: '23700501', saldo: 240000, real: 239900, contra: '51056901' }] });
+  assert.deepEqual(menos.map(l => [l.cuenta, l.debito, l.credito]), [['23700501', 100, 0], ['51056901', 0, 100]]);
+  assert.throws(() => lineasAjuste({ filas: [{ cuenta: '23700501', saldo: 1, real: 2, contra: '' }] }));
+  assert.equal(lineasAjuste({ filas: [{ cuenta: '23700501', saldo: 5, real: 5 }] }).length, 0);
 });

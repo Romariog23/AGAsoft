@@ -8,7 +8,7 @@ import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { FORMATOS, CATALOGO, CALCULOS, calculoDe, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
-import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes } from './nomina.js';
+import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, PRESTACIONES, cuentaContraSugerida, lineasAjuste } from './nomina.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
@@ -199,12 +199,12 @@ const MENU = [
   ['inicio', 'Inicio'],
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
-  ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
+  ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Habilitación DIAN'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -254,9 +254,11 @@ function route() {
     if (v === 'nominaeditar') return vNominaEditor(m, arg);
     if (v === 'nominadoc') return vNominaDoc(m, arg);
     if (v === 'nominacfg') return vNominaCfg(m);
+    if (v === 'nominapasivos') return vNominaPasivos(m);
     if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'disenofactura') return vDisenoFactura(m);
+    if (v === 'habilitacion') return vHabilitacion(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'comprobantes') return vComprobantes(m);
@@ -473,6 +475,8 @@ function vEmpresa(m) {
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
   ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
     <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div>
+    <label class="check"><input type="checkbox" id="feHab" ${feHabilitada() ? 'checked' : ''}> Empresa habilitada ante la DIAN (ya superó el set de pruebas)</label>
+    <p class="hint">Mientras esté apagado, la numeración electrónica sale como "Sin habilitar DIAN" y no se pueden emitir facturas ni notas electrónicas (sí borradores y facturas normales).</p>
     <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
     <p class="hint">Mientras esté apagado, las facturas electrónicas no muestran el botón de envío (siguen con el aviso de pendiente de transmitir).</p></section>` : ''}
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
@@ -484,6 +488,11 @@ function vEmpresa(m) {
   cargarMiPlan();
   pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  if ($('feHab')) $('feHab').onchange = async ev => {
+    const on = ev.target.checked;
+    if (on && !await confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada')) { ev.target.checked = false; return; }
+    try { await guardarContab('fe_habilitada', on); toast(on ? 'Facturación electrónica habilitada para esta empresa.' : 'Facturación electrónica deshabilitada para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !on; }
+  };
   if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
   if ($('feProbar')) $('feProbar').onclick = async () => {
     const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
@@ -519,24 +528,92 @@ function vInicio(m) {
   if (!d.numeraciones.some(n => n.tipo === 'FV' && n.activa)) faltan.push(['numeraciones', 'Registra la resolución de numeración de facturas.']);
   if (!d.terceros.length) faltan.push(['clientes', 'Crea tu primer cliente.']);
   if (!d.productos.length) faltan.push(['productos', 'Crea tus productos o servicios.']);
+  if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Habilita tu facturación electrónica ante la DIAN (set de pruebas).']);
   const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 8);
+  const on = new Set(cfgInicio()), W = k => on.has(k);
+  const medios = WIDGETS.filter(([k]) => W(k) && WIDGET_HTML[k]).map(([k]) => WIDGET_HTML[k]({ R, edades, em, cart }));
   m.innerHTML = `<header class="vhead"><div><h2>${esc(e.nombre)}</h2><p class="sub mono">NIT ${fmtNit(e.nit)}-${e.dv}</p></div>
-    <div class="row"><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
+    <div class="row"><button id="iniCfg" title="Escoger qué se ve en el Inicio">Personalizar</button><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
   ${faltan.length ? `<section class="panel stack callout"><h3>Para empezar a facturar</h3><ol class="steps-list">${faltan.map(([k, t]) => `<li><a href="#/${k}">${t}</a></li>`).join('')}</ol></section>` : ''}
-  <section class="kpis">
+  ${W('kpis') ? `<section class="kpis">
     <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b>${varPct !== null ? `<small class="${varPct >= 0 ? 'k-up' : 'k-down'}">${varPct >= 0 ? '▲' : '▼'} ${Math.abs(varPct)} % vs. ${MESES_NOM[+mesAnt.slice(5) - 1]}</small>` : ''}</div>
     <div class="kpi"><span>Recaudo del mes</span><b class="mono">${money(recaudo)}</b></div>
     <div class="kpi"><span>Cartera por cobrar</span><b class="mono">${money(porCobrar)}</b></div>
     <div class="kpi ${vencido > 0 ? 'warn' : ''}"><span>Cartera vencida</span><b class="mono">${money(vencido)}</b></div>
     <div class="kpi ${R.utilidad < 0 ? 'warn' : ''}"><span>${R.utilidad < 0 ? 'Pérdida' : 'Utilidad'} del año</span><b class="mono">${money(Math.abs(R.utilidad))}</b><small class="muted">Ene–${MESES_NOM[+mes.slice(5) - 1].slice(0, 3)} ${mes.slice(0, 4)}</small></div>
-  </section>
-  <div class="ini-grid">
-    <section class="panel stack"><div class="ini-h"><h3>Ingresos y gastos por mes</h3><span class="muted">Últimos 12 meses, según la contabilidad</span></div>
-      ${graficaMeses(R)}</section>
-    <section class="panel stack"><h3>Cartera por edades</h3>${barraEdades(edades)}</section>
-  </div>
-  <section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>`;
+  </section>` : ''}
+  ${medios.length ? `<div class="ini-widgets">${medios.join('')}</div>` : ''}
+  ${W('ultimos') ? `<section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>` : ''}
+  ${!on.size ? '<p class="muted">No escogiste nada para el Inicio. Usa <b>Personalizar</b> para mostrar tus indicadores.</p>' : ''}`;
+  $('iniCfg').onclick = () => dialogo(`<h2>Personalizar el Inicio</h2><p class="hint">Escoge lo que quieres ver. Queda guardado para esta empresa en este equipo.</p>
+    <div class="w-opc">${WIDGETS.map(([k, t, , desc]) => `<label class="check"><input type="checkbox" name="w" value="${k}" ${on.has(k) ? 'checked' : ''}> <span><b>${t}</b><br><span class="hint">${desc}</span></span></label>`).join('')}</div>
+    <p><button type="button" class="sm ghost" id="wDef">Volver a lo de fábrica</button></p>${pie()}`, fd => { guardarInicio(fd.getAll('w')); vInicio(m); });
+  $('wDef').onclick = () => $('dlgForm').querySelectorAll('[name=w]').forEach(c => c.checked = WIDGETS.find(w => w[0] === c.value)[2]);
 }
+
+/* ---------- Widgets del Inicio ---------- */
+// [clave, nombre, visible de fábrica, descripción]. Lo que cada quien escoge se guarda en este equipo, por empresa.
+const WIDGETS = [
+  ['kpis', 'Indicadores del mes', true, 'Ventas, recaudo, cartera y utilidad del año.'],
+  ['grafica', 'Ingresos y gastos por mes', true, 'Gráfica de los últimos 12 meses.'],
+  ['edades', 'Cartera por edades', true, 'Lo que te deben, por días de vencida.'],
+  ['bancos', 'Caja y bancos', false, 'Saldo de cada cuenta de caja y bancos a hoy.'],
+  ['vencer', 'Facturas por vencer', false, 'Las que vencen en los próximos 15 días.'],
+  ['clientes', 'Mejores clientes del año', false, 'Los 5 clientes con más ventas.'],
+  ['productos', 'Productos más vendidos', false, 'Los 5 productos o servicios con más ventas en el año.'],
+  ['pagar', 'Cuentas por pagar', false, 'Lo que les debes a tus proveedores.'],
+  ['impuestos', 'Impuestos por pagar', false, 'IVA, retenciones e ICA según la contabilidad.'],
+  ['nomina', 'Nómina', false, 'Última nómina, seguridad social y prestaciones por pagar.'],
+  ['ultimos', 'Últimos documentos', true, 'Los 8 documentos más recientes.'],
+];
+const cfgInicio = () => { try { const v = JSON.parse(localStorage.getItem('agasoft-inicio-' + S.eid) || 'null'); if (Array.isArray(v)) return v; } catch (_) { /* sin almacenamiento */ } return WIDGETS.filter(w => w[2]).map(w => w[0]); };
+const guardarInicio = l => { try { localStorage.setItem('agasoft-inicio-' + S.eid, JSON.stringify(l)); } catch (_) { /* sin almacenamiento */ } };
+// Saldo a hoy por cuenta (o por tercero) de las cuentas que cumplen re; signo: 1 = débito − crédito, −1 = crédito − débito.
+function saldosA(re, signo, porTercero) {
+  const h = hoy(), s = {};
+  for (const x of movs()) if (re.test(x.cuenta) && x.fecha <= h) { const k = porTercero ? x.tercero_id || '' : x.cuenta; s[k] = r2((s[k] || 0) + signo * (x.debito - x.credito)); }
+  return Object.entries(s).filter(([, v]) => Math.abs(v) > 0.009).sort((a, b) => b[1] - a[1]);
+}
+const wPanel = (titulo, cuerpo, link, ancho) => `<section class="panel stack${ancho ? ' w-ancho' : ''}"><div class="ini-h"><h3>${titulo}</h3>${link ? `<a class="hint" href="${link[0]}">${link[1]}</a>` : ''}</div>${cuerpo}</section>`;
+// Lista con barra proporcional: filas [nombre, valor, detalle?].
+function wLista(filas, vacio, total) {
+  if (!filas.length) return `<p class="muted">${vacio}</p>`;
+  const max = Math.max(...filas.map(f => Math.abs(f[1])), 1);
+  return `<div class="w-list">${filas.map(([n, v, det]) => `<div class="w-row"><span class="w-n">${esc(n)}${det ? `<small class="hint"> · ${esc(det)}</small>` : ''}</span><b class="mono">${money(v)}</b><i class="w-bar" style="width:${Math.max(2, Math.abs(v) / max * 100)}%"></i></div>`).join('')}
+    ${total !== undefined ? `<div class="w-row w-tot"><span>Total</span><b class="mono">${money(total)}</b></div>` : ''}</div>`;
+}
+const WIDGET_HTML = {
+  grafica: ({ R }) => wPanel('Ingresos y gastos por mes', graficaMeses(R), null, true).replace('<h3>Ingresos y gastos por mes</h3>', '<h3>Ingresos y gastos por mes</h3><span class="muted">Últimos 12 meses, según la contabilidad</span>'),
+  edades: ({ edades }) => wPanel('Cartera por edades', barraEdades(edades)),
+  bancos: () => { const l = saldosA(/^11/, 1); return wPanel('Caja y bancos', wLista(l.map(([c, v]) => [nomCta(c), v, c]), 'Sin saldos en caja ni bancos.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/balance', 'Ver balance']); },
+  vencer: ({ cart }) => {
+    const h = hoy(), lim = new Date(Date.parse(h + 'T12:00:00Z') + 15 * 864e5).toISOString().slice(0, 10);
+    const l = cart.filter(c => !c.diasVencida && c.factura.vence && c.factura.vence >= h && c.factura.vence <= lim).sort((a, b) => a.factura.vence.localeCompare(b.factura.vence)).slice(0, 8);
+    return wPanel('Facturas por vencer', l.length ? `<div class="w-list">${l.map(c => `<div class="w-row"><span class="w-n"><a class="mono" href="#/doc/${c.factura.id}">${esc(numDoc(c.factura))}</a> ${esc(terc(c.factura.tercero_id)?.nombre || '')}<small class="hint"> · vence ${fFecha(c.factura.vence)}</small></span><b class="mono">${money(c.saldo)}</b></div>`).join('')}</div>` : '<p class="muted">Ninguna factura vence en los próximos 15 días.</p>', ['#/cartera', 'Ver cartera']);
+  },
+  clientes: ({ em }) => {
+    const y = hoy().slice(0, 4), t = {};
+    for (const x of em) if (x.fecha.startsWith(y) && ['FV', 'NC', 'ND'].includes(x.tipo)) t[x.tercero_id] = r2((t[x.tercero_id] || 0) + (x.tipo === 'NC' ? -1 : 1) * num(x.base));
+    const l = Object.entries(t).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return wPanel(`Mejores clientes ${y}`, wLista(l.map(([id, v]) => [terc(id)?.nombre || '', v]), 'Todavía no hay ventas este año.'), ['#/FV', 'Ver facturas']);
+  },
+  productos: ({ em }) => {
+    const y = hoy().slice(0, 4), fv = new Set(em.filter(x => x.tipo === 'FV' && x.fecha.startsWith(y)).map(x => x.id)), t = {};
+    for (const it of S.d.items || []) if (fv.has(it.documento_id)) { const k = it.codigo || it.descripcion || 'Sin código', x = t[k] = t[k] || { n: it.descripcion || k, v: 0, q: 0 }; x.v = r2(x.v + linea(it).base); x.q += num(it.cantidad); }
+    const l = Object.values(t).sort((a, b) => b.v - a.v).slice(0, 5);
+    return wPanel(`Productos más vendidos ${y}`, wLista(l.map(x => [x.n, x.v, `${x.q} und.`]), 'Todavía no hay ventas este año.'), ['#/productos', 'Ver productos']);
+  },
+  pagar: () => { const l = saldosA(/^(22|2335)/, -1, true).filter(([, v]) => v > 0); return wPanel('Cuentas por pagar', wLista(l.slice(0, 6).map(([id, v]) => [terc(id)?.nombre || '(sin tercero)', v]), 'No les debes a proveedores.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/cxp', 'Ver cuentas por pagar']); },
+  impuestos: () => { const l = saldosA(/^(2365|2367|2368|2408|2412)/, -1); return wPanel('Impuestos por pagar', wLista(l.map(([c, v]) => [nomCta(c), v, c]), 'No hay impuestos por pagar en la contabilidad.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/balance', 'Ver balance']); },
+  nomina: () => {
+    const n = [...nominas()].filter(x => x.estado === 'contabilizado').sort((a, b) => b.hasta.localeCompare(a.hasta))[0], ms = movs(), h = hoy();
+    const tot = re => r2(pasivosNomina(ms, h, re).reduce((s, x) => s + x.total, 0));
+    if (!n && !empleados().length) return wPanel('Nómina', '<p class="muted">Todavía no hay empleados. <a href="#/empleados">Créalos</a> para liquidar la nómina.</p>');
+    return wPanel('Nómina', `<div class="w-list">${n ? `<div class="w-row"><span class="w-n">Última nómina: <a href="#/nominadoc/${n.id}">NE ${n.numero}</a><small class="hint"> · ${esc(nomPeriodo(n))}</small></span><b class="mono">${money(n.neto)}</b></div>` : ''}
+      <div class="w-row"><span class="w-n">Seguridad social y parafiscales por pagar</span><b class="mono">${money(tot(CUENTAS_SS))}</b></div>
+      <div class="w-row"><span class="w-n">Prestaciones sociales por pagar</span><b class="mono">${money(tot(CUENTAS_PREST))}</b></div></div>`, ['#/nominapasivos', 'Ver detalle']);
+  },
+};
 
 /* ---------- Gráficas del Inicio ---------- */
 const cifraCorta = v => { const a = Math.abs(v); return a >= 1e9 ? `${r2(v / 1e9)} mil M` : a >= 1e6 ? `${Math.round(v / 1e5) / 10} M` : a >= 1e3 ? `${Math.round(v / 1e3)} mil` : String(Math.round(v)); };
@@ -894,6 +971,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
     }
     // Los que no son electrónicos crean su numeración solos si falta.
+    if (esElec() && !feHabilitada()) return 'La facturación electrónica de esta empresa todavía no está habilitada ante la DIAN (falta superar el set de pruebas). Guárdala como borrador o emite una factura normal.';
     if (esElec()) try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
@@ -993,6 +1071,44 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
     <p class="rep-small">Elaborado con AGAsoft.</p>
   </article>`;
 }
+/* ---------- Habilitación ante la DIAN ---------- */
+const HAB_ESTADO = { '': ['Sin iniciar', ''], registrado: ['Software registrado', ''], enviando: ['Set de pruebas en validación', 'warn'], error: ['Set de pruebas rechazado', 'bad'], aprobado: ['Habilitada', 'ok'] };
+function vHabilitacion(m) {
+  const e = emp(), h = e.contabilidad?.fe_hab || {}, hab = feHabilitada(), est = hab ? 'aprobado' : (h.estado || '');
+  const [txt, cls] = HAB_ESTADO[est] || HAB_ESTADO[''];
+  m.innerHTML = `<header class="vhead"><div><h2>Habilitación ante la DIAN</h2><p class="sub">Antes de facturar electrónicamente, la DIAN pide enviar un set de pruebas en su ambiente de habilitación. Esas facturas de prueba no tocan tu contabilidad ni tu numeración real.</p></div>
+    <span class="tag ${cls}">${txt}</span></header>
+  ${hab ? `<section class="panel stack callout ok-box"><h3>¡Tu empresa ya está habilitada!</h3><p>La DIAN aprobó el set de pruebas${h.actualizado ? ' el ' + fFecha(h.actualizado.slice(0, 10)) : ''}. Ya puedes emitir facturas y notas electrónicas.</p>
+    <p class="hint">Último paso: en el portal de la DIAN asocia el prefijo de tu resolución de facturación a este software y regístrala en <a href="#/numeraciones">Numeraciones</a>.</p></section>` : ''}
+  <section class="panel stack"><h3>1. En el portal de la DIAN</h3><ol class="steps-list">
+    <li>Entra a <a href="https://catalogo-vpfe-hab.dian.gov.co/User/Login" target="_blank" rel="noopener">Facturando electrónicamente (habilitación)</a> con el usuario de la empresa.</li>
+    <li>Ve a <b>Registro y habilitación → Documentos electrónicos → Factura electrónica</b> y escoge <b>Software propio</b>.</li>
+    <li>Asocia el software con el nombre <b>AGAsoft</b> y un <b>PIN de 5 dígitos</b> que tú escojas.</li>
+    <li>La DIAN te muestra el <b>ID del software</b> y, en el set de pruebas, el <b>TestSetId</b>. Cópialos en el paso 2.</li></ol></section>
+  <section class="panel stack"><h3>2. Datos que te dio la DIAN</h3>
+    <div class="grid3"><div><label for="hSw">ID del software</label><input id="hSw" class="mono" value="${esc(h.software_dian || '')}" autocomplete="off"></div>
+      <div><label for="hPin">PIN (5 dígitos)</label><input id="hPin" class="mono" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="•••••"></div>
+      <div><label for="hTs">TestSetId</label><input id="hTs" class="mono" value="${esc(h.testsetid || '')}" autocomplete="off"></div></div>
+    <div class="row"><button class="primary" id="hReg" ${hab ? 'disabled' : ''}>${h.software_id ? 'Actualizar datos' : 'Registrar software'}</button></div>
+    <p class="hint">El PIN no se guarda en AGAsoft: se envía una sola vez al proveedor de facturación electrónica.</p></section>
+  <section class="panel stack"><h3>3. Enviar el set de pruebas</h3>
+    <p>AGAsoft le pide al proveedor que envíe a la DIAN las facturas y notas de prueba que exige el set. Tarda unos minutos.</p>
+    <div class="row"><button class="primary" id="hRun" ${!h.software_id || hab || est === 'enviando' ? 'disabled' : ''}>Enviar set de pruebas</button><button id="hEst" ${!h.software_id ? 'disabled' : ''}>Consultar estado</button></div>
+    <div id="hOut">${h.mensaje ? `<p class="${est === 'error' ? 'err' : est === 'aprobado' ? 'ok-txt' : 'muted'}">${esc(h.mensaje)}</p>` : ''}
+      ${(h.documentos || []).length ? `<details><summary>Documentos de prueba (${h.documentos.length})</summary><table class="tbl"><thead><tr><th>Tipo</th><th>Número</th><th>Resultado</th></tr></thead><tbody>${h.documentos.map(x => `<tr><td>${esc(String(x.tipo))}</td><td class="mono">${esc(String(x.numero))}</td><td>${/^(1|true)$/i.test(x.valido) ? '<span class="tag ok">Aceptado</span>' : esc(x.mensaje || 'Pendiente')}</td></tr>`).join('')}</tbody></table></details>` : ''}</div></section>
+  <section class="panel stack"><h3>4. Aprobación</h3><p>Cuando la DIAN apruebe el set, la empresa queda <b>habilitada sola</b>: la numeración electrónica pasa a <b>Activa</b> y ya puedes emitir facturas electrónicas.</p></section>`;
+  const accion = async (btn, a, datos = {}) => {
+    const b = $(btn), t = b.textContent; b.disabled = true; b.textContent = 'Un momento…';
+    try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡La DIAN aprobó el set de pruebas! Ya facturas electrónicamente.'); vHabilitacion(m); return r; }
+    catch (err) { fail(err); b.disabled = false; b.textContent = t; }
+  };
+  $('hReg').onclick = () => accion('hReg', 'hab_registrar', { software_id_dian: $('hSw').value, pin: $('hPin').value, testsetid: $('hTs').value });
+  $('hRun').onclick = async () => { if (await confirmar('Enviar set de pruebas', 'Se envían a la DIAN, en el ambiente de habilitación, los documentos de prueba. No afectan tu contabilidad ni tu numeración real.', 'Enviar')) accion('hRun', 'hab_ejecutar'); };
+  $('hEst').onclick = () => accion('hEst', 'hab_estado');
+  // Mientras la DIAN valida, se consulta sola cada 30 segundos.
+  if (est === 'enviando') { const t = setTimeout(() => { if (location.hash === '#/habilitacion') accion('hEst', 'hab_estado'); }, 30000); window.addEventListener('hashchange', () => clearTimeout(t), { once: true }); }
+}
+
 /* ---------- Diseño de la factura ---------- */
 const PLANTILLAS_FAC = [['clasica', 'Clásica', 'Sobria, con línea de color bajo el encabezado.'], ['moderna', 'Moderna', 'Encabezado en bloque de color y totales resaltados.'], ['compacta', 'Compacta', 'Letra más pequeña: cabe más en una hoja.']];
 const COLORES_FAC = ['#0b2938', '#1f4e79', '#0f766e', '#3f6b12', '#7a1f2b', '#6b21a8', '#9a5b00', '#262626'];
@@ -1109,6 +1225,8 @@ function vDoc(m, id) {
 /* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
 // El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
 const feActiva = () => emp()?.contabilidad?.fe_activa === true;
+// Habilitada = la empresa ya superó el set de pruebas de la DIAN. Antes de eso no se emiten documentos electrónicos.
+const feHabilitada = () => emp()?.contabilidad?.fe_habilitada === true;
 const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
 const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
 function datosFE(d) {
@@ -1352,7 +1470,7 @@ function vNumeraciones(m) {
     <p class="sub">La factura electrónica usa el prefijo y el rango de tu resolución DIAN. La factura normal (no electrónica) lleva su propio consecutivo con otro prefijo. Las notas y los recibos llevan el suyo.</p>
     <div class="row"><button id="nuevaN">Nueva numeración de factura normal</button></div>
     <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>
-    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${n.activa ? '<span class="tag ok">Activa</span>' : '<span class="tag">Inactiva</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
+    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${!n.activa ? '<span class="tag">Inactiva</span>' : n.electronica && !feHabilitada() ? '<span class="tag warn" title="Falta superar el set de pruebas de la DIAN">Sin habilitar DIAN</span>' : '<span class="tag ok">Activa</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
       <td class="r mono">${n.desde} – ${Number(n.hasta) >= 999999999 ? 'sin límite' : n.hasta}</td><td class="r mono">${n.siguiente}${n.tipo === 'FV' && quedan <= 50 ? ` <span class="tag bad">quedan ${Math.max(0, quedan)}</span>` : ''}</td>
       <td>${n.vigencia_hasta ? `hasta ${fFecha(n.vigencia_hasta)}${vence ? ' <span class="tag bad">por vencer</span>' : ''}` : '—'}</td><td class="r"><button class="ghost sm" data-ed="${n.id}">Editar</button></td></tr>`; }).join('')}
     </tbody></table></div>` : '<p class="muted">No hay numeraciones.</p>'}</section>`;
@@ -1753,6 +1871,7 @@ function vNominaEditor(m, id) {
   </form>`;
   const base = () => $('np').value === 'quincenal' ? 15 : 30;
   const novDe = e => { const v = nov[e.id] || {}; return { ...v, dias: v.dias === undefined || v.dias === '' ? diasEmpleado(e, $('nd').value, $('nh').value, base()) : v.dias }; };
+  const verAsiento = { ver: 'resumen' };
   const calc = () => { const PP = { ...P, periodo: $('np').value }; return lista().filter(e => (nov[e.id]?.incluir ?? true)).map(e => liquidar(e, novDe(e), PP)).filter(l => l.dias > 0 || l.devengado > 0); };
   const pintarTabla = () => {
     const es = lista();
@@ -1772,7 +1891,7 @@ function vNominaEditor(m, id) {
     $('nWarn').hidden = !fal.length;
     $('nWarn').innerHTML = fal.length ? `Faltan entidades: ${[emps.length ? `${emps.map(f => f.nombre).join(', ')} de algún empleado (<a href="#/empleados">Empleados</a>)` : '', deE.length ? `${deE.map(f => f.nombre).join(', ')} de la empresa (<a href="#/nominacfg">Configuración de nómina</a>)` : ''].filter(Boolean).join(' y ')}. Se puede guardar, pero esos saldos quedan sin tercero y no se pueden pagar con un egreso.` : '';
     const nuevas = Object.fromEntries(cuentasFaltantes([...cuentasDeNomina(ls), P.cuenta_neto], S.d.cuentas).map(c => [c.codigo, c.nombre]));
-    $('nas').innerHTML = tablaAsiento(asientoNomina({ id: 'nuevo', numero: x?.numero || siguienteNomina(), fecha: $('nfe').value, lineas: ls, cuenta_neto: P.cuenta_neto, estado: 'contabilizado' }), nuevas);
+    vistaAsientoNomina($('nas'), { id: 'nuevo', numero: x?.numero || siguienteNomina(), fecha: $('nfe').value, lineas: ls, cuenta_neto: P.cuenta_neto, estado: 'contabilizado' }, nuevas, verAsiento);
   };
   $('nl').addEventListener('input', ev => {
     const tr = ev.target.closest('tr[data-e]'); if (!tr) return; const v = nov[tr.dataset.e] = nov[tr.dataset.e] || {};
@@ -1821,6 +1940,29 @@ function vNominaEditor(m, id) {
   pintarTabla();
 }
 
+// Contabilización de la nómina: por defecto una fila por cuenta (con 100 empleados el detalle es eterno); se puede ver por empleado.
+function tablaResumenCuentas(ms, nuevas = {}) {
+  if (!ms.length) return '<p class="muted">Este documento no genera movimientos.</p>';
+  const R = resumenPorCuenta(ms), d = R.reduce((s, r) => s + r.debito, 0), c = R.reduce((s, r) => s + r.credito, 0);
+  const nom = cod => nuevas[cod] && !idxCuentas()[cod] ? `${nuevas[cod]} (se crea al guardar)` : nomCta(cod);
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="r">Terceros</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+    ${R.map(r => `<tr><td class="mono"><a href="#/auxiliar?cuenta=${r.cuenta}">${r.cuenta}</a></td><td>${esc(nom(r.cuenta))}</td><td class="r">${r.terceros}</td><td class="r mono">${valor(r.debito)}</td><td class="r mono">${valor(r.credito)}</td></tr>`).join('')}
+    <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(d)}</td><td class="r mono">${money(c)}</td></tr></tbody></table></div>`;
+}
+function vistaAsientoNomina(box, n, nuevas = {}, estado = { ver: 'resumen' }) {
+  if (!box) return;
+  const ls = n.lineas || [], l = ls.find(x => x.empleado_id === estado.ver);
+  if (!['resumen', 'todo'].includes(estado.ver) && !l) estado.ver = 'resumen';
+  const cuerpo = estado.ver === 'resumen' ? tablaResumenCuentas(asientoNomina(n), nuevas) : estado.ver === 'todo' ? tablaAsiento(asientoNomina(n), nuevas) : tablaAsiento(asientoNomina({ ...n, lineas: [l] }), nuevas);
+  box.innerHTML = `<div class="row filters"><div><label for="vAs">Ver la contabilización</label><select id="vAs">
+      <option value="resumen">Resumen por cuenta (todos los empleados)</option>
+      ${ls.length ? `<optgroup label="Por empleado">${ls.map(x => `<option value="${esc(x.empleado_id)}">${esc(terc(x.tercero_id)?.nombre || 'Empleado')}</option>`).join('')}</optgroup>` : ''}
+      <option value="todo">Detalle completo, línea por línea</option></select></div>
+      ${estado.ver === 'resumen' ? `<p class="hint grow">Cada cuenta suma a todos los empleados y entidades. En los libros sí queda cada valor a nombre de su tercero.</p>` : ''}</div>${cuerpo}`;
+  const sel = box.querySelector('#vAs'); sel.value = estado.ver;
+  sel.onchange = () => { estado.ver = sel.value; vistaAsientoNomina(box, n, nuevas, estado); };
+}
+
 function hojaDesprendible(n, l) {
   const t = terc(l.tercero_id), e = empById(l.empleado_id) || {};
   const dev = (l.items || []).filter(i => i.tipo === 'dev'), ded = (l.items || []).filter(i => i.tipo === 'ded');
@@ -1836,7 +1978,7 @@ function hojaDesprendible(n, l) {
 }
 function vNominaDoc(m, id) {
   const n = nominaById(id); if (!n) { m.innerHTML = '<p>No se encontró la nómina.</p>'; return; }
-  const anulada = n.estado === 'anulado', borr = n.estado === 'borrador', ms = asientoNomina({ ...n, estado: 'contabilizado' });
+  const anulada = n.estado === 'anulado', borr = n.estado === 'borrador';
   const tot = k => money((n.lineas || []).reduce((s, l) => s + num(l[k]), 0));
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : borr ? '<span class="tag">Borrador</span>' : ''}</h2>
       <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · ${borr ? `sin contabilizar (fecha ${fFecha(n.fecha)})` : `contabilizada el ${fFecha(n.fecha)}`}</p></div>
@@ -1847,8 +1989,9 @@ function vNominaDoc(m, id) {
         <td class="r nowrap"><button class="sm" data-dp="${i}">Desprendible</button>${anulada || borr ? '' : `<a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${l.tercero_id}">Pagar</a>`}</td></tr>`).join('')}
       <tr class="strong"><td>Total</td><td></td><td class="r mono">${tot('devengado')}</td><td class="r mono">${tot('deducciones')}</td><td class="r mono">${tot('neto')}</td><td class="r mono">${tot('aportes')}</td><td class="r mono">${tot('provisiones')}</td><td></td></tr></tbody></table></div>
       ${n.observaciones ? `<p><b>Observaciones:</b> ${esc(n.observaciones)}</p>` : ''}</section>
-    <section class="panel stack"><h3>${borr ? 'Contabilización (así quedará al contabilizar)' : 'Contabilización'}</h3>${tablaAsiento(ms)}${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
-      <p class="hint">El pago a cada empleado y a cada entidad se hace con un comprobante de egreso: ahí aparecen los saldos de nómina por pagar.</p></section>`;
+    <section class="panel stack"><h3>${borr ? 'Contabilización (así quedará al contabilizar)' : 'Contabilización'}</h3><div id="nAs"></div>${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
+      <p class="hint">El neto de cada empleado se paga con un comprobante de egreso. La seguridad social, los parafiscales y las prestaciones quedan en <a href="#/nominapasivos">Seguridad social y prestaciones</a>, donde se pagan y se ajustan.</p></section>`;
+  vistaAsientoNomina($('nAs'), { ...n, estado: 'contabilizado' });
   const imprimirN = ls => { $('print').innerHTML = ls.map(l => hojaDesprendible(n, l)).join(''); const t = document.title; document.title = `Nómina NE ${n.numero} - ${emp().nombre}`; window.print(); document.title = t; };
   $('imprimir').onclick = () => imprimirN(n.lineas || []);
   m.querySelectorAll('[data-dp]').forEach(b => b.onclick = () => imprimirN([n.lineas[Number(b.dataset.dp)]]));
@@ -1873,6 +2016,72 @@ function vNominaDoc(m, id) {
       await cargarEmpresa(); toast('Nómina anulada.'); route();
     });
   };
+}
+
+/* ---------- Seguridad social y prestaciones (pasivos de nómina) ---------- */
+let tabPasivos = 'ss';
+function vNominaPasivos(m) {
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Seguridad social y prestaciones</h2>
+      <p class="sub">Lo que la nómina deja por pagar fuera del neto de cada mes: los aportes que se pagan con la PILA y las prestaciones que se pagan en sus fechas (cesantías, intereses, prima y vacaciones).</p></div></header>
+    ${filtroFechas('pf', false, () => pintar())}
+    <div class="row tabs" role="tablist"><button type="button" data-tab="ss">Seguridad social y parafiscales</button><button type="button" data-tab="pr">Prestaciones sociales</button></div>
+    <section class="panel" id="pL"></section>
+    <details class="panel"><summary><b>¿Qué hago con las diferencias?</b></summary><div class="stack">
+      <p>La nómina causa los aportes con el cálculo exacto, pero la PILA redondea cada aporte al múltiplo de 100 por encima y puede traer novedades, ajustes de IBC o intereses de mora. Por eso lo pagado casi nunca es idéntico a lo causado.</p>
+      <p>Con <b>Ajustar</b> escribes el valor real de la planilla para cada cuenta. AGAsoft hace una nota de contabilidad con la diferencia y el pasivo queda igual a lo que vas a pagar:</p>
+      <ul><li>Si la PILA es mayor, la diferencia es más gasto: la misma cuenta de gasto del aporte (por ejemplo, 510570 pensión).</li>
+        <li>Si es menor, se devuelve ese gasto. Si el gasto era de un año ya cerrado, usa una cuenta de recuperaciones (4250).</li>
+        <li>Los intereses de mora van a gastos financieros (530520). No son deducibles en renta.</li></ul>
+      <p>Las prestaciones funcionan igual. Cuando consolidas las cesantías o pagas la prima, escribes el valor real y la diferencia con la provisión va al gasto del empleado.</p>
+      <p>Después de ajustar, el egreso a la entidad paga el saldo exacto y la cuenta queda en cero.</p></div></details>`;
+  const pintar = () => {
+    m.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('primary', b.dataset.tab === tabPasivos));
+    const ms = movs(), ss = tabPasivos === 'ss', L = pasivosNomina(ms, F.hasta, ss ? CUENTAS_SS : CUENTAS_PREST);
+    const nomT = t => t ? terc(t)?.nombre || '(tercero borrado)' : '(sin tercero)';
+    const acc = x => x.tercero_id ? `<button class="sm" data-aj="${esc(x.tercero_id)}">Ajustar</button><a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${esc(x.tercero_id)}">Pagar</a>` : '<span class="hint">Asigna el tercero</span>';
+    const tot = L.reduce((s, x) => s + x.total, 0);
+    if (!L.length) { $('pL').innerHTML = `<p class="muted">${ss ? 'No hay aportes de seguridad social ni parafiscales por pagar' : 'No hay prestaciones por pagar'} a ${fFecha(F.hasta)}.</p>`; return; }
+    if (ss) {
+      $('pL').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Entidad</th><th>Cuentas</th><th class="r">Por pagar</th><th></th></tr></thead><tbody>
+        ${L.map(x => `<tr><td><b>${esc(nomT(x.tercero_id))}</b></td><td>${x.cuentas.map(c => `<span class="mono">${c.cuenta}</span> ${esc(nomCta(c.cuenta))}: <span class="mono">${money(c.saldo)}</span>`).join('<br>')}</td><td class="r mono"><b>${money(x.total)}</b></td><td class="r nowrap">${acc(x)}</td></tr>`).join('')}
+        <tr class="strong"><td colspan="2">Total PILA por pagar</td><td class="r mono">${money(tot)}</td><td></td></tr></tbody></table></div>`;
+    } else {
+      const col = (x, pre) => x.cuentas.filter(c => c.cuenta.startsWith(pre)).reduce((s, c) => s + c.saldo, 0);
+      const totCol = pre => L.reduce((s, x) => s + col(x, pre), 0);
+      $('pL').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empleado</th>${PRESTACIONES.map(([, t]) => `<th class="r">${t}</th>`).join('')}<th class="r">Total</th><th></th></tr></thead><tbody>
+        ${L.map(x => `<tr><td><b>${esc(nomT(x.tercero_id))}</b></td>${PRESTACIONES.map(([pre]) => `<td class="r mono">${valor(col(x, pre))}</td>`).join('')}<td class="r mono"><b>${money(x.total)}</b></td><td class="r nowrap">${acc(x)}</td></tr>`).join('')}
+        <tr class="strong"><td>Total</td>${PRESTACIONES.map(([pre]) => `<td class="r mono">${money(totCol(pre))}</td>`).join('')}<td class="r mono">${money(tot)}</td><td></td></tr></tbody></table></div>`;
+    }
+    m.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => ajustarPasivo(L.find(x => x.tercero_id === b.dataset.aj), ss, pintar));
+  };
+  m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tabPasivos = b.dataset.tab; pintar(); });
+  pintar();
+}
+// Nota de contabilidad que deja los pasivos de un tercero en su valor real (PILA o prestación consolidada).
+function ajustarPasivo(x, ss, despues) {
+  if (!x) return;
+  const nom = terc(x.tercero_id)?.nombre || '', fecha = F.hasta;
+  const filas = x.cuentas.map(c => ({ ...c, contra: cuentaContraSugerida(nominas(), x.tercero_id, c.cuenta) }));
+  dialogo(`<h2>Ajustar ${ss ? 'aportes' : 'prestaciones'} de ${esc(nom)}</h2>
+    <p class="hint">Escribe el valor real ${ss ? 'de la planilla PILA' : 'que se va a pagar (por ejemplo, la consolidación de cesantías)'}. La diferencia se lleva a la cuenta de la derecha con una nota de contabilidad del ${fFecha(fecha)}.</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pasivo</th><th class="r">En libros</th><th class="r">Valor real</th><th class="r">Diferencia</th><th>Cuenta de la diferencia</th></tr></thead><tbody>
+      ${filas.map((f, i) => `<tr><td><span class="mono">${f.cuenta}</span><br><span class="hint">${esc(nomCta(f.cuenta))}</span></td><td class="r mono">${money(f.saldo)}</td>
+        <td><input name="r${i}" type="number" step="1" min="0" class="r mono w-val" value="${f.saldo}" data-i="${i}" aria-label="Valor real"></td><td class="r mono" data-dif="${i}"></td>
+        <td><input name="c${i}" list="ctasAj" class="mono" value="${esc(f.contra)}" placeholder="Cuenta auxiliar" autocomplete="off" aria-label="Cuenta de la diferencia"></td></tr>`).join('')}</tbody></table></div>
+    ${ss ? `<div class="grid2"><div><label for="f_mora">Intereses de mora (si la PILA los trae)</label><input id="f_mora" name="mora" type="number" min="0" step="1" class="mono"></div><div><label for="f_cm">Cuenta de los intereses</label><input id="f_cm" name="cmora" list="ctasAj" class="mono" value="53052001" autocomplete="off"></div></div>` : ''}
+    <datalist id="ctasAj">${optsLista(cuentasAux())}</datalist>${pie('Hacer el ajuste')}`, async fd => {
+    const fs = filas.map((f, i) => ({ cuenta: f.cuenta, saldo: f.saldo, real: num(fd.get('r' + i)), contra: String(fd.get('c' + i) || '').trim() }));
+    const lineas = lineasAjuste({ tercero_id: x.tercero_id, filas: fs, mora: num(fd.get('mora')), cuentaMora: String(fd.get('cmora') || '53052001').trim(), detalle: `Ajuste ${ss ? 'PILA' : 'prestaciones'} ${nom}` });
+    if (!lineas.length) throw new Error('No hay diferencias: los valores reales son iguales a los de libros.');
+    const malas = [...new Set(lineas.map(l => l.cuenta))].filter(c => !/^\d{8}$/.test(c));
+    if (malas.length) throw new Error(`Usa cuentas auxiliares de 8 dígitos: ${malas.join(', ')}.`);
+    const faltan = cuentasFaltantes(lineas.map(l => l.cuenta), S.d.cuentas);
+    if (faltan.length) await store.saveMany('cuentas', faltan.map(c => ({ ...c, empresa_id: S.eid })));
+    const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'CC', numero: siguienteComp('CC'), fecha, descripcion: `Ajuste de ${ss ? 'seguridad social (PILA)' : 'prestaciones sociales'} · ${nom}`, lineas, estado: 'contabilizado' });
+    await cargarEmpresa(); toast(`Ajuste hecho con la nota de contabilidad ${g.numero}.`); despues();
+  }, { ancho: true });
+  const f = $('dlgForm'), dif = () => filas.forEach((r, i) => { const d = num(f.querySelector(`[name=r${i}]`).value) - r.saldo; f.querySelector(`[data-dif="${i}"]`).textContent = Math.abs(d) < 0.005 ? '' : (d > 0 ? '+' : '−') + money(Math.abs(d)); });
+  f.addEventListener('input', dif); dif();
 }
 
 /* ---------- Medios magnéticos ---------- */
