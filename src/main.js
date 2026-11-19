@@ -1,4 +1,5 @@
 import './style.css';
+import { jsonFE, erroresFE, RUTA_FE } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
@@ -469,6 +470,8 @@ function vEmpresa(m) {
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
+  ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
+    <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div></section>` : ''}
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
@@ -478,6 +481,16 @@ function vEmpresa(m) {
   cargarMiPlan();
   pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  if ($('feProbar')) $('feProbar').onclick = async () => {
+    const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
+    try {
+      const r = await store.fe('probar');
+      $('feOut').innerHTML = `<p class="${r.conexion === 'ok' ? 'ok-txt' : 'err'}">${r.conexion === 'ok' ? 'Conexión correcta' : 'MATIAS no aceptó el token (HTTP ' + r.http + ')'} · ambiente de ${esc(r.ambiente)}</p>
+        <details><summary>Ver respuesta completa</summary><pre class="mono fe-pre">${esc(JSON.stringify(r, null, 2))}</pre></details>
+        <button type="button" id="feCopiar">Copiar respuesta</button>`;
+      $('feCopiar').onclick = () => navigator.clipboard?.writeText(JSON.stringify(r, null, 2)).then(() => toast('Copiado.'));
+    } catch (e) { $('feOut').innerHTML = `<p class="err">${esc(e.message)}</p>`; } finally { b.disabled = false; }
+  };
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
@@ -981,9 +994,21 @@ function vDoc(m, id) {
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
+    ${d.electronica && d.estado === 'emitido' && RUTA_FE[d.tipo] ? panelDian(d) : ''}
     ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
+  if ($('feEnviar')) $('feEnviar').onclick = async () => {
+    const x = datosFE(d), errs = erroresFE(x);
+    if (errs.length) return fail(new Error(errs.join(' ')));
+    if (!await confirmar(`Enviar ${esc(nomDoc(d))} a la DIAN`, 'Se envía el documento por MATIAS. Si la DIAN lo acepta, queda con CUFE y ya no se puede modificar: cualquier corrección se hace con una nota.', 'Enviar')) return;
+    const b = $('feEnviar'); b.disabled = true; b.textContent = 'Enviando…';
+    try {
+      const r = await store.fe('enviar', { documento_id: d.id, ruta: RUTA_FE[d.tipo], body: jsonFE({ ...x, hora: new Date().toTimeString().slice(0, 8) }) });
+      await cargarEmpresa(); route();
+      if (r.estado === 'aceptado') toast(`${nomDoc(d)} aceptada por la DIAN.`); else fail(new Error(`La DIAN no aceptó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
+    } catch (e) { fail(e); b.disabled = false; b.textContent = 'Enviar a la DIAN'; }
+  };
   if ($('eliminar')) $('eliminar').onclick = async () => {
     const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones);
     if (motivo) return fail(new Error(motivo));
@@ -995,6 +1020,22 @@ function vDoc(m, id) {
     const mot = fd.get('motivo').trim(); if (!mot) throw new Error('Escribe el motivo.');
     await store.anular(d.id, mot); await cargarEmpresa(); toast(`Anulado: ${nomDoc(d)}.`); route();
   });
+}
+/* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
+const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
+const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
+function datosFE(d) {
+  const ref = d.ref_id ? docById(d.ref_id) : null;
+  return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id),
+    numeracion: S.d.numeraciones.find(n => n.id === d.numeracion_id), ref, cufeRef: ref ? envioAceptado(ref.id)?.cufe || '' : '' };
+}
+function panelDian(d) {
+  const ok = envioAceptado(d.id), l = envios(d.id), falta = ok ? [] : erroresFE(datosFE(d));
+  return `<section class="panel stack noprint"><header class="vhead"><h3>DIAN</h3>${ok ? '<span class="tag ok">Aceptada</span>' : `<button class="primary" id="feEnviar">Enviar a la DIAN</button>`}</header>
+    ${ok ? `<dl class="kv"><dt>CUFE</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviada</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.pdf ? `<dt>PDF</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver el PDF de MATIAS</a></dd>` : ''}</dl>`
+      : `<p class="muted">${l.length ? 'La DIAN no ha aceptado este documento. Revisa los errores y vuelve a enviarlo con el mismo número.' : 'Todavía no se ha enviado a la DIAN.'}</p>${falta.length ? `<ul class="err">${falta.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`}
+    ${l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazada'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
+  </section>`;
 }
 function imprimir(d) {
   $('print').innerHTML = representacion(d);

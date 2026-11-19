@@ -3,7 +3,7 @@
 //  - "local": datos solo en este navegador, para probar sin configurar nada (modo demostración).
 import { createClient } from '@supabase/supabase-js';
 
-const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas'];
+const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const ahora = () => new Date().toISOString();
 
@@ -49,6 +49,7 @@ function localStore() {
     mode: 'local',
     async session() { return user; },
     async perfil() { return { id: 'demo', nombre: 'Modo demostración', es_admin: true, aprobado: true }; },
+    async fe() { throw new Error('El envío a la DIAN funciona con la cuenta en línea, no en el modo demostración.'); },
     async signOut() {},
     async listEmpresas() { return db.empresas.map(e => ({ ...e })); },
     async loadEmpresa(eid) { return Object.fromEntries(TABLAS.map(t => [t, db[t].filter(r => r.empresa_id === eid).map(r => ({ ...r }))])); },
@@ -141,7 +142,7 @@ function supabaseStore(url, key) {
     async signUp(email, password, nombre) { return ok(await sb.auth.signUp({ email, password, options: { data: { nombre } } })); },
     async signOut() { await sb.auth.signOut(); },
     async listEmpresas() { return ok(await sb.from('empresas').select('*').order('nombre')); },
-    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras', 'empleados', 'nominas'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
+    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
     async save(t, row) {
       const { id, creado_en, owner, ...campos } = row;
       if (id) return ok(await sb.from(t).update(campos).eq('id', id).select().single());
@@ -161,6 +162,13 @@ function supabaseStore(url, key) {
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async miPlan() { return ok(await sb.rpc('mi_plan')); },
+    // Facturación electrónica: la función de Supabase "fe-matias" habla con MATIAS con el token guardado en los secretos.
+    async fe(accion, datos = {}) {
+      const { data, error } = await sb.functions.invoke('fe-matias', { body: { accion, ...datos } });
+      if (error) { let m = error.message; try { const b = await error.context?.json?.(); if (b?.error) m = b.error; } catch (_) {} throw new Error(/Failed to send|not found|404/i.test(m) ? 'La función fe-matias no está desplegada en Supabase.' : m); }
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
     async planesActivos() { return ok(await sb.from('planes').select('*').eq('activo', true).order('orden').order('nombre')); },
     async guardarTema(t) { ok(await sb.rpc('guardar_tema', { p_tema: t })); },
     async solicitarPlan(id) { ok(await sb.rpc('solicitar_plan', { p_plan: id })); },

@@ -358,3 +358,6 @@ button.bad{color:var(--bad)}
 .ed-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px}
 .ed-0{background:var(--ch-bar)}.ed-1{background:var(--lime)}.ed-2{background:#d9a400}.ed-3{background:var(--bad)}
 @media (max-width:600px){.ch-lab{font-size:20px}}
+
+.fe-pre{max-height:360px;overflow:auto;font-size:.75rem;background:var(--surface-2);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all}
+.fe-cufe{word-break:break-all;font-size:.8rem}.ok-txt{color:var(--ok);font-weight:600}
