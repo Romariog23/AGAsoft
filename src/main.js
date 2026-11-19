@@ -1,6 +1,6 @@
 import './style.css';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
-import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
+import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
@@ -37,7 +37,7 @@ const itemsDe = id => (S.d?.items || []).filter(i => i.documento_id === id).sort
 const aplDe = id => (S.d?.aplicaciones || []).filter(a => a.recibo_id === id);
 const numDoc = d => d.numero ? `${d.prefijo || ''}${d.prefijo ? ' ' : ''}${d.numero}` : 'Borrador';
 const nomDoc = d => `${TIPOS[d.tipo].corto} ${numDoc(d)}`;
-const docId = t => t ? `${TIPOS_ID.find(x => x[0] === t.tipo_id)?.[1] === 'NIT' ? 'NIT' : (TIPOS_ID.find(x => x[0] === t.tipo_id)?.[1] || '')} ${fmtNit(t.numero)}${t.dv != null && t.tipo_id === '31' ? '-' + t.dv : ''}` : '';
+const docId = t => t ? `${SIGLA_ID[t.tipo_id] || ''} ${fmtNit(t.numero)}${t.dv != null && t.tipo_id === '31' ? '-' + t.dv : ''}` : '';
 
 function toast(msg, err) { const t = $('toast'); t.textContent = msg; t.className = err ? 'bad' : ''; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, err ? 6000 : 3500); }
 const fail = e => toast(e?.message || String(e), true);
@@ -993,7 +993,7 @@ function formTercero(t = {}, despues, modo = 'cliente') {
   const quien = prov ? 'proveedor' : empl ? 'empleado' : 'cliente';
   const esProv = t.id ? !!t.es_proveedor : prov, esCli = t.id ? t.es_cliente !== false : !prov && !empl;
   const f = dialogo(`<h2>${t.id ? `Editar ${quien}` : `Nuevo ${quien}`}</h2>
-    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
+    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID.map(([k, n]) => [k, SIGLA_ID[k] === n ? n : `${SIGLA_ID[k]} · ${n}`]), t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
     ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], t.tipo_persona || personaDe('', t, t.tipo_id || '31'))}
     <div data-p="juridica">${campo('razon_social', 'Razón social', t.razon_social || (t.tipo_persona !== 'natural' ? t.nombre : '') || '', 'maxlength="200"')}</div>
     <div data-p="natural" class="grid2">${(pn => `${campo('primer_nombre', 'Primer nombre', pn.primer_nombre || '', 'maxlength="60"')}${campo('segundo_nombre', 'Segundo nombre', pn.segundo_nombre || '', 'maxlength="60"')}
@@ -1481,7 +1481,7 @@ function vNominaCfg(m) {
       <datalist id="ctasNom">${optsLista(cuentasAux().filter(x => /^(13|23|25|51|52|72)/.test(x.codigo)))}</datalist>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th>${AREAS.map(([, n]) => `<th>Gasto ${n.toLowerCase()}</th>`).join('')}<th>Por pagar</th></tr></thead><tbody>
         ${grupo('dev', 'Devengados')}${grupo('ded', 'Deducciones')}${grupo('apo', 'Aportes de la empresa')}${grupo('pro', 'Provisiones de prestaciones')}</tbody></table></div>
-      <p class="hint">Fondo de solidaridad: 1 % desde 4 salarios mínimos, hasta 2 % desde 20. ARL según la clase de riesgo de cada empleado. Cesantías y prima: un doceavo de lo salarial más el auxilio; intereses: 12 % de las cesantías; vacaciones: 15 días por año sobre el salario.</p></section>
+      <p class="hint">Fondo de solidaridad: 1 % desde 4 salarios mínimos, hasta 2 % desde 20. ARL según la clase de riesgo de cada empleado. Cesantías y prima: 8,33 % cada una sobre lo salarial más el auxilio; intereses: 12 % de las cesantías; vacaciones: 4,17 % sobre el salario (15 días por año). Quincenal: la primera va del 1 al 15 y la segunda del 16 al 30, siempre por 15 días.</p></section>
     <div class="row end"><button class="primary">Guardar configuración</button></div>
   </form>`;
   $('nc').onsubmit = async ev => {
@@ -1510,7 +1510,7 @@ function vNominas(m) {
   const pintar = () => {
     const l = nominas().filter(n => anuladas || n.estado !== 'anulado').sort((a, b) => b.hasta.localeCompare(a.hasta) || b.numero - a.numero);
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Periodo</th><th class="r">Empleados</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto a pagar</th><th></th></tr></thead><tbody>
-      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono"><a href="#/nominadoc/${n.id}">NE ${n.numero}</a></td><td class="nowrap">${fFecha(n.desde)} a ${fFecha(n.hasta)}</td><td class="r">${(n.lineas || []).length}</td>
+      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono"><a href="#/nominadoc/${n.id}">NE ${n.numero}</a></td><td class="nowrap">${nomPeriodo(n)}</td><td class="r">${(n.lineas || []).length}</td>
         <td class="r mono">${money(n.devengado)}</td><td class="r mono">${money(n.deducciones)}</td><td class="r mono"><b>${money(n.neto)}</b></td><td>${n.estado === 'anulado' ? '<span class="tag bad">Anulada</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
       : `<p class="muted">${empleados().length ? 'Todavía no hay nóminas liquidadas.' : 'Primero crea los empleados en Nómina › Empleados.'}</p>`;
   };
@@ -1523,7 +1523,22 @@ function diasEmpleado(e, desde, hasta, base) {
   const ini = e.fecha_ingreso && e.fecha_ingreso > desde ? e.fecha_ingreso : desde, fin = e.fecha_retiro && e.fecha_retiro < hasta ? e.fecha_retiro : hasta;
   if (fin < ini) return 0;
   if (ini === desde && fin === hasta) return base;
-  return Math.min(base, Math.round((new Date(fin + 'T12:00:00') - new Date(ini + 'T12:00:00')) / 864e5) + 1);
+  return Math.max(0, Math.min(base, dias360(ini, fin)));
+}
+// Días comerciales (meses de 30): el 31 y el último día de febrero cuentan como 30.
+function dias360(ini, fin) {
+  const d = f => { const [y, m, dd] = f.split('-').map(Number); return [y, m, dd >= 30 || f === finMes(f) ? 30 : dd]; };
+  const [y1, m1, d1] = d(ini), [y2, m2, d2] = d(fin);
+  return (y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1) + 1;
+}
+const MESES_NOM = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+// "1.ª quincena (1 al 15) de noviembre de 2026", "2.ª quincena (16 al 30)…" o "noviembre de 2026".
+function nomPeriodo(n) {
+  const mes = `${MESES_NOM[Number(n.desde.slice(5, 7)) - 1]} de ${n.desde.slice(0, 4)}`, d = n.desde.slice(8), h = n.hasta.slice(8), comp = n.desde.slice(0, 7) === n.hasta.slice(0, 7);
+  if (n.periodo === 'quincenal' && comp && d === '01' && h === '15') return `1.ª quincena (1 al 15) de ${mes}`;
+  if (n.periodo === 'quincenal' && comp && d === '16' && n.hasta === finMes(n.hasta)) return `2.ª quincena (16 al 30) de ${mes}`;
+  if (n.periodo !== 'quincenal' && comp && d === '01' && n.hasta === finMes(n.hasta)) return mes.charAt(0).toUpperCase() + mes.slice(1);
+  return `${fFecha(n.desde)} a ${fFecha(n.hasta)}`;
 }
 function vNominaEditor(m, id) {
   const P = pNom(), x = id && nominaById(id);
@@ -1548,8 +1563,10 @@ function vNominaEditor(m, id) {
   <form id="nf" class="stack" novalidate>
     <section class="panel grid-doc">
       <div><label for="np">Periodo</label><select id="np">${opts(PERIODOS, n.periodo)}</select></div>
-      <div><label for="nd">Desde</label><input id="nd" type="date" value="${n.desde}" required></div>
-      <div><label for="nh">Hasta</label><input id="nh" type="date" value="${n.hasta}" required></div>
+      <div><label for="nmes">Mes</label><input id="nmes" type="month" value="${n.desde.slice(0, 7)}" required></div>
+      <div id="nqBox"><label for="nq">Quincena</label><select id="nq"><option value="1" ${n.desde.slice(8) <= '15' ? 'selected' : ''}>Primera (1 al 15)</option><option value="2" ${n.desde.slice(8) > '15' ? 'selected' : ''}>Segunda (16 al 30)</option></select></div>
+      <input id="nd" type="hidden" value="${n.desde}"><input id="nh" type="hidden" value="${n.hasta}">
+      <p class="hint span2" id="nPer"></p>
       <div><label for="nfe">Fecha de contabilización</label><input id="nfe" type="date" value="${n.fecha}" required></div>
       <div><label>Número</label><p class="mono">${x ? 'NE ' + x.numero : `NE ${siguienteNomina()} (al guardar)`}</p></div>
     </section>
@@ -1588,8 +1605,18 @@ function vNominaEditor(m, id) {
     if (ev.target.hasAttribute('data-inc')) { v.incluir = ev.target.checked; tr.classList.toggle('muted', !v.incluir); }
     resumen();
   });
-  $('np').onchange = () => { if (!x) { const p = propuesto($('np').value); $('nd').value = p.desde; $('nh').value = p.hasta; $('nfe').value = p.hasta; } for (const k in nov) delete nov[k].dias; pintarTabla(); };
-  $('nd').onchange = $('nh').onchange = () => { for (const k in nov) delete nov[k].dias; if (!x) $('nfe').value = $('nh').value; pintarTabla(); };
+  // Mes + quincena → fechas. La segunda quincena va del 16 al último día del mes, pero siempre se liquida por 15 días.
+  const fechasPer = () => {
+    const mes = $('nmes').value, q = $('np').value === 'quincenal' ? $('nq').value : '';
+    $('nqBox').hidden = !q;
+    if (!mes) return;
+    const desde = mes + (q === '2' ? '-16' : '-01'), hasta = q === '1' ? mes + '-15' : finMes(desde);
+    $('nd').value = desde; $('nh').value = hasta; n.desde = desde; n.hasta = hasta;
+    $('nPer').textContent = `Liquida ${nomPeriodo({ periodo: $('np').value, desde, hasta })}: ${base()} días.`;
+  };
+  const cambioPer = () => { fechasPer(); for (const k in nov) delete nov[k].dias; if (!x) $('nfe').value = $('nh').value; pintarTabla(); };
+  $('np').onchange = $('nmes').onchange = $('nq').onchange = cambioPer;
+  fechasPer();
   $('nfe').onchange = resumen;
   $('nf').onsubmit = async ev => {
     ev.preventDefault();
@@ -1617,7 +1644,7 @@ function hojaDesprendible(n, l) {
   const t = terc(l.tercero_id), e = empById(l.empleado_id) || {};
   const dev = (l.items || []).filter(i => i.tipo === 'dev'), ded = (l.items || []).filter(i => i.tipo === 'ded');
   const filas = Math.max(dev.length, ded.length);
-  return `<article class="desprendible">${cabInforme('Desprendible de nómina', `NE ${n.numero}<br><small>${fFecha(n.desde)} a ${fFecha(n.hasta)}</small>`)}
+  return `<article class="desprendible">${cabInforme('Desprendible de nómina', `NE ${n.numero}<br><small>${nomPeriodo(n)}</small>`)}
     <div class="grid2"><div><b>${esc(t?.nombre || '')}</b><br><span class="muted">${esc(docId(t))}</span><br>${esc(e.cargo || '')}</div>
       <div><b>Salario:</b> ${money(e.salario)}<br><b>Días liquidados:</b> ${l.dias}${e.banco ? `<br><b>Pago a:</b> ${esc(e.banco)} ${esc(e.cuenta_bancaria || '')}` : ''}</div></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Devengados</th><th class="r">Valor</th><th>Deducciones</th><th class="r">Valor</th></tr></thead><tbody>
@@ -1631,7 +1658,7 @@ function vNominaDoc(m, id) {
   const anulada = n.estado === 'anulado', ms = asientoNomina({ ...n, estado: 'contabilizado' });
   const tot = k => money((n.lineas || []).reduce((s, l) => s + num(l[k]), 0));
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : ''}</h2>
-      <p class="sub">${fFecha(n.desde)} a ${fFecha(n.hasta)} · ${n.periodo === 'quincenal' ? 'quincenal' : 'mensual'} · contabilizada el ${fFecha(n.fecha)}</p></div>
+      <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · contabilizada el ${fFecha(n.fecha)}</p></div>
     <div class="row">${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button></div></header>
     <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empleado</th><th class="r">Días</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto</th><th class="r">Aportes</th><th class="r">Provisiones</th><th></th></tr></thead><tbody>
       ${(n.lineas || []).map((l, i) => `<tr><td><b>${esc(terc(l.tercero_id)?.nombre || '')}</b></td><td class="r">${l.dias}</td><td class="r mono">${money(l.devengado)}</td><td class="r mono">${money(l.deducciones)}</td><td class="r mono"><b>${money(l.neto)}</b></td><td class="r mono">${money(l.aportes)}</td><td class="r mono">${money(l.provisiones)}</td>

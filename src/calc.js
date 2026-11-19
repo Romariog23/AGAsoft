@@ -133,7 +133,9 @@ const CONCEPTOS_NC = [
 ];
 const CONCEPTOS_ND = [['1', 'Intereses'], ['2', 'Gastos por cobrar'], ['3', 'Cambio del valor'], ['4', 'Otros']];
 const TIPOS_ID = [['31', 'NIT'], ['13', 'Cédula de ciudadanía'], ['22', 'Cédula de extranjería'], ['41', 'Pasaporte'], ['12', 'Tarjeta de identidad'], ['42', 'Documento de identificación extranjero'], ['47', 'PEP'], ['48', 'PPT']];
+// Abreviaturas para mostrar junto al número (CC 1.020.304.050).
+const SIGLA_ID = { '31': 'NIT', '13': 'CC', '22': 'CE', '41': 'PA', '12': 'TI', '42': 'DIE', '47': 'PEP', '48': 'PPT' };
 const FORMAS_PAGO = [['contado', 'Contado'], ['credito', 'Crédito']];
 const MEDIOS_PAGO = [['efectivo', 'Efectivo'], ['transferencia', 'Transferencia'], ['consignacion', 'Consignación'], ['tarjeta', 'Tarjeta'], ['cheque', 'Cheque']];
 
-export { r2, num, dvOf, parseNit, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO };
+export { r2, num, dvOf, parseNit, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO };
