@@ -1288,6 +1288,8 @@ function formTercero(t = {}, despues, modo = 'cliente') {
     <div class="grid2">${campo('telefono', 'Teléfono', t.telefono, 'type="tel"')}${campo('correo', 'Correo para enviar facturas', t.correo, 'type="email"')}</div>
     <div class="grid2" ${empl ? 'hidden' : ''}>${campo('plazo_dias', 'Plazo de pago (días, 0 = contado)', t.plazo_dias ?? 0, 'type="number" min="0" max="365"')}<div class="checkcell">${check('responsable_iva', 'Responsable de IVA', t.responsable_iva)}</div></div>
     <div class="row" ${empl ? 'hidden' : ''}>${check('es_cliente', 'Es cliente', esCli)}${check('es_proveedor', 'Es proveedor', esProv)}</div>
+    <fieldset ${empl ? 'hidden' : ''}><legend>Entidad de seguridad social (para la nómina)</legend><div class="row" style="flex-wrap:wrap;gap:4px 18px">${ENTIDADES_SS.map(([k, n]) => check('ss_' + k, n, entidadesDe(t).includes(k))).join('')}</div>
+      <p class="hint">Márcalo si este tercero es una EPS, fondo, caja o ARL. Así sale en la ficha de cada empleado y en la PILA. Un fondo puede ser de pensiones y de cesantías a la vez.</p></fieldset>
     <fieldset data-fs="cli"><legend>Retenciones que este cliente le practica a la empresa</legend><div class="grid3">
       ${campo('retefuente_pct', 'Retefuente %', num(t.retefuente_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
       ${campo('reteiva_pct', 'ReteIVA % (del IVA)', num(t.reteiva_pct) || '', 'type="number" min="0" max="100" step="0.001"')}
@@ -1304,12 +1306,16 @@ function formTercero(t = {}, despues, modo = 'cliente') {
     else { numero = numero.replace(/[.\s]/g, ''); if (!/^[0-9A-Za-z-]{3,20}$/.test(numero)) throw new Error('Revisa el número de documento.'); }
     const nom = nombreTercero(Object.fromEntries(['tipo_persona', 'razon_social', ...PARTES].map(k => [k, fd.get(k) || ''])), tipo);
     if (nom.error) throw new Error(nom.error.charAt(0).toUpperCase() + nom.error.slice(1) + '.');
-    if (!empl && fd.get('es_cliente') !== 'on' && fd.get('es_proveedor') !== 'on') throw new Error('Marca si es cliente, proveedor o ambos.');
+    const ent = empl ? entidadesDe(t) : ENTIDADES_SS.map(([k]) => k).filter(k => fd.get('ss_' + k) === 'on');
+    if (!empl && fd.get('es_cliente') !== 'on' && fd.get('es_proveedor') !== 'on' && !ent.length) throw new Error('Marca si es cliente, proveedor o ambos.');
     if (S.d.terceros.some(x => x.id !== t.id && x.tipo_id === tipo && x.numero === numero)) throw new Error('Ya existe un tercero con ese documento (búscalo en Clientes o Proveedores).');
     const row = { empresa_id: S.eid, tipo_id: tipo, numero, dv, ...nom, direccion: fd.get('direccion').trim(), departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(),
       plazo_dias: Math.max(0, Math.round(num(fd.get('plazo_dias')))), responsable_iva: fd.get('responsable_iva') === 'on', retefuente_pct: num(fd.get('retefuente_pct')), reteiva_pct: num(fd.get('reteiva_pct')), reteica_milaje: num(fd.get('reteica_milaje')),
-      es_cliente: fd.get('es_cliente') === 'on', es_proveedor: fd.get('es_proveedor') === 'on', ret_compra_fuente_pct: num(fd.get('ret_compra_fuente_pct')), ret_compra_iva_pct: num(fd.get('ret_compra_iva_pct')), ret_compra_ica_milaje: num(fd.get('ret_compra_ica_milaje')) };
-    const g = await store.save('terceros', t.id ? { ...row, id: t.id } : row);
+      es_cliente: fd.get('es_cliente') === 'on', es_proveedor: fd.get('es_proveedor') === 'on' || ent.length > 0, ret_compra_fuente_pct: num(fd.get('ret_compra_fuente_pct')), ret_compra_iva_pct: num(fd.get('ret_compra_iva_pct')), ret_compra_ica_milaje: num(fd.get('ret_compra_ica_milaje')),
+      // Solo se manda si se usa, para que funcione aunque no se haya corrido 026_entidades_ss.sql.
+      ...(ent.length || entidadesDe(t).length ? { entidad_ss: ent } : {}) };
+    let g; try { g = await store.save('terceros', t.id ? { ...row, id: t.id } : row); }
+    catch (e) { throw /entidad_ss/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/026_entidades_ss.sql para marcar entidades de seguridad social.') : e; }
     toast(prov ? 'Proveedor guardado.' : empl ? 'Persona guardada.' : 'Cliente guardado.');
     if (despues) await despues(g); else { await cargarEmpresa(); route(); }
   }, { ancho: true });
@@ -1690,6 +1696,16 @@ const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setM
 const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /borrador|nominas_estado_check|row-level security/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
 // El tercero de la propia empresa (mismo NIT), si está creado.
 const terceroEmpresa = () => { const nit = String(emp()?.nit || '').replace(/\D/g, ''); return nit ? S.d?.terceros.find(t => String(t.numero).replace(/\D/g, '') === nit)?.id || '' : ''; };
+// Entidades de seguridad social: un tercero puede ser varias (por ejemplo, un fondo de pensiones y cesantías).
+const ENTIDADES_SS = [['eps', 'EPS (salud)'], ['pension', 'Fondo de pensiones'], ['cesantias', 'Fondo de cesantías'], ['caja', 'Caja de compensación'], ['arl', 'ARL'], ['parafiscales', 'ICBF o SENA']];
+const entidadesDe = t => Array.isArray(t?.entidad_ss) ? t.entidad_ss : [];
+// Lista para escoger una entidad: las marcadas con ese tipo (y la que ya estaba escogida). Si no hay ninguna marcada, todos los terceros.
+const optsEntidad = (tipo, sel, excluir) => {
+  const marcadas = S.d.terceros.filter(t => t.id !== excluir && (tipo ? entidadesDe(t).includes(tipo) : entidadesDe(t).length));
+  if (!marcadas.length) return optsTerceros(sel, excluir);
+  const l = [...marcadas, ...S.d.terceros.filter(t => t.id === sel && !marcadas.includes(t))].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return `<option value="">—</option>` + l.map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
+};
 const optsTerceros = (sel, excluir) => `<option value="">—</option>` + [...S.d.terceros].filter(t => t.id !== excluir).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 
 function vEmpleados(m) {
@@ -1723,9 +1739,9 @@ function formEmpleado(e) {
     <p>${check('auxilio', `Tiene derecho a auxilio de transporte (solo aplica si gana hasta 2 salarios mínimos: ${money(2 * P.smmlv)})`, e.auxilio !== false)}</p>
     <p>${check('pensionado', 'Es pensionado (no se le descuenta ni se le paga pensión ni fondo de solidaridad; la salud sí se liquida completa)', e.pensionado === true)}</p>
     <h3>Entidades</h3>
-    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsTerceros(e.eps_id, e.tercero_id)}</select></div><div><label for="f_pen">Fondo de pensiones <span class="hint">(no aplica si es pensionado)</span></label><select id="f_pen" name="pension_id">${optsTerceros(e.pension_id, e.tercero_id)}</select></div></div>
-    <div class="grid2"><div><label for="f_ces">Fondo de cesantías</label><select id="f_ces" name="cesantias_id">${optsTerceros(e.cesantias_id, e.tercero_id)}</select></div><div><label for="f_caja">Caja de compensación</label><select id="f_caja" name="caja_id">${optsTerceros(e.caja_id, e.tercero_id)}</select></div></div>
-    <p class="hint">Si una entidad no está en la lista, créala primero en Proveedores con su NIT. La ARL, el ICBF y el SENA son de la empresa: van en Configuración de nómina.</p>
+    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsEntidad('eps', e.eps_id, e.tercero_id)}</select></div><div><label for="f_pen">Fondo de pensiones <span class="hint">(no aplica si es pensionado)</span></label><select id="f_pen" name="pension_id">${optsEntidad('pension', e.pension_id, e.tercero_id)}</select></div></div>
+    <div class="grid2"><div><label for="f_ces">Fondo de cesantías</label><select id="f_ces" name="cesantias_id">${optsEntidad('cesantias', e.cesantias_id, e.tercero_id)}</select></div><div><label for="f_caja">Caja de compensación</label><select id="f_caja" name="caja_id">${optsEntidad('caja', e.caja_id, e.tercero_id)}</select></div></div>
+    <p class="hint">Si una entidad no está en la lista, créala en Proveedores con su NIT y márcala como entidad de seguridad social (EPS, fondo, caja). La ARL, el ICBF y el SENA son de la empresa: van en Configuración de nómina.</p>
     <div class="grid2">${campo('banco', 'Banco', e.banco || '', 'maxlength="60"')}${campo('cuenta_bancaria', 'Cuenta bancaria', e.cuenta_bancaria || '', 'maxlength="40" class="mono"')}</div>
     ${e.id ? `<div class="grid2">${campo('fecha_retiro', 'Fecha de retiro', e.fecha_retiro || '', 'type="date"')}<div class="checkcell">${check('activo', 'Activo (se liquida en la nómina)', e.activo !== false)}</div></div>` : ''}
     ${pie()}`, async fd => {
@@ -1762,7 +1778,7 @@ function vNominaCfg(m) {
       <p class="hint">Revisa el salario mínimo y el auxilio de transporte de cada año en el decreto del Gobierno.</p>
       <p>${check('exonerada', 'La empresa está exonerada de salud 8,5 %, ICBF y SENA por los empleados que ganan menos de 10 salarios mínimos (artículo 114-1 del Estatuto Tributario)', P.exonerada)}</p></section>
     <section class="panel stack"><h3>Entidades de la empresa</h3>
-      <div class="grid3"><div><label for="f_arl">ARL</label><select id="f_arl" name="arl_id">${optsTerceros(P.arl_id)}</select></div><div><label for="f_icbf">ICBF</label><select id="f_icbf" name="icbf_id">${optsTerceros(P.icbf_id)}</select></div><div><label for="f_sena">SENA</label><select id="f_sena" name="sena_id">${optsTerceros(P.sena_id)}</select></div></div>
+      <div class="grid3"><div><label for="f_arl">ARL</label><select id="f_arl" name="arl_id">${optsEntidad('arl', P.arl_id)}</select></div><div><label for="f_icbf">ICBF</label><select id="f_icbf" name="icbf_id">${optsEntidad('parafiscales', P.icbf_id)}</select></div><div><label for="f_sena">SENA</label><select id="f_sena" name="sena_id">${optsEntidad('parafiscales', P.sena_id)}</select></div></div>
       <p class="hint">Son los terceros a los que queda el saldo por pagar. Las EPS, fondos y cajas de cada empleado se escogen en su ficha.</p></section>
     <section class="panel stack"><h3>Cuentas</h3>
       <p class="hint">Vacías = las sugeridas (en gris). El gasto va según el área del empleado. Si una cuenta no existe en el plan, se crea al guardar la primera nómina que la use.</p>
@@ -2100,6 +2116,7 @@ function vNominaPagos(m) {
 const pagadoPN = c => r2((c.lineas || []).filter(l => /^11/.test(l.cuenta)).reduce((s, l) => s + num(l.credito), 0));
 
 let modoPago = 'salarios';
+const tipoEntidadCuenta = c => c.startsWith('2380') ? 'pension' : c === '23700601' ? 'arl' : c.startsWith('237010') ? 'caja' : c.startsWith('237005') ? 'eps' : '';
 // Entidad configurada para el empleado según la cuenta del aporte (EPS, fondo de pensiones, caja; la ARL es de la empresa).
 const entidadSugerida = (tid, cuenta) => { const e = empleados().find(x => x.tercero_id === tid), P = pNom();
   return (cuenta.startsWith('2380') ? e?.pension_id : cuenta === '23700601' ? P.arl_id : cuenta.startsWith('237010') ? e?.caja_id : cuenta.startsWith('237005') ? e?.eps_id : '') || ''; };
@@ -2165,7 +2182,7 @@ function vNominaPago(m, { modo, tercero, concepto }) {
       const chk = `<input type="checkbox" data-on="${i}" ${f.on ? 'checked' : ''} aria-label="Pagar">`;
       const val = `<input type="number" step="1" min="0" class="r mono w-val" data-v="${i}" value="${f.pagar}" aria-label="${CONTRA_PAGO[modoPago]}">`;
       let html = sal ? `<tr><td>${chk}</td><td>${quien}</td><td class="hint">${esc([e?.banco, e?.cuenta_bancaria].filter(Boolean).join(' · ') || 'Sin cuenta bancaria')}</td><td class="r mono">${money(f.saldo)}</td><td>${val}</td></tr>`
-        : `<tr><td>${chk}</td><td>${f.reasig ? `${quien}<br><select data-ent="${i}" aria-label="Entidad a la que se paga" style="max-width:220px">${optsTerceros(f.tercero_pago, f.tercero_id)}</select>` : ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
+        : `<tr><td>${chk}</td><td>${f.reasig ? `${quien}<br><select data-ent="${i}" aria-label="Entidad a la que se paga" style="max-width:220px">${optsEntidad(tipoEntidadCuenta(f.cuenta), f.tercero_pago, f.tercero_id)}</select>` : ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
           <td class="r mono">${money(f.saldo)}</td><td>${val}</td><td class="r mono" data-dif="${i}"></td><td><input class="mono" list="ctasPN" data-c="${i}" value="${esc(f.contra || '')}" placeholder="Cuenta auxiliar" autocomplete="off" aria-label="Cuenta de la diferencia"></td></tr>`;
       const ultimo = ss && !f.reasig && filas[i + 1]?.grupo !== f.grupo;
       if (ultimo) html += `<tr><td></td><td></td><td class="hint">Intereses de mora (si la PILA los trae)</td><td></td><td><input type="number" step="1" min="0" class="r mono w-val" data-mora="${esc(f.grupo)}" aria-label="Intereses de mora"></td><td></td><td class="mono hint">53052001</td></tr>`;
@@ -3045,7 +3062,7 @@ function vProveedores(m) {
   const pintar = () => {
     const l = proveedores().filter(t => !q || `${t.nombre} ${t.numero}`.toLowerCase().includes(q));
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Documento</th><th>Ciudad</th><th class="r">Por pagar</th><th></th></tr></thead><tbody>
-      ${l.map(t => `<tr><td>${esc(t.nombre)}</td><td class="mono">${esc(docId(t))}</td><td>${esc(t.ciudad)}</td><td class="r mono">${saldos[t.id] > 0.009 ? money(saldos[t.id]) : ''}</td>
+      ${l.map(t => `<tr><td>${esc(t.nombre)}${entidadesDe(t).map(k => ` <span class="tag">${esc(ENTIDADES_SS.find(x => x[0] === k)?.[1] || k)}</span>`).join('')}</td><td class="mono">${esc(docId(t))}</td><td>${esc(t.ciudad)}</td><td class="r mono">${saldos[t.id] > 0.009 ? money(saldos[t.id]) : ''}</td>
         <td class="r nowrap"><a class="btn ghost sm" href="#/compranueva?tipo=FC&tercero=${t.id}">Registrar factura</a><button class="ghost sm" data-ed="${t.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`
       : `<p class="muted">${q ? 'Ningún proveedor coincide.' : 'Todavía no hay proveedores. Un cliente también puede ser proveedor: edítalo y marca "Es proveedor".'}</p>`;
   };

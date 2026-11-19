@@ -1294,3 +1294,11 @@ alter table public.comprobantes drop constraint if exists comprobantes_tipo_chec
 alter table public.comprobantes add constraint comprobantes_tipo_check check (tipo in ('CC', 'SI', 'CI', 'PN'));
 
 notify pgrst, 'reload schema';
+
+/* ============ Entidades de seguridad social (también en 026_entidades_ss.sql) ============ */
+
+alter table public.terceros add column if not exists entidad_ss text[] not null default '{}';
+alter table public.terceros drop constraint if exists terceros_entidad_ss_check;
+alter table public.terceros add constraint terceros_entidad_ss_check check (entidad_ss <@ array['eps', 'pension', 'cesantias', 'caja', 'arl', 'parafiscales']::text[]);
+
+notify pgrst, 'reload schema';
