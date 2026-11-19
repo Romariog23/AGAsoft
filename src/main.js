@@ -1699,12 +1699,13 @@ const terceroEmpresa = () => { const nit = String(emp()?.nit || '').replace(/\D/
 // Entidades de seguridad social: un tercero puede ser varias (por ejemplo, un fondo de pensiones y cesantías).
 const ENTIDADES_SS = [['eps', 'EPS (salud)'], ['pension', 'Fondo de pensiones'], ['cesantias', 'Fondo de cesantías'], ['caja', 'Caja de compensación'], ['arl', 'ARL'], ['parafiscales', 'ICBF o SENA']];
 const entidadesDe = t => Array.isArray(t?.entidad_ss) ? t.entidad_ss : [];
-// Lista para escoger una entidad: las marcadas con ese tipo (y la que ya estaba escogida). Si no hay ninguna marcada, todos los terceros.
-const optsEntidad = (tipo, sel, excluir) => {
-  const marcadas = S.d.terceros.filter(t => t.id !== excluir && (tipo ? entidadesDe(t).includes(tipo) : entidadesDe(t).length));
-  if (!marcadas.length) return optsTerceros(sel, excluir);
-  const l = [...marcadas, ...S.d.terceros.filter(t => t.id === sel && !marcadas.includes(t))].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  return `<option value="">—</option>` + l.map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
+// Lista para escoger una entidad: solo los terceros marcados con ese tipo. Una escogida antes sin marcar se deja, avisando.
+const optsEntidad = (tipo, sel) => {
+  const marcadas = S.d.terceros.filter(t => entidadesDe(t).includes(tipo)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const vieja = sel && !marcadas.some(t => t.id === sel) ? terc(sel) : null;
+  const nom = ENTIDADES_SS.find(x => x[0] === tipo)?.[1] || tipo;
+  return `<option value="">${marcadas.length ? '—' : `No hay terceros marcados como ${esc(nom)}`}</option>` + (vieja ? `<option value="${vieja.id}" selected>${esc(vieja.nombre)} (falta marcarlo como ${esc(nom)})</option>` : '')
+    + marcadas.map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 };
 const optsTerceros = (sel, excluir) => `<option value="">—</option>` + [...S.d.terceros].filter(t => t.id !== excluir).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 
@@ -1739,9 +1740,9 @@ function formEmpleado(e) {
     <p>${check('auxilio', `Tiene derecho a auxilio de transporte (solo aplica si gana hasta 2 salarios mínimos: ${money(2 * P.smmlv)})`, e.auxilio !== false)}</p>
     <p>${check('pensionado', 'Es pensionado (no se le descuenta ni se le paga pensión ni fondo de solidaridad; la salud sí se liquida completa)', e.pensionado === true)}</p>
     <h3>Entidades</h3>
-    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsEntidad('eps', e.eps_id, e.tercero_id)}</select></div><div><label for="f_pen">Fondo de pensiones <span class="hint">(no aplica si es pensionado)</span></label><select id="f_pen" name="pension_id">${optsEntidad('pension', e.pension_id, e.tercero_id)}</select></div></div>
-    <div class="grid2"><div><label for="f_ces">Fondo de cesantías</label><select id="f_ces" name="cesantias_id">${optsEntidad('cesantias', e.cesantias_id, e.tercero_id)}</select></div><div><label for="f_caja">Caja de compensación</label><select id="f_caja" name="caja_id">${optsEntidad('caja', e.caja_id, e.tercero_id)}</select></div></div>
-    <p class="hint">Si una entidad no está en la lista, créala en Proveedores con su NIT y márcala como entidad de seguridad social (EPS, fondo, caja). La ARL, el ICBF y el SENA son de la empresa: van en Configuración de nómina.</p>
+    <div class="grid2"><div><label for="f_eps">EPS</label><select id="f_eps" name="eps_id">${optsEntidad('eps', e.eps_id)}</select></div><div><label for="f_pen">Fondo de pensiones <span class="hint">(no aplica si es pensionado)</span></label><select id="f_pen" name="pension_id">${optsEntidad('pension', e.pension_id)}</select></div></div>
+    <div class="grid2"><div><label for="f_ces">Fondo de cesantías</label><select id="f_ces" name="cesantias_id">${optsEntidad('cesantias', e.cesantias_id)}</select></div><div><label for="f_caja">Caja de compensación</label><select id="f_caja" name="caja_id">${optsEntidad('caja', e.caja_id)}</select></div></div>
+    <p class="hint">Solo salen los terceros marcados como esa entidad. Si falta una, créala o edítala en <a href="#/proveedores">Proveedores</a> y marca qué es (EPS, fondo de pensiones, cesantías, caja). La ARL, el ICBF y el SENA son de la empresa: van en Configuración de nómina.</p>
     <div class="grid2">${campo('banco', 'Banco', e.banco || '', 'maxlength="60"')}${campo('cuenta_bancaria', 'Cuenta bancaria', e.cuenta_bancaria || '', 'maxlength="40" class="mono"')}</div>
     ${e.id ? `<div class="grid2">${campo('fecha_retiro', 'Fecha de retiro', e.fecha_retiro || '', 'type="date"')}<div class="checkcell">${check('activo', 'Activo (se liquida en la nómina)', e.activo !== false)}</div></div>` : ''}
     ${pie()}`, async fd => {
@@ -2155,7 +2156,10 @@ function vNominaPago(m, { modo, tercero, concepto }) {
           const ent = entidadSugerida(x.tercero_id, c.cuenta);
           return { reasig: true, grupo: ent || 'sin|' + x.tercero_id + c.cuenta, tercero_id: x.tercero_id, tercero_pago: ent, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) && !!ent };
         }));
-      return { filas: buenas.concat(deEmpleado), malos: L.filter(x => !x.tercero_id && x.total > 0) };
+      // Todas las filas de una misma entidad juntas (las propias y las que vienen de empleados); las que no tienen entidad, al final.
+      const orden = [...new Set(buenas.concat(deEmpleado).filter(f => f.tercero_pago).map(f => f.grupo))];
+      const filas = orden.flatMap(g => buenas.concat(deEmpleado).filter(f => f.grupo === g)).concat(deEmpleado.filter(f => !f.tercero_pago));
+      return { filas, malos: L.filter(x => !x.tercero_id && x.total > 0) };
     }
     return { filas: pasivosNomina(ms, fecha, CUENTAS_PREST).filter(x => x.tercero_id).flatMap(x => x.cuentas.filter(c => c.saldo > 0 && (!st.concepto || c.cuenta.startsWith(st.concepto))).map(c => {
       const fondo = c.cuenta.startsWith('2510') ? empDe(x.tercero_id)?.cesantias_id : '';
@@ -2170,7 +2174,7 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     $('pOpc').innerHTML = `${pr ? `<div class="row filters"><div><label for="pCo">Qué prestación</label><select id="pCo"><option value="">Todas</option>${PRESTACIONES.map(([p, t]) => `<option value="${p}" ${p === st.concepto ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>` : ''}
       ${sal ? '' : `<label class="check"><input type="checkbox" id="pAj" ${st.ajustar !== false ? 'checked' : ''}> Ajustar la diferencia contra el gasto (el pasivo queda en cero)</label>
         <p class="hint">${ss ? 'Escribe lo que liquidó la PILA para cada cuenta de cada entidad. Si es distinto a lo causado, la diferencia va al gasto con que se causó el aporte, y los intereses de mora a 53052001, en este mismo comprobante.' : 'Si pagas menos de lo provisionado (por ejemplo, unos días de vacaciones), quita el ajuste para que el resto siga pendiente. Las cesantías se consignan al fondo de cada empleado.'}</p>`}
-      ${filas.some(f => f.reasig) ? '<p class="hint"><b>Aportes a nombre de empleados:</b> quedaron así porque la nómina se contabilizó antes de asignarle las entidades. Escoge en cada uno la entidad a la que se paga: el pago cancela el pasivo del empleado y el banco sale a nombre de la entidad. Para las próximas nóminas, asigna las entidades en <a href="#/empleados">Empleados</a>.</p>' : ''}
+      ${filas.some(f => f.reasig) ? '<p class="hint"><b>Aportes a nombre de empleados:</b> quedaron así porque la nómina se contabilizó antes de asignarle las entidades. Se pagan a la entidad que tiene asignada el empleado en su ficha: el pago cancela el pasivo del empleado y el banco sale a nombre de la entidad.</p>' : ''}
       ${r.malos.length ? `<p class="err">Hay aportes sin tercero: ${money(r.malos.reduce((a, x) => a + x.total, 0))}. Asigna la EPS, el fondo y la caja en <a href="#/empleados">Empleados</a> y la ARL y los parafiscales en <a href="#/nominacfg">Configuración de nómina</a>. Los saldos viejos pásalos a la entidad con una <a href="#/compnuevo?tipo=CC">nota de contabilidad</a>.</p>` : ''}`;
     if (!filas.length) { $('pTab').innerHTML = `<p class="muted">No hay ${sal ? 'salarios' : ss ? 'aportes de seguridad social' : 'prestaciones'} por pagar a ${fFecha($('pFe').value)}.</p>`; calc(); enlazar(); return; }
     const cab = sal ? '<th>Empleado</th><th>Banco y cuenta</th><th class="r">Por pagar</th><th class="r">Valor a pagar</th>'
@@ -2179,24 +2183,23 @@ function vNominaPago(m, { modo, tercero, concepto }) {
     const filasHtml = filas.map((f, i) => {
       const e = empDe(f.tercero_id), nuevo = f.grupo !== prev; prev = f.grupo;
       const quien = `<b>${esc(nomT(f.tercero_id))}</b>`;
-      const chk = `<input type="checkbox" data-on="${i}" ${f.on ? 'checked' : ''} aria-label="Pagar">`;
+      const chk = `<input type="checkbox" data-on="${i}" ${f.on ? 'checked' : ''} ${f.reasig && !f.tercero_pago ? 'disabled' : ''} aria-label="Pagar">`;
       const val = `<input type="number" step="1" min="0" class="r mono w-val" data-v="${i}" value="${f.pagar}" aria-label="${CONTRA_PAGO[modoPago]}">`;
       let html = sal ? `<tr><td>${chk}</td><td>${quien}</td><td class="hint">${esc([e?.banco, e?.cuenta_bancaria].filter(Boolean).join(' · ') || 'Sin cuenta bancaria')}</td><td class="r mono">${money(f.saldo)}</td><td>${val}</td></tr>`
-        : `<tr><td>${chk}</td><td>${f.reasig ? `${quien}<br><select data-ent="${i}" aria-label="Entidad a la que se paga" style="max-width:220px">${optsEntidad(tipoEntidadCuenta(f.cuenta), f.tercero_pago, f.tercero_id)}</select>` : ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
+        : `<tr><td>${chk}</td><td>${f.reasig && f.tercero_pago ? (nuevo ? `<b>${esc(nomT(f.tercero_pago))}</b>` : '') : f.reasig ? `${quien}<br>${f.tercero_pago ? '' : `<span class="err">Sin ${esc(ENTIDADES_SS.find(x => x[0] === tipoEntidadCuenta(f.cuenta))?.[1] || 'entidad')}: ${f.cuenta === '23700601' ? '<a href="#/nominacfg">asígnala en Configuración de nómina</a>' : `<a href="#/empleados">asígnala en la ficha del empleado</a>`}</span>`}` : ss && !nuevo ? '' : quien}</td><td>${ss ? `<span class="mono">${f.cuenta}</span> <span class="hint">${esc(nomCta(f.cuenta))}</span>${f.reasig && f.tercero_pago ? `<br><span class="hint">A nombre de ${esc(nomT(f.tercero_id))}</span>` : ''}` : esc(conPre(f.cuenta))}</td>${pr ? `<td class="hint">${f.tercero_pago !== f.tercero_id ? esc(nomT(f.tercero_pago)) : 'El empleado'}</td>` : ''}
           <td class="r mono">${money(f.saldo)}</td><td>${val}</td><td class="r mono" data-dif="${i}"></td><td><input class="mono" list="ctasPN" data-c="${i}" value="${esc(f.contra || '')}" placeholder="Cuenta auxiliar" autocomplete="off" aria-label="Cuenta de la diferencia"></td></tr>`;
-      const ultimo = ss && !f.reasig && filas[i + 1]?.grupo !== f.grupo;
+      const ultimo = ss && !!f.tercero_pago && filas[i + 1]?.grupo !== f.grupo;
       if (ultimo) html += `<tr><td></td><td></td><td class="hint">Intereses de mora (si la PILA los trae)</td><td></td><td><input type="number" step="1" min="0" class="r mono w-val" data-mora="${esc(f.grupo)}" aria-label="Intereses de mora"></td><td></td><td class="mono hint">53052001</td></tr>`;
       return html;
     }).join('');
     $('pTab').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="pTodos" checked aria-label="Todos"></th>${cab}</tr></thead><tbody>${filasHtml}</tbody></table></div>`;
-    $('pTodos').checked = filas.every(f => f.on);
+    $('pTodos').checked = filas.filter(f => !(f.reasig && !f.tercero_pago)).every(f => f.on);
     enlazar(); calc();
   };
   const leer = () => {
     m.querySelectorAll('[data-on]').forEach(x => filas[x.dataset.on].on = x.checked);
     m.querySelectorAll('[data-v]').forEach(x => filas[x.dataset.v].pagar = num(x.value));
     m.querySelectorAll('[data-c]').forEach(x => filas[x.dataset.c].contra = x.value.trim());
-    m.querySelectorAll('[data-ent]').forEach(x => { const f = filas[x.dataset.ent]; f.tercero_pago = x.value; f.grupo = x.value || 'sin|' + f.tercero_id + f.cuenta; });
     const ajustar = modoPago !== 'salarios' && !!$('pAj')?.checked, mora = {};
     m.querySelectorAll('[data-mora]').forEach(x => mora[x.dataset.mora] = num(x.value));
     const grupos = [];
@@ -2224,7 +2227,7 @@ function vNominaPago(m, { modo, tercero, concepto }) {
   const enlazar = () => {
     if ($('pCo')) $('pCo').onchange = () => { st.concepto = $('pCo').value; pintar(); };
     if ($('pAj')) $('pAj').onchange = () => { st.ajustar = $('pAj').checked; calc(); };
-    if ($('pTodos')) $('pTodos').onchange = () => { m.querySelectorAll('[data-on]').forEach(x => x.checked = $('pTodos').checked); calc(); };
+    if ($('pTodos')) $('pTodos').onchange = () => { m.querySelectorAll('[data-on]:not(:disabled)').forEach(x => x.checked = $('pTodos').checked); calc(); };
   };
   $('pTab').addEventListener('input', calc); $('pTab').addEventListener('change', calc);
   $('pBa').onchange = calc;
