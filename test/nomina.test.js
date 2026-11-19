@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { liquidar, paramNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, pctSolidaridad, totalesNomina, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, cuentaContraSugerida, lineasAjuste } from '../src/nomina.js';
+import { liquidar, paramNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, pctSolidaridad, totalesNomina, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, cuentaContraSugerida, lineasAjuste, lineasPagoNomina } from '../src/nomina.js';
 import { asientoCompra } from '../src/compras.js';
 import { planInicial } from '../src/puc.js';
 
@@ -116,4 +116,29 @@ test('nómina: ajuste de la PILA a su valor real, con intereses de mora', () => 
   assert.deepEqual(menos.map(l => [l.cuenta, l.debito, l.credito]), [['23700501', 100, 0], ['51056901', 0, 100]]);
   assert.throws(() => lineasAjuste({ filas: [{ cuenta: '23700501', saldo: 1, real: 2, contra: '' }] }));
   assert.equal(lineasAjuste({ filas: [{ cuenta: '23700501', saldo: 5, real: 5 }] }).length, 0);
+});
+
+test('pago de nómina: salarios por empleado, abono parcial sin ajustar', () => {
+  const ls = lineasPagoNomina({ banco: '11100501', detalle: 'Pago de salarios', grupos: [
+    { tercero_pago: 't1', nombre: 'Ana', filas: [{ cuenta: '25050501', tercero_id: 't1', saldo: 2760000, pagar: 2760000 }] },
+    { tercero_pago: 't2', nombre: 'Luis', filas: [{ cuenta: '25050501', tercero_id: 't2', saldo: 1500000, pagar: 1000000 }] }] });
+  assert.deepEqual(ls.map(l => [l.cuenta, l.tercero_id, l.debito, l.credito]), [
+    ['25050501', 't1', 2760000, 0], ['11100501', 't1', 0, 2760000], ['25050501', 't2', 1000000, 0], ['11100501', 't2', 0, 1000000]]);
+  assert.throws(() => lineasPagoNomina({ banco: '11100501', grupos: [{ tercero_pago: 't1', filas: [{ cuenta: '25050501', tercero_id: 't1', saldo: 100, pagar: 200 }] }] }), /más de lo que se debe/);
+});
+
+test('pago de nómina: PILA por entidad con diferencia y mora en el mismo comprobante', () => {
+  const ls = lineasPagoNomina({ banco: '11100501', ajustar: true, grupos: [
+    { tercero_pago: 'afp', nombre: 'Fondo', mora: 5000, filas: [{ cuenta: '23803001', tercero_id: 'afp', saldo: 480000, pagar: 480100, contra: '51057001' }] },
+    { tercero_pago: 'eps', nombre: 'EPS', filas: [{ cuenta: '23700501', tercero_id: 'eps', saldo: 120000, pagar: 119900, contra: '51056901' }] }] });
+  assert.deepEqual(ls.map(l => [l.cuenta, l.tercero_id, l.debito, l.credito]), [
+    ['23803001', 'afp', 480000, 0], ['51057001', 'afp', 100, 0], ['53052001', 'afp', 5000, 0], ['11100501', 'afp', 0, 485100],
+    ['23700501', 'eps', 120000, 0], ['51056901', 'eps', 0, 100], ['11100501', 'eps', 0, 119900]]);
+  assert.throws(() => lineasPagoNomina({ banco: '11100501', ajustar: true, grupos: [{ tercero_pago: 'x', filas: [{ cuenta: '23700501', tercero_id: 'x', saldo: 10, pagar: 20 }] }] }), /cuenta para la diferencia/);
+});
+
+test('pago de nómina: cesantías al fondo con el pasivo a nombre del empleado', () => {
+  const ls = lineasPagoNomina({ banco: '11100501', ajustar: true, grupos: [
+    { tercero_pago: 'fondo', nombre: 'Ana', filas: [{ cuenta: '25100501', tercero_id: 't1', saldo: 250000, pagar: 250000 }] }] });
+  assert.deepEqual(ls.map(l => [l.cuenta, l.tercero_id, l.debito, l.credito]), [['25100501', 't1', 250000, 0], ['11100501', 'fondo', 0, 250000]]);
 });
