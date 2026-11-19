@@ -65,14 +65,14 @@ test('cuentas propias del producto en nota débito y nota crédito', () => {
 test('comprobantes manuales: asiento, validación e informes', () => {
   const plan = planInicial();
   const si = { id: 'c1', tipo: 'SI', numero: 1, fecha: '2026-01-01', descripcion: 'Saldos iniciales', estado: 'contabilizado',
-    lineas: [{ cuenta: '11100501', debito: 15000000, credito: 0 }, { cuenta: '31050501', debito: 0, credito: 15000000, tercero_id: 't1' }] };
+    lineas: [{ cuenta: '11100501', debito: 15000000, credito: 0, tercero_id: 't1' }, { cuenta: '31050501', debito: 0, credito: 15000000, tercero_id: 't1' }] };
   const a = asientoComprobante(si);
   assert.ok(cuadra(a)); assert.equal(a.length, 2); assert.equal(a[0].ref, 'SI 1'); assert.equal(a[1].tercero_id, 't1');
   assert.deepEqual(erroresComprobante(si, plan), []);
   assert.equal(asientoComprobante({ ...si, estado: 'anulado' }).length, 0);
   const malo = { ...si, lineas: [{ cuenta: '111005', debito: 10, credito: 0 }, { cuenta: '99999901', debito: 0, credito: 5 }, { cuenta: '31050501', debito: 1, credito: 1 }] };
   const e = erroresComprobante(malo, plan).join(' | ');
-  assert.match(e, /no es auxiliar/); assert.match(e, /no existe/); assert.match(e, /no los dos/); assert.match(e, /No cuadra/);
+  assert.match(e, /no es auxiliar/); assert.match(e, /no existe/); assert.match(e, /Línea 1: falta el tercero/); assert.match(e, /no los dos/); assert.match(e, /No cuadra/);
   const ms = movimientos({ ...S, comprobantes: [si, { ...si, id: 'c2', numero: 2, estado: 'anulado' }] });
   assert.equal(ms.filter(m => m.origen === 'comp').length, 2);
   const b = balancePrueba(ms, plan, '2026-01-01', '2026-12-31');
@@ -178,7 +178,9 @@ test('IVA con cuenta propia por tarifa', () => {
 test('cierre contable del año', async () => {
   const { cierreAnual } = await import('../src/contab.js');
   const ms = movimientos({ ...S, docs: S.documentos });
-  const r = cierreAnual(ms, '2026', '36050501', '36100501');
+  const r = cierreAnual(ms, '2026', '36050501', '36100501', 'tEmp');
+  assert.ok(r.lineas.every(l => l.tercero_id), 'todas las líneas del cierre llevan tercero');
+  assert.equal(r.lineas.at(-1).tercero_id, 'tEmp');
   const d = r.lineas.reduce((s, l) => s + l.debito, 0), c = r.lineas.reduce((s, l) => s + l.credito, 0);
   assert.ok(Math.abs(d - c) < 0.001); assert.ok(r.resultado > 0);
   assert.equal(r.lineas.at(-1).cuenta, '36050501'); assert.equal(r.lineas.at(-1).credito, r.resultado);

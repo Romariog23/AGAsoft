@@ -98,7 +98,8 @@ const TIPOS_COMP = { CC: { nombre: 'Nota de contabilidad', corto: 'Nota cont.', 
 
 // Cierre del año: cancela los saldos de ingresos, gastos y costos (clases 4, 5, 6 y 7) de cada cuenta y tercero,
 // y lleva la diferencia a la utilidad (crédito) o a la pérdida del ejercicio (débito). Un cierre anterior del mismo año no cuenta.
-function cierreAnual(movs, anio, ctaUtilidad, ctaPerdida) {
+// terceroDefecto: tercero para las líneas que no lo traen (resultado del ejercicio y movimientos viejos sin tercero).
+function cierreAnual(movs, anio, ctaUtilidad, ctaPerdida, terceroDefecto = '') {
   const ini = `${anio}-01-01`, fin = `${anio}-12-31`, saldos = {};
   for (const m of movs) {
     if (m.tipo === 'CI' || m.fecha < ini || m.fecha > fin || !/^[4-7]/.test(m.cuenta)) continue;
@@ -107,12 +108,12 @@ function cierreAnual(movs, anio, ctaUtilidad, ctaPerdida) {
   }
   const lineas = Object.entries(saldos).filter(([, v]) => v).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => {
     const [cuenta, tercero_id] = k.split('|');
-    return { cuenta, tercero_id, detalle: `Cierre ${anio}`, debito: v < 0 ? -v : 0, credito: v > 0 ? v : 0 };
+    return { cuenta, tercero_id: tercero_id || terceroDefecto, detalle: `Cierre ${anio}`, debito: v < 0 ? -v : 0, credito: v > 0 ? v : 0 };
   });
   const resultado = r2(-Object.values(saldos).reduce((a, v) => a + v, 0)); // positivo = utilidad
   const ingresos = r2(-Object.entries(saldos).filter(([k]) => k.startsWith('4')).reduce((a, [, v]) => a + v, 0));
-  if (resultado > 0) lineas.push({ cuenta: ctaUtilidad, tercero_id: '', detalle: `Utilidad del ejercicio ${anio}`, debito: 0, credito: resultado });
-  else if (resultado < 0) lineas.push({ cuenta: ctaPerdida, tercero_id: '', detalle: `Pérdida del ejercicio ${anio}`, debito: -resultado, credito: 0 });
+  if (resultado > 0) lineas.push({ cuenta: ctaUtilidad, tercero_id: terceroDefecto, detalle: `Utilidad del ejercicio ${anio}`, debito: 0, credito: resultado });
+  else if (resultado < 0) lineas.push({ cuenta: ctaPerdida, tercero_id: terceroDefecto, detalle: `Pérdida del ejercicio ${anio}`, debito: -resultado, credito: 0 });
   return { lineas, resultado, ingresos, gastos: r2(ingresos - resultado), fecha: fin };
 }
 function asientoComprobante(c) {
@@ -132,6 +133,7 @@ function erroresComprobante(c, cuentas) {
     if (!cta) out.push(`${n}: falta la cuenta.`);
     else if (!esAuxiliar(cta)) out.push(`${n}: la cuenta ${cta} no es auxiliar; solo se registran movimientos en cuentas de 8 dígitos.`);
     else if (!idx[cta]) out.push(`${n}: la cuenta ${cta} no existe en el plan de cuentas.`);
+    if (!String(l.tercero_id || '').trim()) out.push(`${n}: falta el tercero (puede ser cualquiera, pero todas las líneas lo llevan).`);
     const d = num(l.debito), k = num(l.credito);
     if (d < 0 || k < 0) out.push(`${n}: los valores no pueden ser negativos.`);
     else if (d && k) out.push(`${n}: lleva débito o crédito, no los dos.`);
