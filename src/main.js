@@ -530,23 +530,90 @@ function vInicio(m) {
   if (!d.productos.length) faltan.push(['productos', 'Crea tus productos o servicios.']);
   if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Habilita tu facturación electrónica ante la DIAN (set de pruebas).']);
   const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 8);
+  const on = new Set(cfgInicio()), W = k => on.has(k);
+  const medios = WIDGETS.filter(([k]) => W(k) && WIDGET_HTML[k]).map(([k]) => WIDGET_HTML[k]({ R, edades, em, cart }));
   m.innerHTML = `<header class="vhead"><div><h2>${esc(e.nombre)}</h2><p class="sub mono">NIT ${fmtNit(e.nit)}-${e.dv}</p></div>
-    <div class="row"><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
+    <div class="row"><button id="iniCfg" title="Escoger qué se ve en el Inicio">Personalizar</button><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
   ${faltan.length ? `<section class="panel stack callout"><h3>Para empezar a facturar</h3><ol class="steps-list">${faltan.map(([k, t]) => `<li><a href="#/${k}">${t}</a></li>`).join('')}</ol></section>` : ''}
-  <section class="kpis">
+  ${W('kpis') ? `<section class="kpis">
     <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b>${varPct !== null ? `<small class="${varPct >= 0 ? 'k-up' : 'k-down'}">${varPct >= 0 ? '▲' : '▼'} ${Math.abs(varPct)} % vs. ${MESES_NOM[+mesAnt.slice(5) - 1]}</small>` : ''}</div>
     <div class="kpi"><span>Recaudo del mes</span><b class="mono">${money(recaudo)}</b></div>
     <div class="kpi"><span>Cartera por cobrar</span><b class="mono">${money(porCobrar)}</b></div>
     <div class="kpi ${vencido > 0 ? 'warn' : ''}"><span>Cartera vencida</span><b class="mono">${money(vencido)}</b></div>
     <div class="kpi ${R.utilidad < 0 ? 'warn' : ''}"><span>${R.utilidad < 0 ? 'Pérdida' : 'Utilidad'} del año</span><b class="mono">${money(Math.abs(R.utilidad))}</b><small class="muted">Ene–${MESES_NOM[+mes.slice(5) - 1].slice(0, 3)} ${mes.slice(0, 4)}</small></div>
-  </section>
-  <div class="ini-grid">
-    <section class="panel stack"><div class="ini-h"><h3>Ingresos y gastos por mes</h3><span class="muted">Últimos 12 meses, según la contabilidad</span></div>
-      ${graficaMeses(R)}</section>
-    <section class="panel stack"><h3>Cartera por edades</h3>${barraEdades(edades)}</section>
-  </div>
-  <section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>`;
+  </section>` : ''}
+  ${medios.length ? `<div class="ini-widgets">${medios.join('')}</div>` : ''}
+  ${W('ultimos') ? `<section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>` : ''}
+  ${!on.size ? '<p class="muted">No escogiste nada para el Inicio. Usa <b>Personalizar</b> para mostrar tus indicadores.</p>' : ''}`;
+  $('iniCfg').onclick = () => dialogo(`<h2>Personalizar el Inicio</h2><p class="hint">Escoge lo que quieres ver. Queda guardado para esta empresa en este equipo.</p>
+    <div class="w-opc">${WIDGETS.map(([k, t, , desc]) => `<label class="check"><input type="checkbox" name="w" value="${k}" ${on.has(k) ? 'checked' : ''}> <span><b>${t}</b><br><span class="hint">${desc}</span></span></label>`).join('')}</div>
+    <p><button type="button" class="sm ghost" id="wDef">Volver a lo de fábrica</button></p>${pie()}`, fd => { guardarInicio(fd.getAll('w')); vInicio(m); });
+  $('wDef').onclick = () => $('dlgForm').querySelectorAll('[name=w]').forEach(c => c.checked = WIDGETS.find(w => w[0] === c.value)[2]);
 }
+
+/* ---------- Widgets del Inicio ---------- */
+// [clave, nombre, visible de fábrica, descripción]. Lo que cada quien escoge se guarda en este equipo, por empresa.
+const WIDGETS = [
+  ['kpis', 'Indicadores del mes', true, 'Ventas, recaudo, cartera y utilidad del año.'],
+  ['grafica', 'Ingresos y gastos por mes', true, 'Gráfica de los últimos 12 meses.'],
+  ['edades', 'Cartera por edades', true, 'Lo que te deben, por días de vencida.'],
+  ['bancos', 'Caja y bancos', false, 'Saldo de cada cuenta de caja y bancos a hoy.'],
+  ['vencer', 'Facturas por vencer', false, 'Las que vencen en los próximos 15 días.'],
+  ['clientes', 'Mejores clientes del año', false, 'Los 5 clientes con más ventas.'],
+  ['productos', 'Productos más vendidos', false, 'Los 5 productos o servicios con más ventas en el año.'],
+  ['pagar', 'Cuentas por pagar', false, 'Lo que les debes a tus proveedores.'],
+  ['impuestos', 'Impuestos por pagar', false, 'IVA, retenciones e ICA según la contabilidad.'],
+  ['nomina', 'Nómina', false, 'Última nómina, seguridad social y prestaciones por pagar.'],
+  ['ultimos', 'Últimos documentos', true, 'Los 8 documentos más recientes.'],
+];
+const cfgInicio = () => { try { const v = JSON.parse(localStorage.getItem('agasoft-inicio-' + S.eid) || 'null'); if (Array.isArray(v)) return v; } catch (_) { /* sin almacenamiento */ } return WIDGETS.filter(w => w[2]).map(w => w[0]); };
+const guardarInicio = l => { try { localStorage.setItem('agasoft-inicio-' + S.eid, JSON.stringify(l)); } catch (_) { /* sin almacenamiento */ } };
+// Saldo a hoy por cuenta (o por tercero) de las cuentas que cumplen re; signo: 1 = débito − crédito, −1 = crédito − débito.
+function saldosA(re, signo, porTercero) {
+  const h = hoy(), s = {};
+  for (const x of movs()) if (re.test(x.cuenta) && x.fecha <= h) { const k = porTercero ? x.tercero_id || '' : x.cuenta; s[k] = r2((s[k] || 0) + signo * (x.debito - x.credito)); }
+  return Object.entries(s).filter(([, v]) => Math.abs(v) > 0.009).sort((a, b) => b[1] - a[1]);
+}
+const wPanel = (titulo, cuerpo, link, ancho) => `<section class="panel stack${ancho ? ' w-ancho' : ''}"><div class="ini-h"><h3>${titulo}</h3>${link ? `<a class="hint" href="${link[0]}">${link[1]}</a>` : ''}</div>${cuerpo}</section>`;
+// Lista con barra proporcional: filas [nombre, valor, detalle?].
+function wLista(filas, vacio, total) {
+  if (!filas.length) return `<p class="muted">${vacio}</p>`;
+  const max = Math.max(...filas.map(f => Math.abs(f[1])), 1);
+  return `<div class="w-list">${filas.map(([n, v, det]) => `<div class="w-row"><span class="w-n">${esc(n)}${det ? `<small class="hint"> · ${esc(det)}</small>` : ''}</span><b class="mono">${money(v)}</b><i class="w-bar" style="width:${Math.max(2, Math.abs(v) / max * 100)}%"></i></div>`).join('')}
+    ${total !== undefined ? `<div class="w-row w-tot"><span>Total</span><b class="mono">${money(total)}</b></div>` : ''}</div>`;
+}
+const WIDGET_HTML = {
+  grafica: ({ R }) => wPanel('Ingresos y gastos por mes', graficaMeses(R), null, true).replace('<h3>Ingresos y gastos por mes</h3>', '<h3>Ingresos y gastos por mes</h3><span class="muted">Últimos 12 meses, según la contabilidad</span>'),
+  edades: ({ edades }) => wPanel('Cartera por edades', barraEdades(edades)),
+  bancos: () => { const l = saldosA(/^11/, 1); return wPanel('Caja y bancos', wLista(l.map(([c, v]) => [nomCta(c), v, c]), 'Sin saldos en caja ni bancos.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/balance', 'Ver balance']); },
+  vencer: ({ cart }) => {
+    const h = hoy(), lim = new Date(Date.parse(h + 'T12:00:00Z') + 15 * 864e5).toISOString().slice(0, 10);
+    const l = cart.filter(c => !c.diasVencida && c.factura.vence && c.factura.vence >= h && c.factura.vence <= lim).sort((a, b) => a.factura.vence.localeCompare(b.factura.vence)).slice(0, 8);
+    return wPanel('Facturas por vencer', l.length ? `<div class="w-list">${l.map(c => `<div class="w-row"><span class="w-n"><a class="mono" href="#/doc/${c.factura.id}">${esc(numDoc(c.factura))}</a> ${esc(terc(c.factura.tercero_id)?.nombre || '')}<small class="hint"> · vence ${fFecha(c.factura.vence)}</small></span><b class="mono">${money(c.saldo)}</b></div>`).join('')}</div>` : '<p class="muted">Ninguna factura vence en los próximos 15 días.</p>', ['#/cartera', 'Ver cartera']);
+  },
+  clientes: ({ em }) => {
+    const y = hoy().slice(0, 4), t = {};
+    for (const x of em) if (x.fecha.startsWith(y) && ['FV', 'NC', 'ND'].includes(x.tipo)) t[x.tercero_id] = r2((t[x.tercero_id] || 0) + (x.tipo === 'NC' ? -1 : 1) * num(x.base));
+    const l = Object.entries(t).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return wPanel(`Mejores clientes ${y}`, wLista(l.map(([id, v]) => [terc(id)?.nombre || '', v]), 'Todavía no hay ventas este año.'), ['#/FV', 'Ver facturas']);
+  },
+  productos: ({ em }) => {
+    const y = hoy().slice(0, 4), fv = new Set(em.filter(x => x.tipo === 'FV' && x.fecha.startsWith(y)).map(x => x.id)), t = {};
+    for (const it of S.d.items || []) if (fv.has(it.documento_id)) { const k = it.codigo || it.descripcion || 'Sin código', x = t[k] = t[k] || { n: it.descripcion || k, v: 0, q: 0 }; x.v = r2(x.v + linea(it).base); x.q += num(it.cantidad); }
+    const l = Object.values(t).sort((a, b) => b.v - a.v).slice(0, 5);
+    return wPanel(`Productos más vendidos ${y}`, wLista(l.map(x => [x.n, x.v, `${x.q} und.`]), 'Todavía no hay ventas este año.'), ['#/productos', 'Ver productos']);
+  },
+  pagar: () => { const l = saldosA(/^(22|2335)/, -1, true).filter(([, v]) => v > 0); return wPanel('Cuentas por pagar', wLista(l.slice(0, 6).map(([id, v]) => [terc(id)?.nombre || '(sin tercero)', v]), 'No les debes a proveedores.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/cxp', 'Ver cuentas por pagar']); },
+  impuestos: () => { const l = saldosA(/^(2365|2367|2368|2408|2412)/, -1); return wPanel('Impuestos por pagar', wLista(l.map(([c, v]) => [nomCta(c), v, c]), 'No hay impuestos por pagar en la contabilidad.', r2(l.reduce((s, x) => s + x[1], 0))), ['#/balance', 'Ver balance']); },
+  nomina: () => {
+    const n = [...nominas()].filter(x => x.estado === 'contabilizado').sort((a, b) => b.hasta.localeCompare(a.hasta))[0], ms = movs(), h = hoy();
+    const tot = re => r2(pasivosNomina(ms, h, re).reduce((s, x) => s + x.total, 0));
+    if (!n && !empleados().length) return wPanel('Nómina', '<p class="muted">Todavía no hay empleados. <a href="#/empleados">Créalos</a> para liquidar la nómina.</p>');
+    return wPanel('Nómina', `<div class="w-list">${n ? `<div class="w-row"><span class="w-n">Última nómina: <a href="#/nominadoc/${n.id}">NE ${n.numero}</a><small class="hint"> · ${esc(nomPeriodo(n))}</small></span><b class="mono">${money(n.neto)}</b></div>` : ''}
+      <div class="w-row"><span class="w-n">Seguridad social y parafiscales por pagar</span><b class="mono">${money(tot(CUENTAS_SS))}</b></div>
+      <div class="w-row"><span class="w-n">Prestaciones sociales por pagar</span><b class="mono">${money(tot(CUENTAS_PREST))}</b></div></div>`, ['#/nominapasivos', 'Ver detalle']);
+  },
+};
 
 /* ---------- Gráficas del Inicio ---------- */
 const cifraCorta = v => { const a = Math.abs(v); return a >= 1e9 ? `${r2(v / 1e9)} mil M` : a >= 1e6 ? `${Math.round(v / 1e5) / 10} M` : a >= 1e3 ? `${Math.round(v / 1e3)} mil` : String(Math.round(v)); };
