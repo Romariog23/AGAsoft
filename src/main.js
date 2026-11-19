@@ -545,10 +545,11 @@ function vInicio(m) {
   ${medios.length ? `<div class="ini-widgets">${medios.join('')}</div>` : ''}
   ${W('ultimos') ? `<section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>` : ''}
   ${!on.size ? '<p class="muted">No escogiste nada para el Inicio. Usa <b>Personalizar</b> para mostrar tus indicadores.</p>' : ''}`;
-  $('iniCfg').onclick = () => dialogo(`<h2>Personalizar el Inicio</h2><p class="hint">Escoge lo que quieres ver. Queda guardado para esta empresa en este equipo.</p>
+  $('iniCfg').onclick = () => { dialogo(`<h2>Personalizar el Inicio</h2><p class="hint">Escoge lo que quieres ver. Queda guardado para esta empresa en este equipo.</p>
     <div class="w-opc">${WIDGETS.map(([k, t, , desc]) => `<label class="check"><input type="checkbox" name="w" value="${k}" ${on.has(k) ? 'checked' : ''}> <span><b>${t}</b><br><span class="hint">${desc}</span></span></label>`).join('')}</div>
     <p><button type="button" class="sm ghost" id="wDef">Volver a lo de fábrica</button></p>${pie()}`, fd => { guardarInicio(fd.getAll('w')); vInicio(m); });
-  $('wDef').onclick = () => $('dlgForm').querySelectorAll('[name=w]').forEach(c => c.checked = WIDGETS.find(w => w[0] === c.value)[2]);
+    $('wDef').onclick = () => $('dlgForm').querySelectorAll('[name=w]').forEach(c => c.checked = WIDGETS.find(w => w[0] === c.value)[2]);
+  };
 }
 
 /* ---------- Widgets del Inicio ---------- */
