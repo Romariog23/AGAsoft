@@ -12,7 +12,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
+import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
@@ -490,8 +490,11 @@ function vEmpresa(m) {
 function vInicio(m) {
   const e = emp(), d = S.d, mes = hoy().slice(0, 7);
   const em = d.documentos.filter(x => x.estado === 'emitido');
-  const delMes = t => em.filter(x => x.tipo === t && x.fecha.startsWith(mes));
-  const ventas = r2(delMes('FV').reduce((s, x) => s + num(x.base), 0) - delMes('NC').reduce((s, x) => s + num(x.base), 0) + delMes('ND').reduce((s, x) => s + num(x.base), 0));
+  const delMes = (t, k = mes) => em.filter(x => x.tipo === t && x.fecha.startsWith(k));
+  const ventasDe = k => r2(delMes('FV', k).reduce((s, x) => s + num(x.base), 0) - delMes('NC', k).reduce((s, x) => s + num(x.base), 0) + delMes('ND', k).reduce((s, x) => s + num(x.base), 0));
+  const ventas = ventasDe(mes), mesAnt = new Date(Date.UTC(+mes.slice(0, 4), +mes.slice(5, 7) - 2, 1)).toISOString().slice(0, 7), ventasAnt = ventasDe(mesAnt);
+  const varPct = ventasAnt > 0 ? Math.round((ventas - ventasAnt) / ventasAnt * 100) : null;
+  const R = resumenMensual(movs(), hoy(), 12), edades = carteraEdades(cartera(d.documentos, d.aplicaciones));
   const cart = cartera(d.documentos, d.aplicaciones).filter(c => c.saldo > 0.009);
   const porCobrar = r2(cart.reduce((s, c) => s + c.saldo, 0)), vencido = r2(cart.filter(c => c.diasVencida > 0).reduce((s, c) => s + c.saldo, 0));
   const recaudo = r2(delMes('RC').reduce((s, x) => s + num(x.total), 0));
@@ -504,12 +507,44 @@ function vInicio(m) {
     <div class="row"><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
   ${faltan.length ? `<section class="panel stack callout"><h3>Para empezar a facturar</h3><ol class="steps-list">${faltan.map(([k, t]) => `<li><a href="#/${k}">${t}</a></li>`).join('')}</ol></section>` : ''}
   <section class="kpis">
-    <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b></div>
+    <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b>${varPct !== null ? `<small class="${varPct >= 0 ? 'k-up' : 'k-down'}">${varPct >= 0 ? '▲' : '▼'} ${Math.abs(varPct)} % vs. ${MESES_NOM[+mesAnt.slice(5) - 1]}</small>` : ''}</div>
     <div class="kpi"><span>Recaudo del mes</span><b class="mono">${money(recaudo)}</b></div>
     <div class="kpi"><span>Cartera por cobrar</span><b class="mono">${money(porCobrar)}</b></div>
     <div class="kpi ${vencido > 0 ? 'warn' : ''}"><span>Cartera vencida</span><b class="mono">${money(vencido)}</b></div>
+    <div class="kpi ${R.utilidad < 0 ? 'warn' : ''}"><span>${R.utilidad < 0 ? 'Pérdida' : 'Utilidad'} del año</span><b class="mono">${money(Math.abs(R.utilidad))}</b><small class="muted">Ene–${MESES_NOM[+mes.slice(5) - 1].slice(0, 3)} ${mes.slice(0, 4)}</small></div>
   </section>
+  <div class="ini-grid">
+    <section class="panel stack"><div class="ini-h"><h3>Ingresos y gastos por mes</h3><span class="muted">Últimos 12 meses, según la contabilidad</span></div>
+      ${graficaMeses(R)}</section>
+    <section class="panel stack"><h3>Cartera por edades</h3>${barraEdades(edades)}</section>
+  </div>
   <section class="panel stack"><h3>Últimos documentos</h3>${tablaDocs(ult, true) || '<p class="muted">Todavía no hay documentos.</p>'}</section>`;
+}
+
+/* ---------- Gráficas del Inicio ---------- */
+const cifraCorta = v => { const a = Math.abs(v); return a >= 1e9 ? `${r2(v / 1e9)} mil M` : a >= 1e6 ? `${Math.round(v / 1e5) / 10} M` : a >= 1e3 ? `${Math.round(v / 1e3)} mil` : String(Math.round(v)); };
+function graficaMeses(R) {
+  if (!R.ingresos.some(Boolean) && !R.gastos.some(Boolean)) return '<p class="muted">Cuando registres facturas, compras o comprobantes, aquí verás tus ingresos y gastos de cada mes.</p>';
+  const W = 760, H = 260, L = 56, B = 26, T = 10, max = Math.max(1, ...R.ingresos, ...R.gastos);
+  const paso = (() => { const e = 10 ** Math.floor(Math.log10(max / 3)); return [1, 2, 2.5, 5, 10].map(k => k * e).find(k => max / k <= 4); })();
+  const tope = Math.ceil(max / paso) * paso, y = v => T + (H - T - B) * (1 - Math.max(0, v) / tope), bw = (W - L) / R.meses.length;
+  const cx = i => L + i * bw + bw / 2, ult = R.meses.length - 1;
+  let g = '';
+  for (let v = 0; v <= tope + 1e-6; v += paso) g += `<line class="ch-grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text class="ch-lab" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${cifraCorta(v)}</text>`;
+  R.ingresos.forEach((v, i) => { const m = R.meses[i], nom = MESES_NOM[+m.slice(5) - 1];
+    g += `<g><title>${nom} ${m.slice(0, 4)}\nIngresos: ${money(v)}\nGastos y costos: ${money(R.gastos[i])}</title><rect class="ch-bar ${i === ult ? 'now' : ''}" x="${L + i * bw + bw * .18}" y="${y(v)}" width="${bw * .64}" height="${Math.max(0, y(0) - y(v))}" rx="4"/></g>
+      <text class="ch-lab" x="${cx(i)}" y="${H - 8}" text-anchor="middle">${nom.slice(0, 3)}</text>`; });
+  g += `<polyline class="ch-line" points="${R.gastos.map((v, i) => `${cx(i)},${y(v)}`).join(' ')}"/>` + R.gastos.map((v, i) => `<circle class="ch-dot" cx="${cx(i)}" cy="${y(v)}" r="3.5"/>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ingresos y gastos de los últimos 12 meses">${g}</svg>
+    <div class="ch-ley"><span><i class="sw-bar"></i>Ingresos</span><span><i class="sw-line"></i>Gastos y costos</span></div>`;
+}
+function barraEdades(edades) {
+  const tot = r2(edades.reduce((s, [, v]) => s + v, 0));
+  if (!tot) return '<p class="muted">No hay cartera pendiente.</p>';
+  return `<div class="ed-bar">${edades.map(([, v], i) => v ? `<div class="ed-${i}" style="width:${v / tot * 100}%"></div>` : '').join('')}</div>
+    ${edades.map(([k, v], i) => `<div class="ed-row"><span><i class="ed-dot ed-${i}"></i>${k}</span><b class="mono">${money(v)}</b></div>`).join('')}
+    <div class="ed-row ed-tot"><span>Total</span><b class="mono">${money(tot)}</b></div>
+    <a href="#/cartera" class="hint">Ver cartera</a>`;
 }
 
 /* ---------- Listas de documentos ---------- */

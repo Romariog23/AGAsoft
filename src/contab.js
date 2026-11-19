@@ -288,4 +288,26 @@ function situacionFinanciera(movs, cuentas, hasta) {
   ], activo, pasivo, patrimonio, cuadra: Math.abs(activo - pasivo - patrimonio) < 0.01, excluido };
 }
 
-export { cierreAnual, auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+// Resumen para el panel de Inicio: ingresos (clase 4) y gastos y costos (5, 6, 7) por mes, de los últimos n meses
+// hasta el mes de `hasta` (AAAA-MM-DD), y la utilidad del año de `hasta`. No cuenta el comprobante de cierre.
+function resumenMensual(movs, hasta, n = 12) {
+  const [y, m] = hasta.slice(0, 7).split('-').map(Number), meses = [];
+  for (let i = n - 1; i >= 0; i--) { const d = new Date(Date.UTC(y, m - 1 - i, 1)); meses.push(d.toISOString().slice(0, 7)); }
+  const idx = Object.fromEntries(meses.map((k, i) => [k, i])), ingresos = meses.map(() => 0), gastos = meses.map(() => 0);
+  let utilidad = 0; const anio = hasta.slice(0, 4);
+  for (const x of movs) {
+    if (x.tipo === 'CI' || x.fecha > hasta || !/^[4-7]/.test(x.cuenta)) continue;
+    const v = x.cuenta[0] === '4' ? x.credito - x.debito : x.debito - x.credito, i = idx[x.fecha.slice(0, 7)];
+    if (i !== undefined) { if (x.cuenta[0] === '4') ingresos[i] += v; else gastos[i] += v; }
+    if (x.fecha.startsWith(anio)) utilidad += x.cuenta[0] === '4' ? v : -v;
+  }
+  return { meses, ingresos: ingresos.map(r2), gastos: gastos.map(r2), utilidad: r2(utilidad) };
+}
+// Saldos de cartera por edades de vencimiento (filas de cartera() con saldo y diasVencida).
+function carteraEdades(filas) {
+  const out = [['Al día', 0], ['1 a 30 días', 0], ['31 a 60 días', 0], ['Más de 60 días', 0]];
+  for (const c of filas) if (c.saldo > 0.009) { const d = c.diasVencida || 0; out[d <= 0 ? 0 : d <= 30 ? 1 : d <= 60 ? 2 : 3][1] += c.saldo; }
+  return out.map(([k, v]) => [k, r2(v)]);
+}
+
+export { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
