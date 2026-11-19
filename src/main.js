@@ -1,5 +1,5 @@
 import './style.css';
-import { jsonFE, erroresFE, RUTA_FE, contenidoQR, qrSvg } from './fe.js';
+import { jsonFE, erroresFE, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
@@ -204,7 +204,7 @@ const MENU = [
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Habilitación DIAN'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -473,8 +473,8 @@ function vEmpresa(m) {
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
-  ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
-    <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div>
+  ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Facturación electrónica (Factus)</h3><a class="btn" href="#/habilitacion">Conectar o probar</a></header>
+    <p class="hint">Solo la ve el administrador. La cuenta de Factus de la empresa se conecta en Configuración › Factura electrónica (DIAN). Al probar una cuenta de producción con numeración activa, la empresa queda habilitada sola.</p>
     <label class="check"><input type="checkbox" id="feHab" ${feHabilitada() ? 'checked' : ''}> Empresa habilitada ante la DIAN (ya superó el set de pruebas)</label>
     <p class="hint">Mientras esté apagado, la numeración electrónica sale como "Sin habilitar DIAN" y no se pueden emitir facturas ni notas electrónicas (sí borradores y facturas normales).</p>
     <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
@@ -494,16 +494,6 @@ function vEmpresa(m) {
     try { await guardarContab('fe_habilitada', on); toast(on ? 'Facturación electrónica habilitada para esta empresa.' : 'Facturación electrónica deshabilitada para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !on; }
   };
   if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
-  if ($('feProbar')) $('feProbar').onclick = async () => {
-    const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
-    try {
-      const r = await store.fe('probar');
-      $('feOut').innerHTML = `<p class="${r.conexion === 'ok' ? 'ok-txt' : 'err'}">${r.conexion === 'ok' ? 'Conexión correcta' : 'MATIAS no aceptó el token (HTTP ' + r.http + ')'} · ambiente de ${esc(r.ambiente)}</p>
-        <details><summary>Ver respuesta completa</summary><pre class="mono fe-pre">${esc(JSON.stringify(r, null, 2))}</pre></details>
-        <button type="button" id="feCopiar">Copiar respuesta</button>`;
-      $('feCopiar').onclick = () => navigator.clipboard?.writeText(JSON.stringify(r, null, 2)).then(() => toast('Copiado.'));
-    } catch (e) { $('feOut').innerHTML = `<p class="err">${esc(e.message)}</p>`; } finally { b.disabled = false; }
-  };
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
@@ -528,7 +518,7 @@ function vInicio(m) {
   if (!d.numeraciones.some(n => n.tipo === 'FV' && n.activa)) faltan.push(['numeraciones', 'Registra la resolución de numeración de facturas.']);
   if (!d.terceros.length) faltan.push(['clientes', 'Crea tu primer cliente.']);
   if (!d.productos.length) faltan.push(['productos', 'Crea tus productos o servicios.']);
-  if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Habilita tu facturación electrónica ante la DIAN (set de pruebas).']);
+  if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Conecta tu facturación electrónica con la DIAN (Factus).']);
   const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 5);
   const on = new Set(cfgInicio()), W = k => on.has(k);
   const medios = WIDGETS.filter(([k]) => W(k) && WIDGET_HTML[k]).map(([k]) => WIDGET_HTML[k]({ R, edades, em, cart }));
@@ -1025,7 +1015,8 @@ function representacion(d, opc = {}) {
   const bloqueFE = ev ? `<section class="rep-fe"><div class="rep-qr">${qrSvg(contenidoQR(ev), D.plantilla === 'compacta' ? 104 : 124)}</div>
       <div><p><b>${d.tipo === 'FV' ? 'Factura electrónica' : 'Documento electrónico'} validada por la DIAN</b>${ev.ambiente !== 'produccion' ? ' <span class="tag warn">Ambiente de pruebas</span>' : ''}</p>
         <p class="rep-small">${d.tipo === 'FV' ? 'CUFE' : 'CUDE'}: <span class="mono fe-cufe">${esc(ev.cufe)}</span></p>
-        <p class="rep-small">Fecha de validación: ${fFecha(ev.creado_en.slice(0, 10))}. Escanea el código QR para consultar el documento en la DIAN.</p></div></section>` : '';
+        <p class="rep-small">Fecha de validación: ${fFecha(ev.creado_en.slice(0, 10))}. Escanea el código QR para consultar el documento en la DIAN.</p>
+        <p class="rep-small">Software: AGAsoft · Proveedor tecnológico: Factus</p></div></section>` : '';
   const bloqueRes = d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small rep-res">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? `, vigente hasta ${fFecha(n.vigencia_hasta)}` : ''}.</p>` : '';
   const arriba = D.ubic_fe === 'arriba';
   return `<article class="rep rep-${D.plantilla}${D.codigo ? '' : ' sin-cod'}${D.descuento ? '' : ' sin-desc'}" style="--rep-color:${D.color}">
@@ -1073,41 +1064,42 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
   </article>`;
 }
 /* ---------- Habilitación ante la DIAN ---------- */
-const HAB_ESTADO = { '': ['Sin iniciar', ''], registrado: ['Software registrado', ''], enviando: ['Set de pruebas en validación', 'warn'], error: ['Set de pruebas rechazado', 'bad'], aprobado: ['Habilitada', 'ok'] };
+const HAB_ESTADO = { '': ['Sin conectar', ''], pruebas: ['Conectada en pruebas', 'warn'], pendiente: ['Esperando habilitación', 'warn'], error: ['Error de conexión', 'bad'], aprobado: ['Habilitada', 'ok'] };
 function vHabilitacion(m) {
-  const e = emp(), h = e.contabilidad?.fe_hab || {}, hab = feHabilitada(), est = hab ? 'aprobado' : (h.estado || '');
+  const e = emp(), h = e.contabilidad?.fe_hab?.proveedor === 'factus' ? e.contabilidad.fe_hab : {}, hab = feHabilitada(), est = hab ? 'aprobado' : (h.estado || '');
   const [txt, cls] = HAB_ESTADO[est] || HAB_ESTADO[''];
-  m.innerHTML = `<header class="vhead"><div><h2>Habilitación ante la DIAN</h2><p class="sub">Antes de facturar electrónicamente, la DIAN pide enviar un set de pruebas en su ambiente de habilitación. Esas facturas de prueba no tocan tu contabilidad ni tu numeración real.</p></div>
+  const fv = S.d.numeraciones.find(n => n.tipo === 'FV' && n.electronica && n.activa);
+  const rangos = h.rangos || [], prefijoOk = !fv || !rangos.length || rangos.some(r => r.prefijo === (fv.prefijo || ''));
+  m.innerHTML = `<header class="vhead"><div><h2>Factura electrónica (DIAN)</h2><p class="sub">AGAsoft envía tus facturas y notas a la DIAN por medio de <b>Factus</b>, proveedor tecnológico autorizado. Tú facturas en AGAsoft, con tu diseño y tu logo; Factus valida cada documento con la DIAN y devuelve el CUFE y el QR.</p></div>
     <span class="tag ${cls}">${txt}</span></header>
-  ${hab ? `<section class="panel stack callout ok-box"><h3>¡Tu empresa ya está habilitada!</h3><p>La DIAN aprobó el set de pruebas${h.actualizado ? ' el ' + fFecha(h.actualizado.slice(0, 10)) : ''}. Ya puedes emitir facturas y notas electrónicas.</p>
-    <p class="hint">Último paso: en el portal de la DIAN asocia el prefijo de tu resolución de facturación a este software y regístrala en <a href="#/numeraciones">Numeraciones</a>.</p></section>` : ''}
-  <section class="panel stack"><h3>1. En el portal de la DIAN</h3><ol class="steps-list">
-    <li>Entra a <a href="https://catalogo-vpfe-hab.dian.gov.co/User/Login" target="_blank" rel="noopener">Facturando electrónicamente (habilitación)</a> con el usuario de la empresa.</li>
-    <li>Ve a <b>Registro y habilitación → Documentos electrónicos → Factura electrónica</b> y escoge <b>Software propio</b>.</li>
-    <li>Asocia el software con el nombre <b>AGAsoft</b> y un <b>PIN de 5 dígitos</b> que tú escojas.</li>
-    <li>La DIAN te muestra el <b>ID del software</b> y, en el set de pruebas, el <b>TestSetId</b>. Cópialos en el paso 2.</li></ol></section>
-  <section class="panel stack"><h3>2. Datos que te dio la DIAN</h3>
-    <div class="grid3"><div><label for="hSw">ID del software</label><input id="hSw" class="mono" value="${esc(h.software_dian || '')}" autocomplete="off"></div>
-      <div><label for="hPin">PIN (5 dígitos)</label><input id="hPin" class="mono" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="•••••"></div>
-      <div><label for="hTs">TestSetId</label><input id="hTs" class="mono" value="${esc(h.testsetid || '')}" autocomplete="off"></div></div>
-    <div class="row"><button class="primary" id="hReg" ${hab ? 'disabled' : ''}>${h.software_id ? 'Actualizar datos' : 'Registrar software'}</button></div>
-    <p class="hint">El PIN no se guarda en AGAsoft: se envía una sola vez al proveedor de facturación electrónica.</p></section>
-  <section class="panel stack"><h3>3. Enviar el set de pruebas</h3>
-    <p>AGAsoft le pide al proveedor que envíe a la DIAN las facturas y notas de prueba que exige el set. Tarda unos minutos.</p>
-    <div class="row"><button class="primary" id="hRun" ${!h.software_id || hab || est === 'enviando' ? 'disabled' : ''}>Enviar set de pruebas</button><button id="hEst" ${!h.software_id ? 'disabled' : ''}>Consultar estado</button></div>
-    <div id="hOut">${h.mensaje ? `<p class="${est === 'error' ? 'err' : est === 'aprobado' ? 'ok-txt' : 'muted'}">${esc(h.mensaje)}</p>` : ''}
-      ${(h.documentos || []).length ? `<details><summary>Documentos de prueba (${h.documentos.length})</summary><table class="tbl"><thead><tr><th>Tipo</th><th>Número</th><th>Resultado</th></tr></thead><tbody>${h.documentos.map(x => `<tr><td>${esc(String(x.tipo))}</td><td class="mono">${esc(String(x.numero))}</td><td>${/^(1|true)$/i.test(x.valido) ? '<span class="tag ok">Aceptado</span>' : esc(x.mensaje || 'Pendiente')}</td></tr>`).join('')}</tbody></table></details>` : ''}</div></section>
-  <section class="panel stack"><h3>4. Aprobación</h3><p>Cuando la DIAN apruebe el set, la empresa queda <b>habilitada sola</b>: la numeración electrónica pasa a <b>Activa</b> y ya puedes emitir facturas electrónicas.</p></section>`;
+  ${hab ? `<section class="panel stack callout ok-box"><h3>¡Tu empresa ya factura electrónicamente!</h3><p>Factus confirmó tu cuenta de producción${h.actualizado ? ' el ' + fFecha(h.actualizado.slice(0, 10)) : ''}. Las facturas y notas electrónicas se emiten en AGAsoft y se envían a la DIAN desde cada documento.</p></section>` : ''}
+  <section class="panel stack"><h3>1. Activa tu cuenta en Factus</h3><ol class="steps-list">
+    <li>Pide la activación a Factus con los documentos de la empresa: <b>Cámara de Comercio</b> de menos de 30 días, <b>cédula del representante legal</b>, <b>RUT</b> y la <b>resolución de numeración</b> autorizada por la DIAN.</li>
+    <li>Factus hace la habilitación ante la DIAN con tu NIT y el certificado de firma. Las pruebas van en el ambiente de habilitación y <b>no tocan tu contabilidad</b>.</li>
+    <li>Factus te entrega el <b>correo y la contraseña</b> de tu cuenta (y, si aplica, el <b>client_id</b> y el <b>client_secret</b>). Escríbelos en el paso 2.</li></ol></section>
+  <section class="panel stack"><h3>2. Conecta AGAsoft con tu cuenta de Factus</h3>
+    <div class="grid2"><div><label for="hAmb">Ambiente</label><select id="hAmb"><option value="pruebas">Pruebas (sandbox de Factus)</option><option value="produccion">Producción (facturas reales)</option></select></div>
+      <div><label for="hUs">Correo de la cuenta</label><input id="hUs" type="email" value="${esc(h.usuario || '')}" autocomplete="off"></div></div>
+    <div class="grid3"><div><label for="hPw">Contraseña</label><input id="hPw" type="password" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : ''}"></div>
+      <div><label for="hCi">Client ID</label><input id="hCi" class="mono" autocomplete="off" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div>
+      <div><label for="hCs">Client secret</label><input id="hCs" type="password" class="mono" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div></div>
+    <div class="row"><button class="primary" id="hGuardar">Guardar y probar</button>${h.usuario ? '<button id="hProbar">Volver a probar</button>' : ''}</div>
+    <p class="hint">Las credenciales se guardan en el servidor y no se vuelven a mostrar. Deja en blanco lo que no cambias.</p></section>
+  <section class="panel stack"><h3>3. Estado</h3>
+    ${h.mensaje ? `<p class="${est === 'error' ? 'err' : est === 'aprobado' ? 'ok-txt' : ''}">${esc(h.mensaje)}</p>` : '<p class="muted">Todavía no has conectado la cuenta.</p>'}
+    ${h.empresa_factus?.nombre || h.empresa_factus?.nit ? `<dl class="kv"><dt>Empresa en Factus</dt><dd>${esc(h.empresa_factus.nombre || '')}${h.empresa_factus.nit ? ` · NIT <span class="mono">${esc(h.empresa_factus.nit)}</span>` : ''}</dd><dt>Ambiente</dt><dd>${h.ambiente === 'produccion' ? 'Producción' : 'Pruebas'}</dd></dl>` : ''}
+    ${rangos.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Numeración en Factus</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Va en</th><th>Vence</th></tr></thead><tbody>
+      ${rangos.map(r => `<tr><td>${esc(r.documento)}</td><td class="mono">${esc(r.prefijo)}</td><td class="mono">${esc(r.resolucion)}</td><td class="r mono">${r.desde ?? ''}–${r.hasta ?? ''}</td><td class="r mono">${r.actual ?? ''}</td><td>${r.vence ? fFecha(String(r.vence).slice(0, 10)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${!prefijoOk && h.ambiente === 'produccion' ? `<p class="err">Tu numeración de facturas en AGAsoft usa el prefijo <b>${esc(fv.prefijo)}</b>, pero en Factus no hay uno igual. Revisa el prefijo en <a href="#/numeraciones">Numeraciones</a> o pídele a Factus que asocie esa resolución.</p>` : ''}
+    <p class="hint">Cuando pruebes una cuenta de <b>producción</b> con una numeración de facturas activa, la empresa queda <b>habilitada sola</b>: la numeración electrónica pasa a Activa y aparece el botón "Enviar a la DIAN" en cada factura.</p></section>`;
+  $('hAmb').value = h.ambiente === 'produccion' ? 'produccion' : 'pruebas';
   const accion = async (btn, a, datos = {}) => {
-    const b = $(btn), t = b.textContent; b.disabled = true; b.textContent = 'Un momento…';
-    try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡La DIAN aprobó el set de pruebas! Ya facturas electrónicamente.'); vHabilitacion(m); return r; }
+    const b = $(btn), t = b.textContent; b.disabled = true; b.textContent = 'Conectando…';
+    try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡Listo! Tu empresa ya factura electrónicamente.'); else if (r.hab?.estado === 'error') toast(r.hab.mensaje, true); vHabilitacion(m); }
     catch (err) { fail(err); b.disabled = false; b.textContent = t; }
   };
-  $('hReg').onclick = () => accion('hReg', 'hab_registrar', { software_id_dian: $('hSw').value, pin: $('hPin').value, testsetid: $('hTs').value });
-  $('hRun').onclick = async () => { if (await confirmar('Enviar set de pruebas', 'Se envían a la DIAN, en el ambiente de habilitación, los documentos de prueba. No afectan tu contabilidad ni tu numeración real.', 'Enviar')) accion('hRun', 'hab_ejecutar'); };
-  $('hEst').onclick = () => accion('hEst', 'hab_estado');
-  // Mientras la DIAN valida, se consulta sola cada 30 segundos.
-  if (est === 'enviando') { const t = setTimeout(() => { if (location.hash === '#/habilitacion') accion('hEst', 'hab_estado'); }, 30000); window.addEventListener('hashchange', () => clearTimeout(t), { once: true }); }
+  $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value, client_id: $('hCi').value.trim(), client_secret: $('hCs').value });
+  if ($('hProbar')) $('hProbar').onclick = () => accion('hProbar', 'probar');
 }
 
 /* ---------- Diseño de la factura ---------- */
@@ -1196,19 +1188,19 @@ function vDoc(m, id) {
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
-    ${d.electronica && d.estado === 'emitido' && RUTA_FE[d.tipo] && (feActiva() || envios(d.id).length) ? panelDian(d) : ''}
+    ${d.electronica && d.estado === 'emitido' && TIPOS_FE.includes(d.tipo) && (feActiva() || envios(d.id).length) ? panelDian(d) : ''}
     ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
   if ($('feEnviar')) $('feEnviar').onclick = async () => {
     const x = datosFE(d), errs = erroresFE(x);
     if (errs.length) return fail(new Error(errs.join(' ')));
-    if (!await confirmar(`Enviar ${esc(nomDoc(d))} a la DIAN`, 'Se envía el documento por MATIAS. Si la DIAN lo acepta, queda con CUFE y ya no se puede modificar: cualquier corrección se hace con una nota.', 'Enviar')) return;
+    if (!await confirmar(`Enviar ${esc(nomDoc(d))} a la DIAN`, 'Se envía el documento a la DIAN por Factus, el proveedor tecnológico. Si la DIAN lo acepta, queda con CUFE y ya no se puede modificar: cualquier corrección se hace con una nota.', 'Enviar')) return;
     const b = $('feEnviar'); b.disabled = true; b.textContent = 'Enviando…';
     try {
-      const r = await store.fe('enviar', { documento_id: d.id, ruta: RUTA_FE[d.tipo], body: jsonFE({ ...x, hora: new Date().toTimeString().slice(0, 8) }) });
+      const r = await store.fe('enviar', { documento_id: d.id, tipo: d.tipo, body: jsonFE(x) });
       await cargarEmpresa(); route();
-      if (r.estado === 'aceptado') toast(`${nomDoc(d)} aceptada por la DIAN.`); else fail(new Error(`La DIAN no aceptó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
+      if (r.estado === 'aceptado') toast(`${nomDoc(d)} aceptada por la DIAN.${(r.avisos || []).length ? ' ' + r.avisos.join(' ') : ''}`); else fail(new Error(`La DIAN no aceptó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
     } catch (e) { fail(e); b.disabled = false; b.textContent = 'Enviar a la DIAN'; }
   };
   if ($('eliminar')) $('eliminar').onclick = async () => {
@@ -1223,7 +1215,7 @@ function vDoc(m, id) {
     await store.anular(d.id, mot); await cargarEmpresa(); toast(`Anulado: ${nomDoc(d)}.`); route();
   });
 }
-/* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
+/* ---------- Facturación electrónica (DIAN por Factus) ---------- */
 // El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
 const feActiva = () => emp()?.contabilidad?.fe_activa === true;
 // Habilitada = la empresa ya superó el set de pruebas de la DIAN. Antes de eso no se emiten documentos electrónicos.
@@ -1233,12 +1225,13 @@ const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
 function datosFE(d) {
   const ref = d.ref_id ? docById(d.ref_id) : null;
   return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id),
-    numeracion: S.d.numeraciones.find(n => n.id === d.numeracion_id), ref, cufeRef: ref ? envioAceptado(ref.id)?.cufe || '' : '' };
+    numeracion: S.d.numeraciones.find(n => n.id === d.numeracion_id), ref, cufeRef: ref ? envioAceptado(ref.id)?.cufe || '' : '',
+    numeroRef: ref ? envioAceptado(ref.id)?.respuesta?.data?.number || '' : '' };
 }
 function panelDian(d) {
   const ok = envioAceptado(d.id), l = envios(d.id), falta = ok ? [] : erroresFE(datosFE(d));
   return `<section class="panel stack noprint"><header class="vhead"><h3>DIAN</h3>${ok ? '<span class="tag ok">Aceptada</span>' : `<button class="primary" id="feEnviar">Enviar a la DIAN</button>`}</header>
-    ${ok ? `<dl class="kv"><dt>CUFE</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviada</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.pdf ? `<dt>PDF</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver el PDF de MATIAS</a></dd>` : ''}</dl>`
+    ${ok ? `<dl class="kv"><dt>CUFE</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviada</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.respuesta?.data?.number ? `<dt>Número en Factus</dt><dd class="mono">${esc(ok.respuesta.data.number)}</dd>` : ''}${ok.pdf ? `<dt>Consulta</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver el documento en Factus</a></dd>` : ''}</dl>`
       : `<p class="muted">${l.length ? 'La DIAN no ha aceptado este documento. Revisa los errores y vuelve a enviarlo con el mismo número.' : 'Todavía no se ha enviado a la DIAN.'}</p>${falta.length ? `<ul class="err">${falta.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`}
     ${l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazada'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
   </section>`;

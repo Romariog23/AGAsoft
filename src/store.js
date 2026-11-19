@@ -162,10 +162,10 @@ function supabaseStore(url, key) {
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async miPlan() { return ok(await sb.rpc('mi_plan')); },
-    // Facturación electrónica: la función de Supabase "fe-matias" habla con MATIAS con el token guardado en los secretos.
+    // Facturación electrónica: la función de Supabase "fe-factus" habla con Factus con la cuenta de cada empresa.
     async fe(accion, datos = {}) {
-      const { data, error } = await sb.functions.invoke('fe-matias', { body: { accion, ...datos } });
-      if (error) { let m = error.message; try { const b = await error.context?.json?.(); if (b?.error) m = b.error; } catch (_) {} throw new Error(/Failed to send|not found|404/i.test(m) ? 'La función fe-matias no está desplegada en Supabase.' : m); }
+      const { data, error } = await sb.functions.invoke('fe-factus', { body: { accion, ...datos } });
+      if (error) { let m = error.message; try { const b = await error.context?.json?.(); if (b?.error) m = b.error; } catch (_) {} throw new Error(/Failed to send|not found|404/i.test(m) ? 'La función fe-factus no está desplegada en Supabase.' : m); }
       if (data?.error) throw new Error(data.error);
       return data;
     },
