@@ -473,6 +473,8 @@ function vEmpresa(m) {
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
   ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
     <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div>
+    <label class="check"><input type="checkbox" id="feHab" ${feHabilitada() ? 'checked' : ''}> Empresa habilitada ante la DIAN (ya superó el set de pruebas)</label>
+    <p class="hint">Mientras esté apagado, la numeración electrónica sale como "Sin habilitar DIAN" y no se pueden emitir facturas ni notas electrónicas (sí borradores y facturas normales).</p>
     <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
     <p class="hint">Mientras esté apagado, las facturas electrónicas no muestran el botón de envío (siguen con el aviso de pendiente de transmitir).</p></section>` : ''}
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
@@ -484,6 +486,11 @@ function vEmpresa(m) {
   cargarMiPlan();
   pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  if ($('feHab')) $('feHab').onchange = async ev => {
+    const on = ev.target.checked;
+    if (on && !await confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada')) { ev.target.checked = false; return; }
+    try { await guardarContab('fe_habilitada', on); toast(on ? 'Facturación electrónica habilitada para esta empresa.' : 'Facturación electrónica deshabilitada para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !on; }
+  };
   if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
   if ($('feProbar')) $('feProbar').onclick = async () => {
     const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
@@ -894,6 +901,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
     }
     // Los que no son electrónicos crean su numeración solos si falta.
+    if (esElec() && !feHabilitada()) return 'La facturación electrónica de esta empresa todavía no está habilitada ante la DIAN (falta superar el set de pruebas). Guárdala como borrador o emite una factura normal.';
     if (esElec()) try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
@@ -1109,6 +1117,8 @@ function vDoc(m, id) {
 /* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
 // El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
 const feActiva = () => emp()?.contabilidad?.fe_activa === true;
+// Habilitada = la empresa ya superó el set de pruebas de la DIAN. Antes de eso no se emiten documentos electrónicos.
+const feHabilitada = () => emp()?.contabilidad?.fe_habilitada === true;
 const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
 const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
 function datosFE(d) {
@@ -1352,7 +1362,7 @@ function vNumeraciones(m) {
     <p class="sub">La factura electrónica usa el prefijo y el rango de tu resolución DIAN. La factura normal (no electrónica) lleva su propio consecutivo con otro prefijo. Las notas y los recibos llevan el suyo.</p>
     <div class="row"><button id="nuevaN">Nueva numeración de factura normal</button></div>
     <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>
-    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${n.activa ? '<span class="tag ok">Activa</span>' : '<span class="tag">Inactiva</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
+    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${!n.activa ? '<span class="tag">Inactiva</span>' : n.electronica && !feHabilitada() ? '<span class="tag warn" title="Falta superar el set de pruebas de la DIAN">Sin habilitar DIAN</span>' : '<span class="tag ok">Activa</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
       <td class="r mono">${n.desde} – ${Number(n.hasta) >= 999999999 ? 'sin límite' : n.hasta}</td><td class="r mono">${n.siguiente}${n.tipo === 'FV' && quedan <= 50 ? ` <span class="tag bad">quedan ${Math.max(0, quedan)}</span>` : ''}</td>
       <td>${n.vigencia_hasta ? `hasta ${fFecha(n.vigencia_hasta)}${vence ? ' <span class="tag bad">por vencer</span>' : ''}` : '—'}</td><td class="r"><button class="ghost sm" data-ed="${n.id}">Editar</button></td></tr>`; }).join('')}
     </tbody></table></div>` : '<p class="muted">No hay numeraciones.</p>'}</section>`;
