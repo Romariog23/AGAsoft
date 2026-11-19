@@ -472,7 +472,9 @@ function vEmpresa(m) {
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
     <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
   ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Conexión con la DIAN (MATIAS API)</h3><button id="feProbar">Probar conexión</button></header>
-    <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div></section>` : ''}
+    <p class="hint">Solo la ve el administrador. Prueba el token guardado en Supabase y trae los catálogos de MATIAS (tipos de documento, municipios, medios de pago).</p><div id="feOut"></div>
+    <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
+    <p class="hint">Mientras esté apagado, las facturas electrónicas no muestran el botón de envío (siguen con el aviso de pendiente de transmitir).</p></section>` : ''}
   ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
   <section class="panel stack" id="apariencia"></section>
   <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
@@ -482,6 +484,7 @@ function vEmpresa(m) {
   cargarMiPlan();
   pintarApariencia();
   $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
+  if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
   if ($('feProbar')) $('feProbar').onclick = async () => {
     const b = $('feProbar'); b.disabled = true; $('feOut').innerHTML = '<p class="muted">Conectando…</p>';
     try {
@@ -1076,7 +1079,7 @@ function vDoc(m, id) {
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
-    ${d.electronica && d.estado === 'emitido' && RUTA_FE[d.tipo] ? panelDian(d) : ''}
+    ${d.electronica && d.estado === 'emitido' && RUTA_FE[d.tipo] && (feActiva() || envios(d.id).length) ? panelDian(d) : ''}
     ${d.estado === 'emitido' ? `<section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asiento(d, ctxContable()))}</section>` : ''}
     ${rel.length ? `<section class="panel stack noprint"><h3>Documentos relacionados</h3>${tablaDocs(rel, true)}</section>` : ''}`;
   $('imprimir').onclick = () => imprimir(d);
@@ -1104,6 +1107,8 @@ function vDoc(m, id) {
   });
 }
 /* ---------- Facturación electrónica (DIAN por MATIAS) ---------- */
+// El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
+const feActiva = () => emp()?.contabilidad?.fe_activa === true;
 const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
 const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
 function datosFE(d) {
