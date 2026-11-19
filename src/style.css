@@ -402,3 +402,4 @@ button.bad{color:var(--bad)}
 .df-prev{position:sticky;top:12px;background:#fff;color:#101211}
 .df-prev .rep{--muted:#5a605c;--line:#e3dccb;--fg:#101211}
 .rep-head>.rep-num{margin-left:auto}.rep-items td:nth-child(2){white-space:nowrap}
+.ok-box{border-color:var(--ok);background:var(--ok-soft)}

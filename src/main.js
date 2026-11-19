@@ -204,7 +204,7 @@ const MENU = [
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Habilitación DIAN'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -257,6 +257,7 @@ function route() {
     if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
     if (v === 'disenofactura') return vDisenoFactura(m);
+    if (v === 'habilitacion') return vHabilitacion(m);
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'comprobantes') return vComprobantes(m);
@@ -526,6 +527,7 @@ function vInicio(m) {
   if (!d.numeraciones.some(n => n.tipo === 'FV' && n.activa)) faltan.push(['numeraciones', 'Registra la resolución de numeración de facturas.']);
   if (!d.terceros.length) faltan.push(['clientes', 'Crea tu primer cliente.']);
   if (!d.productos.length) faltan.push(['productos', 'Crea tus productos o servicios.']);
+  if (d.numeraciones.some(n => n.tipo === 'FV' && n.electronica && n.activa) && !feHabilitada()) faltan.push(['habilitacion', 'Habilita tu facturación electrónica ante la DIAN (set de pruebas).']);
   const ult = [...d.documentos].sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || '')).slice(0, 8);
   m.innerHTML = `<header class="vhead"><div><h2>${esc(e.nombre)}</h2><p class="sub mono">NIT ${fmtNit(e.nit)}-${e.dv}</p></div>
     <div class="row"><a class="btn primary" href="#/nuevo/FV">Nueva factura</a><a class="btn" href="#/nuevo/RC">Nuevo recibo</a></div></header>
@@ -1001,6 +1003,44 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
     <p class="rep-small">Elaborado con AGAsoft.</p>
   </article>`;
 }
+/* ---------- Habilitación ante la DIAN ---------- */
+const HAB_ESTADO = { '': ['Sin iniciar', ''], registrado: ['Software registrado', ''], enviando: ['Set de pruebas en validación', 'warn'], error: ['Set de pruebas rechazado', 'bad'], aprobado: ['Habilitada', 'ok'] };
+function vHabilitacion(m) {
+  const e = emp(), h = e.contabilidad?.fe_hab || {}, hab = feHabilitada(), est = hab ? 'aprobado' : (h.estado || '');
+  const [txt, cls] = HAB_ESTADO[est] || HAB_ESTADO[''];
+  m.innerHTML = `<header class="vhead"><div><h2>Habilitación ante la DIAN</h2><p class="sub">Antes de facturar electrónicamente, la DIAN pide enviar un set de pruebas en su ambiente de habilitación. Esas facturas de prueba no tocan tu contabilidad ni tu numeración real.</p></div>
+    <span class="tag ${cls}">${txt}</span></header>
+  ${hab ? `<section class="panel stack callout ok-box"><h3>¡Tu empresa ya está habilitada!</h3><p>La DIAN aprobó el set de pruebas${h.actualizado ? ' el ' + fFecha(h.actualizado.slice(0, 10)) : ''}. Ya puedes emitir facturas y notas electrónicas.</p>
+    <p class="hint">Último paso: en el portal de la DIAN asocia el prefijo de tu resolución de facturación a este software y regístrala en <a href="#/numeraciones">Numeraciones</a>.</p></section>` : ''}
+  <section class="panel stack"><h3>1. En el portal de la DIAN</h3><ol class="steps-list">
+    <li>Entra a <a href="https://catalogo-vpfe-hab.dian.gov.co/User/Login" target="_blank" rel="noopener">Facturando electrónicamente (habilitación)</a> con el usuario de la empresa.</li>
+    <li>Ve a <b>Registro y habilitación → Documentos electrónicos → Factura electrónica</b> y escoge <b>Software propio</b>.</li>
+    <li>Asocia el software con el nombre <b>AGAsoft</b> y un <b>PIN de 5 dígitos</b> que tú escojas.</li>
+    <li>La DIAN te muestra el <b>ID del software</b> y, en el set de pruebas, el <b>TestSetId</b>. Cópialos en el paso 2.</li></ol></section>
+  <section class="panel stack"><h3>2. Datos que te dio la DIAN</h3>
+    <div class="grid3"><div><label for="hSw">ID del software</label><input id="hSw" class="mono" value="${esc(h.software_dian || '')}" autocomplete="off"></div>
+      <div><label for="hPin">PIN (5 dígitos)</label><input id="hPin" class="mono" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="•••••"></div>
+      <div><label for="hTs">TestSetId</label><input id="hTs" class="mono" value="${esc(h.testsetid || '')}" autocomplete="off"></div></div>
+    <div class="row"><button class="primary" id="hReg" ${hab ? 'disabled' : ''}>${h.software_id ? 'Actualizar datos' : 'Registrar software'}</button></div>
+    <p class="hint">El PIN no se guarda en AGAsoft: se envía una sola vez al proveedor de facturación electrónica.</p></section>
+  <section class="panel stack"><h3>3. Enviar el set de pruebas</h3>
+    <p>AGAsoft le pide al proveedor que envíe a la DIAN las facturas y notas de prueba que exige el set. Tarda unos minutos.</p>
+    <div class="row"><button class="primary" id="hRun" ${!h.software_id || hab || est === 'enviando' ? 'disabled' : ''}>Enviar set de pruebas</button><button id="hEst" ${!h.software_id ? 'disabled' : ''}>Consultar estado</button></div>
+    <div id="hOut">${h.mensaje ? `<p class="${est === 'error' ? 'err' : est === 'aprobado' ? 'ok-txt' : 'muted'}">${esc(h.mensaje)}</p>` : ''}
+      ${(h.documentos || []).length ? `<details><summary>Documentos de prueba (${h.documentos.length})</summary><table class="tbl"><thead><tr><th>Tipo</th><th>Número</th><th>Resultado</th></tr></thead><tbody>${h.documentos.map(x => `<tr><td>${esc(String(x.tipo))}</td><td class="mono">${esc(String(x.numero))}</td><td>${/^(1|true)$/i.test(x.valido) ? '<span class="tag ok">Aceptado</span>' : esc(x.mensaje || 'Pendiente')}</td></tr>`).join('')}</tbody></table></details>` : ''}</div></section>
+  <section class="panel stack"><h3>4. Aprobación</h3><p>Cuando la DIAN apruebe el set, la empresa queda <b>habilitada sola</b>: la numeración electrónica pasa a <b>Activa</b> y ya puedes emitir facturas electrónicas.</p></section>`;
+  const accion = async (btn, a, datos = {}) => {
+    const b = $(btn), t = b.textContent; b.disabled = true; b.textContent = 'Un momento…';
+    try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡La DIAN aprobó el set de pruebas! Ya facturas electrónicamente.'); vHabilitacion(m); return r; }
+    catch (err) { fail(err); b.disabled = false; b.textContent = t; }
+  };
+  $('hReg').onclick = () => accion('hReg', 'hab_registrar', { software_id_dian: $('hSw').value, pin: $('hPin').value, testsetid: $('hTs').value });
+  $('hRun').onclick = async () => { if (await confirmar('Enviar set de pruebas', 'Se envían a la DIAN, en el ambiente de habilitación, los documentos de prueba. No afectan tu contabilidad ni tu numeración real.', 'Enviar')) accion('hRun', 'hab_ejecutar'); };
+  $('hEst').onclick = () => accion('hEst', 'hab_estado');
+  // Mientras la DIAN valida, se consulta sola cada 30 segundos.
+  if (est === 'enviando') { const t = setTimeout(() => { if (location.hash === '#/habilitacion') accion('hEst', 'hab_estado'); }, 30000); window.addEventListener('hashchange', () => clearTimeout(t), { once: true }); }
+}
+
 /* ---------- Diseño de la factura ---------- */
 const PLANTILLAS_FAC = [['clasica', 'Clásica', 'Sobria, con línea de color bajo el encabezado.'], ['moderna', 'Moderna', 'Encabezado en bloque de color y totales resaltados.'], ['compacta', 'Compacta', 'Letra más pequeña: cabe más en una hoja.']];
 const COLORES_FAC = ['#0b2938', '#1f4e79', '#0f766e', '#3f6b12', '#7a1f2b', '#6b21a8', '#9a5b00', '#262626'];

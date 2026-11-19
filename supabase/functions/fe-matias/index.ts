@@ -77,6 +77,59 @@ Deno.serve(async req => {
       return json({ ambiente, conexion: yo.status === 200 ? 'ok' : 'error', http: yo.status, cuenta: yo.data, catalogos: muestra });
     }
 
+    // ---------- Habilitación ante la DIAN (set de pruebas). MATIAS genera y envía los documentos de prueba:
+    // no se crea nada en la contabilidad de AGAsoft. Al terminar bien, la empresa queda habilitada sola.
+    if (['hab_registrar', 'hab_ejecutar', 'hab_estado'].includes(p.accion)) {
+      const eid = p.empresa_id;
+      const { data: dueno } = await sb.rpc('es_dueno', { eid });
+      if (!dueno) return json({ error: 'Solo el dueño de la empresa puede hacer la habilitación.' }, 403);
+      const { data: emp, error: e1 } = await sb.from('empresas').select('id, contabilidad, fe_client_uuid').eq('id', eid).single();
+      if (e1 || !emp) return json({ error: 'No encontré la empresa.' }, 404);
+      const conta = emp.contabilidad || {}, hab = conta.fe_hab || {};
+      const guardar = async (cambios: Record<string, unknown>, habilitada?: boolean) => {
+        const nuevo = { ...conta, fe_hab: { ...hab, ...cambios, actualizado: new Date().toISOString() }, ...(habilitada !== undefined ? { fe_habilitada: habilitada } : {}) };
+        const { error } = await sb.from('empresas').update({ contabilidad: nuevo }).eq('id', eid);
+        if (error) throw new Error('No se pudo guardar el estado de la habilitación: ' + error.message);
+        return nuevo.fe_hab;
+      };
+      const cu = emp.fe_client_uuid || '';
+
+      if (p.accion === 'hab_registrar') {
+        const sw = String(p.software_id_dian || '').trim(), pin = String(p.pin || '').trim(), tsi = String(p.testsetid || '').trim();
+        if (!sw || !/^\d{5}$/.test(pin) || !tsi) return json({ error: 'Escribe el ID del software, el PIN de 5 dígitos y el TestSetId que te dio la DIAN.' }, 400);
+        const records = JSON.stringify({ environment_id: 2, type_id: 1, integration_type: 1, testsetid: tsi, pin, identification: sw, initial_number: Number(p.inicial) || 1 });
+        let r;
+        if (hab.software_id) r = await matias(`/software/${hab.software_id}`, { method: 'PUT', body: JSON.stringify({ records }) }, cu);
+        else r = await matias('/software', { method: 'POST', body: JSON.stringify({ records }) }, cu);
+        const id = r.data?.record?.id || r.data?.data?.id || hab.software_id;
+        if (r.status >= 300 || !id) return json({ error: `MATIAS no registró el software (HTTP ${r.status}).`, detalle: recortar(r.data) }, 400);
+        const h = await guardar({ software_id: id, software_dian: sw, testsetid: tsi, estado: 'registrado', mensaje: '' }, false);
+        return json({ hab: h });
+      }
+      if (!hab.software_id) return json({ error: 'Primero registra el software (paso 2).' }, 400);
+
+      if (p.accion === 'hab_ejecutar') {
+        const r = await matias('/document/run-test', { method: 'POST', body: JSON.stringify({ software_id: hab.software_id }) }, cu);
+        if (r.status >= 300) return json({ error: `MATIAS no pudo iniciar el set de pruebas (HTTP ${r.status}).`, detalle: recortar(r.data) }, 400);
+        const h = await guardar({ estado: 'enviando', process_id: r.data?.process_id || r.data?.data?.process_id || null, mensaje: 'Set de pruebas enviado. La DIAN tarda unos minutos en validarlo.', iniciado: new Date().toISOString() });
+        return json({ hab: h });
+      }
+
+      // hab_estado: el proceso más reciente manda.
+      const r = await matias(`/software/test/${hab.software_id}`, {}, cu);
+      if (r.status >= 300) return json({ error: `No se pudo consultar la habilitación (HTTP ${r.status}).`, detalle: recortar(r.data) }, 400);
+      const procs = lista(r.data).length ? lista(r.data) : (Array.isArray(r.data?.processes) ? r.data.processes : []);
+      const ult = procs[0];
+      if (!ult) return json({ hab });
+      const st = String(ult.status || '').toUpperCase();
+      const docs = (ult.documents || ult.test_documents || []).map((d: any) => ({ tipo: d.type || d.document_type || d.type_document_id || '', numero: d.number || d.document_number || '', valido: String(d.is_valid ?? d.IsValid ?? '').toString(), mensaje: d.StatusDescription || d.message || '' }));
+      const ok = st === 'FINISHED';
+      const estado = ok ? 'aprobado' : st === 'ERROR' ? 'error' : 'enviando';
+      const mensaje = ok ? 'La DIAN aprobó el set de pruebas. La empresa ya puede facturar electrónicamente.' : String(ult.error_message || ult.StatusDescription || (st === 'ERROR' ? 'La DIAN rechazó el set de pruebas.' : `En proceso (${st || 'pendiente'}).`));
+      const h = await guardar({ estado, mensaje, documentos: docs.slice(0, 40), estado_matias: st }, ok ? true : undefined);
+      return json({ hab: h, habilitada: ok });
+    }
+
     if (p.accion === 'enviar') {
       const { data: doc, error } = await sb.from('documentos').select('id, empresa_id, tipo, estado, electronica, numero, prefijo').eq('id', p.documento_id).single();
       if (error || !doc) return json({ error: 'No encontré el documento.' }, 404);
