@@ -1370,6 +1370,7 @@ function vCierre(m) {
       <div><label for="ca">Año que cierra</label><select id="ca">${(anios.length ? anios : [actual]).map(a => `<option ${a === anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div class="grow"><label for="cu">Cuenta de la utilidad</label><input id="cu" list="ctas3" class="mono" value="${P.util}" autocomplete="off"><p class="hint" id="cuN"></p></div>
       <div class="grow"><label for="cp">Cuenta de la pérdida</label><input id="cp" list="ctas3" class="mono" value="${P.perd}" autocomplete="off"><p class="hint" id="cpN"></p></div></div>
+      <div class="row filters"><div class="grow"><label for="ct">Tercero para la utilidad o pérdida y las líneas sin tercero</label><select id="ct">${optsTerceros(terceroEmpresa())}</select><p class="hint">Todas las líneas del cierre llevan tercero. Por lo general es la misma empresa.</p></div></div>
       <datalist id="ctas3">${optsLista(ctas3)}</datalist></section>
     <section class="panel stack" id="cOut"></section>`;
   const pintar = () => {
@@ -1377,7 +1378,7 @@ function vCierre(m) {
     const cu = $('cu').value.trim().split(' ')[0], cp = $('cp').value.trim().split(' ')[0];
     $('cuN').textContent = nomCta(cu); $('cpN').textContent = nomCta(cp);
     const hecho = comps().find(c => c.tipo === 'CI' && c.estado !== 'anulado' && c.fecha.startsWith(anio));
-    const r = cierreAnual(ms, anio, cu, cp);
+    const ct = $('ct').value, r = cierreAnual(ms, anio, cu, cp, ct);
     $('cOut').innerHTML = `<div class="kpis"><div class="kpi"><span>Ingresos ${anio}</span><b class="mono">${money(r.ingresos)}</b></div><div class="kpi"><span>Gastos y costos</span><b class="mono">${money(r.gastos)}</b></div>
       <div class="kpi ${r.resultado < 0 ? 'warn' : ''}"><span>${r.resultado < 0 ? 'Pérdida' : 'Utilidad'} del ejercicio</span><b class="mono">${money(Math.abs(r.resultado))}</b></div></div>
       ${hecho ? `<p class="aviso">El año ${anio} ya está cerrado con el <a href="#/comp/${hecho.id}">${esc(nomComp(hecho))}</a> del ${fFecha(hecho.fecha)}. Si registras algo más en ${anio}, anula ese cierre y hazlo de nuevo.</p>` : ''}
@@ -1387,14 +1388,15 @@ function vCierre(m) {
       <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
     if ($('cGo')) $('cGo').onclick = async () => {
       for (const [c, q] of [[cu, 'utilidad'], [cp, 'pérdida']]) if (!esAuxiliar(c) || !idxCuentas()[c]) return toast(`La cuenta de la ${q} (${c}) no es auxiliar o no existe en el plan de cuentas.`, true);
+      if (r.lineas.some(l => !l.tercero_id)) return toast('Escoge el tercero para la utilidad o pérdida y las líneas sin tercero.', true);
       if (!await confirmar(`Cierre contable ${anio}`, `Se crea un comprobante de cierre con fecha ${fFecha(r.fecha)} que deja en cero los ingresos, gastos y costos de ${anio} y lleva la ${r.resultado < 0 ? 'pérdida' : 'utilidad'} de <b>${money(Math.abs(r.resultado))}</b> a ${esc(r.resultado < 0 ? cp : cu)}.<br>Si después hace falta, se anula el comprobante y se cierra de nuevo.`, 'Hacer el cierre')) return;
       try {
-        const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'CI', numero: siguienteComp('CI'), fecha: r.fecha, descripcion: `Cierre contable ${anio}`, lineas: r.lineas.map(l => ({ ...l, tercero_id: l.tercero_id || '' })), estado: 'contabilizado' });
+        const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'CI', numero: siguienteComp('CI'), fecha: r.fecha, descripcion: `Cierre contable ${anio}`, lineas: r.lineas, estado: 'contabilizado' });
         await cargarEmpresa(); toast(`Cierre de ${anio} hecho.`); location.hash = '#/comp/' + g.id;
       } catch (e) { fail(e); }
     };
   };
-  $('ca').onchange = pintar; $('cu').onchange = pintar; $('cp').onchange = pintar;
+  $('ca').onchange = pintar; $('cu').onchange = pintar; $('cp').onchange = pintar; $('ct').onchange = pintar;
   pintar();
 }
 
@@ -1409,6 +1411,8 @@ const siguienteNomina = () => Math.max(0, ...nominas().map(n => Number(n.numero)
 const nomArea = a => (AREAS.find(x => x[0] === a) || AREAS[0])[1];
 const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); return d.toISOString().slice(0, 10); };
 const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /borrador|nominas_estado_check|row-level security/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
+// El tercero de la propia empresa (mismo NIT), si está creado.
+const terceroEmpresa = () => { const nit = String(emp()?.nit || '').replace(/\D/g, ''); return nit ? S.d?.terceros.find(t => String(t.numero).replace(/\D/g, '') === nit)?.id || '' : ''; };
 const optsTerceros = (sel, excluir) => `<option value="">—</option>` + [...S.d.terceros].filter(t => t.id !== excluir).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 
 function vEmpleados(m) {
@@ -2115,7 +2119,8 @@ function vCompEditor(m, { id, tipo }) {
   const T = TIPOS_COMP[c.tipo];
   const aux = cuentasAux(), idx = idxCuentas();
   const terceros = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  const nuevaLinea = () => ({ cuenta: '', tercero_id: '', detalle: '', debito: '', credito: '' });
+  // Cada línea lleva tercero: la nueva toma el de la línea anterior para no escogerlo cada vez.
+  const nuevaLinea = () => ({ cuenta: '', tercero_id: c.lineas?.filter(l => l.tercero_id).at(-1)?.tercero_id || '', detalle: '', debito: '', credito: '' });
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${id ? `Editar ${esc(nomComp(c))}` : `Nuevo: ${T.nombre.toLowerCase()}`}</h2>
     <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
   <form id="ce" class="stack" novalidate>
@@ -2126,7 +2131,7 @@ function vCompEditor(m, { id, tipo }) {
     </section>
     <section class="panel stack"><div class="vhead"><h3>Movimientos</h3><div class="row"><button type="button" id="impL">Importar CSV</button><button type="button" id="addL">+ Agregar línea</button></div></div>
       <datalist id="ctasComp">${optsLista(aux)}</datalist>
-      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero <span class="hint">(obligatorio)</span></th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
       <div class="totbox" id="ctot"></div>
     </section>
     <div class="err" id="ceErr" hidden></div>
@@ -2136,7 +2141,7 @@ function vCompEditor(m, { id, tipo }) {
   const pintar = () => {
     $('lns').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" autocomplete="off" placeholder="Código o nombre"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
-      <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero"><option value="">—</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
+      <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero" required><option value="">Escoge…</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
       <td data-l="Detalle" class="c-desc"><input data-k="detalle" value="${esc(l.detalle)}" maxlength="200" aria-label="Detalle"></td>
       <td data-l="Débito"><input data-k="debito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.debito) || ''}" aria-label="Débito"></td>
       <td data-l="Crédito"><input data-k="credito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.credito) || ''}" aria-label="Crédito"></td>
@@ -2199,9 +2204,11 @@ function importarLineas(c, alTerminar) {
   const f = dialogo(`<h2>Importar movimientos</h2><p>Guarda la hoja como <b>CSV</b>. Debe tener la cuenta y los valores, en columnas <b>Débito</b> y <b>Crédito</b> o en una sola columna <b>Saldo</b>. Por ejemplo:</p>
     <pre class="mono">Cuenta;NIT;Detalle;Débito;Crédito\n11100501;;Saldo banco;15.000.000;0\n31050501;;Capital;0;15.000.000</pre>
     <p class="hint">Si el archivo trae cuentas de grupo (1, 11, 1110…) y también sus auxiliares, solo se toman las auxiliares para no sumar dos veces. Con la columna Saldo, el valor positivo va a la naturaleza de la cuenta.</p>
-    <input type="file" name="archivo" accept=".csv,text/csv" required><div id="ilPrev"></div>${pie('Importar')}`, async () => {
+    <input type="file" name="archivo" accept=".csv,text/csv" required><div id="ilPrev"></div>
+    <label for="ilTer">Tercero para las filas sin NIT (o con un NIT que no está creado)</label><select id="ilTer" name="tercero">${optsTerceros(terceroEmpresa())}</select>
+    <p class="hint">Cada línea del comprobante debe llevar tercero.</p>${pie('Importar')}`, async () => {
     const filas = f._filas; if (!filas?.length) throw new Error('Escoge un archivo con datos.');
-    const idx = idxCuentas(), codigos = filas.map(x => x.cuenta);
+    const idx = idxCuentas(), codigos = filas.map(x => x.cuenta), terDef = f.querySelector('[name=tercero]').value;
     const hojas = filas.filter(x => !codigos.some(o => o.length > x.cuenta.length && o.startsWith(x.cuenta)));
     let sinTercero = 0;
     const nuevas = hojas.map(x => {
@@ -2214,7 +2221,7 @@ function importarLineas(c, alTerminar) {
       const nit = String(x.tercero || '').split('-')[0].replace(/\D/g, '');
       const t = nit ? S.d.terceros.find(y => y.numero === nit) : null;
       if (nit && !t) sinTercero++;
-      return { cuenta: a8(x.cuenta), tercero_id: t?.id || '', detalle: [x.detalle, nit && !t ? `NIT ${nit}` : ''].filter(Boolean).join(' · ') || c.descripcion || '', debito: d || '', credito: k || '' };
+      return { cuenta: a8(x.cuenta), tercero_id: t?.id || terDef, detalle: [x.detalle, nit && !t ? `NIT ${nit}` : ''].filter(Boolean).join(' · ') || c.descripcion || '', debito: d || '', credito: k || '' };
     }).filter(l => l.debito || l.credito);
     c.lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito)).concat(nuevas);
     alTerminar();
