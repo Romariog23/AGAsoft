@@ -1,5 +1,5 @@
 import './style.css';
-import { jsonFE, erroresFE, RUTA_FE } from './fe.js';
+import { jsonFE, erroresFE, RUTA_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
@@ -939,7 +939,7 @@ function representacion(d) {
   const tot = d.tipo === 'RC' ? null : totales(its, d);
   const conc = d.tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND;
   return `<article class="rep">
-    ${d.tipo !== 'RC' && d.electronica ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
+    ${d.tipo !== 'RC' && d.electronica && !envioAceptado(d.id) ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
     ${d.estado === 'anulado' ? `<p class="aviso bad">ANULADO${d.anulado_motivo ? ': ' + esc(d.anulado_motivo) : ''}</p>` : ''}
     <header class="rep-head">
       <div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv} · ${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || '')}${e.responsable_iva ? ' · Responsable de IVA' : ' · No responsable de IVA'}</p>
@@ -947,6 +947,10 @@ function representacion(d) {
 ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div>
       <div class="rep-num"><span>${esc(T.nombre.toUpperCase())}${d.tipo === 'FV' && d.electronica ? ' ELECTRÓNICA' : ''}</span><b class="mono">${esc(numDoc(d))}</b></div>
     </header>
+    ${d.tipo !== 'RC' && d.electronica && envioAceptado(d.id) ? (() => { const ev = envioAceptado(d.id); return `<section class="rep-fe"><div class="rep-qr">${qrSvg(contenidoQR(ev))}</div>
+      <div><p><b>${d.tipo === 'FV' ? 'Factura electrónica' : 'Documento electrónico'} validada por la DIAN</b>${ev.ambiente !== 'produccion' ? ' <span class="tag warn">Ambiente de pruebas</span>' : ''}</p>
+        <p class="rep-small">${d.tipo === 'FV' ? 'CUFE' : 'CUDE'}: <span class="mono fe-cufe">${esc(ev.cufe)}</span></p>
+        <p class="rep-small">Fecha de validación: ${fFecha(ev.creado_en.slice(0, 10))}. Escanea el código QR para consultar el documento en la DIAN.</p></div></section>`; })() : ''}
     ${d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? ', vigente hasta ' + fFecha(n.vigencia_hasta) : ''}.</p>` : ''}
     <section class="rep-grid">
       <div><h3>${d.tipo === 'RC' ? 'Recibimos de' : 'Adquiriente'}</h3><p><b>${esc(t.nombre)}</b><br>${esc(docId(t))}<br>${esc(ubic(t))}${t.telefono ? '<br>Tel. ' + esc(t.telefono) : ''}${t.correo ? '<br>' + esc(t.correo) : ''}</p></div>

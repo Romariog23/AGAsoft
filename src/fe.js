@@ -2,6 +2,7 @@
 // Los catálogos de MATIAS usan ids propios: aquí se envían los códigos DIAN y los nombres en campos `_dian`
 // y la función de Supabase (supabase/functions/fe-matias) los cambia por los ids de MATIAS antes de enviar.
 import { r2, num, linea } from './calc.js';
+import qrcode from 'qrcode-generator';
 
 const TIPO_DOC_FE = { FV: 7, NC: 5, ND: 4 };
 const OPERACION_FE = { FV: 1, NC: 12, ND: 14 }; // 1 estándar; 12 y 14: nota que referencia una factura electrónica
@@ -95,4 +96,19 @@ function leerRespuestaFE(r) {
   return { aceptado: valido, cufe, estado: valido ? 'aceptado' : 'rechazado', mensaje: res.StatusDescription || res.StatusMessage || r?.message || '', errores, pdf: r?.pdf?.url || r?.pdf?.path || '', uuid: r?.uuid || '' };
 }
 
-export { jsonFE, erroresFE, leerRespuestaFE, RUTA_FE, TIPO_DOC_FE };
+// Contenido del QR de la representación gráfica: el que devuelve MATIAS (qr.qrDian) o, si no viene, la consulta del CUFE en la DIAN.
+function contenidoQR(envio) {
+  const q = envio?.respuesta?.qr?.qrDian || envio?.respuesta?.QRCode || '';
+  if (typeof q === 'string' && q.length > 20 && !q.includes('omitidos')) return q;
+  const host = envio?.ambiente === 'produccion' ? 'catalogo-vpfe.dian.gov.co' : 'catalogo-vpfe-hab.dian.gov.co';
+  return `https://${host}/document/searchqr?documentkey=${envio?.cufe || ''}`;
+}
+// QR como SVG (sin dependencias de red): sirve en pantalla y al imprimir.
+function qrSvg(texto, tam = 132) {
+  const q = qrcode(0, 'M'); q.addData(texto); q.make();
+  const n = q.getModuleCount(), m = 2, k = n + m * 2; let d = '';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) d += `M${x + m} ${y + m}h1v1h-1z`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${k} ${k}" width="${tam}" height="${tam}" shape-rendering="crispEdges" role="img" aria-label="Código QR de la DIAN"><rect width="${k}" height="${k}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+export { contenidoQR, qrSvg, jsonFE, erroresFE, leerRespuestaFE, RUTA_FE, TIPO_DOC_FE };

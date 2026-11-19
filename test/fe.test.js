@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jsonFE, erroresFE, leerRespuestaFE, RUTA_FE } from '../src/fe.js';
+import { jsonFE, erroresFE, leerRespuestaFE, RUTA_FE, contenidoQR, qrSvg } from '../src/fe.js';
 
 const tercero = { id: 't1', tipo_id: '31', numero: '900123456', dv: 8, nombre: 'Cliente S.A.S.', correo: 'c@x.co', direccion: 'Cra 1 # 2-3', ciudad: 'Medellín', departamento: 'Antioquia', telefono: '300 123 4567', tipo_persona: 'juridica', responsable_iva: true };
 const numeracion = { id: 'n1', resolucion: '18760000001', prefijo: 'FE' };
@@ -36,4 +36,13 @@ test('validación previa y lectura de la respuesta', () => {
   assert.equal(leerRespuestaFE({ response: { IsValid: 'true', StatusCode: '00', XmlDocumentKey: 'cufe1' } }).aceptado, true);
   const r = leerRespuestaFE({ response: { IsValid: 'false', StatusCode: '99', ErrorMessage: { string: ['Regla FAD06 rechazo'] } } });
   assert.equal(r.aceptado, false); assert.deepEqual(r.errores, ['Regla FAD06 rechazo']);
+});
+
+test('QR de la representación gráfica', () => {
+  assert.equal(contenidoQR({ cufe: 'abc', ambiente: 'pruebas' }), 'https://catalogo-vpfe-hab.dian.gov.co/document/searchqr?documentkey=abc');
+  assert.match(contenidoQR({ cufe: 'abc', ambiente: 'produccion' }), /^https:\/\/catalogo-vpfe\.dian/);
+  const q = 'NumFac: FE15\nCUFE: abc\nQRCode: https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=abc';
+  assert.equal(contenidoQR({ cufe: 'abc', respuesta: { qr: { qrDian: q } } }), q);
+  const svg = qrSvg('https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=abc');
+  assert.match(svg, /^<svg/); assert.ok(svg.length > 1000);
 });

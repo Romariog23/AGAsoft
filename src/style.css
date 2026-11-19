@@ -361,3 +361,5 @@ button.bad{color:var(--bad)}
 
 .fe-pre{max-height:360px;overflow:auto;font-size:.75rem;background:var(--surface-2);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all}
 .fe-cufe{word-break:break-all;font-size:.8rem}.ok-txt{color:var(--ok);font-weight:600}
+.rep-fe{display:flex;gap:16px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}.rep-fe p{margin:2px 0}.rep-qr svg{display:block}
+@media print{.rep-fe{border-color:#999}}
