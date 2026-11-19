@@ -1751,6 +1751,7 @@ function formEmpleado(e) {
     if (salario <= 0) throw new Error('Escribe el salario mensual.');
     if (empleados().some(x => x.id !== e.id && x.tercero_id === tercero_id)) throw new Error('Esa persona ya es empleado.');
     const ent = k => fd.get(k) || null;
+    if (['eps_id', 'pension_id', 'cesantias_id', 'caja_id'].some(k => ent(k) === tercero_id)) throw new Error('La EPS, el fondo o la caja no pueden ser el mismo empleado: escoge la entidad.');
     const row = { empresa_id: S.eid, tercero_id, cargo: String(fd.get('cargo') || '').trim(), contrato: fd.get('contrato'), salario, fecha_ingreso: fd.get('fecha_ingreso') || null, area: fd.get('area'), riesgo: fd.get('riesgo'),
       auxilio: fd.get('auxilio') === 'on', ...(fd.get('pensionado') === 'on' || e.pensionado !== undefined ? { pensionado: fd.get('pensionado') === 'on' } : {}), eps_id: ent('eps_id'), pension_id: ent('pension_id'), cesantias_id: ent('cesantias_id'), caja_id: ent('caja_id'), banco: String(fd.get('banco') || '').trim(), cuenta_bancaria: String(fd.get('cuenta_bancaria') || '').trim(),
       ...(e.id ? { fecha_retiro: fd.get('fecha_retiro') || null, activo: fd.get('activo') === 'on' } : { activo: true }) };
@@ -2153,7 +2154,7 @@ function vNominaPago(m, { modo, tercero, concepto }) {
       // Saldos que quedaron a nombre del empleado (nóminas contabilizadas antes de asignarle las entidades):
       // se cancela el pasivo del empleado y el banco sale a nombre de la entidad que se escoja.
       const deEmpleado = L.filter(x => x.tercero_id && esEmpleado(x.tercero_id)).flatMap(x => x.cuentas.filter(c => c.saldo > 0).map(c => {
-          const ent = entidadSugerida(x.tercero_id, c.cuenta);
+          const e0 = entidadSugerida(x.tercero_id, c.cuenta), ent = e0 && e0 !== x.tercero_id && !esEmpleado(e0) ? e0 : '';
           return { reasig: true, grupo: ent || 'sin|' + x.tercero_id + c.cuenta, tercero_id: x.tercero_id, tercero_pago: ent, cuenta: c.cuenta, saldo: c.saldo, pagar: c.saldo, contra: contraPago(x.tercero_id, c.cuenta), on: sel(x.tercero_id) && !!ent };
         }));
       // Todas las filas de una misma entidad juntas (las propias y las que vienen de empleados); las que no tienen entidad, al final.
