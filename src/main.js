@@ -1400,7 +1400,7 @@ const pNom = () => paramNomina(emp()?.contabilidad);
 const siguienteNomina = () => Math.max(0, ...nominas().map(n => Number(n.numero) || 0)) + 1;
 const nomArea = a => (AREAS.find(x => x[0] === a) || AREAS[0])[1];
 const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); return d.toISOString().slice(0, 10); };
-const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
+const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /borrador|nominas_estado_check|row-level security/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
 const optsTerceros = (sel, excluir) => `<option value="">—</option>` + [...S.d.terceros].filter(t => t.id !== excluir).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('');
 
 function vEmpleados(m) {
@@ -1510,7 +1510,7 @@ function vNominas(m) {
   const pintar = () => {
     const l = nominas().filter(n => anuladas || n.estado !== 'anulado').sort((a, b) => b.hasta.localeCompare(a.hasta) || b.numero - a.numero);
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Periodo</th><th class="r">Empleados</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto a pagar</th><th></th></tr></thead><tbody>
-      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono"><a href="#/nominadoc/${n.id}">NE ${n.numero}</a></td><td class="nowrap">${nomPeriodo(n)}</td><td class="r">${(n.lineas || []).length}</td>
+      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono nowrap"><a href="#/nominadoc/${n.id}">NE ${n.numero}</a>${n.estado === 'borrador' ? ' <span class="tag">Borrador</span>' : ''}</td><td class="nowrap">${nomPeriodo(n)}</td><td class="r">${(n.lineas || []).length}</td>
         <td class="r mono">${money(n.devengado)}</td><td class="r mono">${money(n.deducciones)}</td><td class="r mono"><b>${money(n.neto)}</b></td><td>${n.estado === 'anulado' ? '<span class="tag bad">Anulada</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
       : `<p class="muted">${empleados().length ? 'Todavía no hay nóminas liquidadas.' : 'Primero crea los empleados en Nómina › Empleados.'}</p>`;
   };
@@ -1574,7 +1574,7 @@ function vNominaEditor(m, id) {
     <section class="panel grid-doc"><div class="span2 c-obs"><label for="nob">Observaciones</label><textarea id="nob" rows="2" maxlength="1000">${esc(n.observaciones || '')}</textarea></div><div class="span2 totbox" id="ntot"></div></section>
     <section class="panel stack"><h3>Contabilización</h3><div id="nas"></div></section>
     <div class="err" id="nErr" hidden></div>
-    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${x ? '#/nominadoc/' + x.id : '#/nomina'}">Cancelar</a><button type="submit" class="primary" id="nSave">Guardar y contabilizar</button></div>
+    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${x ? '#/nominadoc/' + x.id : '#/nomina'}">Cancelar</a>${!x || x.estado === 'borrador' ? '<button type="button" id="nBor">Guardar borrador</button>' : ''}<button type="submit" class="primary" id="nSave">${x && x.estado !== 'borrador' ? 'Guardar cambios' : 'Guardar y contabilizar'}</button></div>
   </form>`;
   const base = () => $('np').value === 'quincenal' ? 15 : 30;
   const novDe = e => { const v = nov[e.id] || {}; return { ...v, dias: v.dias === undefined || v.dias === '' ? diasEmpleado(e, $('nd').value, $('nh').value, base()) : v.dias }; };
@@ -1618,8 +1618,12 @@ function vNominaEditor(m, id) {
   $('np').onchange = $('nmes').onchange = $('nq').onchange = cambioPer;
   fechasPer();
   $('nfe').onchange = resumen;
+  // Borrador: se guarda sin contabilizar; se puede editar o eliminar hasta que se contabilice.
+  let comoBorrador = false;
+  if ($('nBor')) $('nBor').onclick = () => { comoBorrador = true; $('nf').requestSubmit(); };
   $('nf').onsubmit = async ev => {
     ev.preventDefault();
+    const borrador = comoBorrador; comoBorrador = false;
     const err = t => { $('nErr').textContent = t; $('nErr').hidden = false; };
     const desde = $('nd').value, hasta = $('nh').value, fecha = $('nfe').value, ls = calc();
     if (!desde || !hasta || hasta < desde) return err('Revisa las fechas del periodo.');
@@ -1633,8 +1637,10 @@ function vNominaEditor(m, id) {
       if (faltan.length) await store.saveMany('cuentas', faltan.map(c => ({ ...c, empresa_id: S.eid })));
       const novGuardar = Object.fromEntries(Object.entries(nov).map(([k, v]) => [k, Object.fromEntries(Object.entries(v).filter(([kk, vv]) => kk !== 'dias' && vv !== '' && vv !== undefined))]));
       const row = { empresa_id: S.eid, periodo: $('np').value, desde, hasta, fecha, lineas: ls, novedades: novGuardar, cuenta_neto: P.cuenta_neto, observaciones: $('nob').value.trim(), ...totalesNomina(ls) };
-      const g = x ? await store.save('nominas', { ...row, id: x.id }) : await store.save('nominas', { ...row, numero: siguienteNomina(), estado: 'contabilizado' });
-      await cargarEmpresa(); toast(faltan.length ? `Nómina guardada y contabilizada. Se crearon ${faltan.length} cuentas en el plan.` : 'Nómina guardada y contabilizada.'); location.hash = '#/nominadoc/' + g.id;
+      const estado = borrador ? 'borrador' : 'contabilizado';
+      const g = x ? await store.save('nominas', { ...row, id: x.id, estado }) : await store.save('nominas', { ...row, numero: siguienteNomina(), estado });
+      const msg = borrador ? 'Borrador guardado. Todavía no se contabiliza.' : 'Nómina guardada y contabilizada.';
+      await cargarEmpresa(); toast(faltan.length ? `${msg} Se crearon ${faltan.length} cuentas en el plan.` : msg); location.hash = '#/nominadoc/' + g.id;
     } catch (e) { err(faltaTablaNomina(e)); } finally { $('nSave').disabled = false; }
   };
   pintarTabla();
@@ -1655,21 +1661,34 @@ function hojaDesprendible(n, l) {
 }
 function vNominaDoc(m, id) {
   const n = nominaById(id); if (!n) { m.innerHTML = '<p>No se encontró la nómina.</p>'; return; }
-  const anulada = n.estado === 'anulado', ms = asientoNomina({ ...n, estado: 'contabilizado' });
+  const anulada = n.estado === 'anulado', borr = n.estado === 'borrador', ms = asientoNomina({ ...n, estado: 'contabilizado' });
   const tot = k => money((n.lineas || []).reduce((s, l) => s + num(l[k]), 0));
-  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : ''}</h2>
-      <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · contabilizada el ${fFecha(n.fecha)}</p></div>
-    <div class="row">${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button></div></header>
+  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : borr ? '<span class="tag">Borrador</span>' : ''}</h2>
+      <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · ${borr ? `sin contabilizar (fecha ${fFecha(n.fecha)})` : `contabilizada el ${fFecha(n.fecha)}`}</p></div>
+    <div class="row">${borr ? `<button id="eliminar">Eliminar</button><a class="btn" href="#/nominaeditar/${id}">Editar</a><button id="imprimir">Imprimir desprendibles</button><button class="primary" id="contab">Contabilizar</button>`
+      : `${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button>`}</div></header>
     <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empleado</th><th class="r">Días</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto</th><th class="r">Aportes</th><th class="r">Provisiones</th><th></th></tr></thead><tbody>
       ${(n.lineas || []).map((l, i) => `<tr><td><b>${esc(terc(l.tercero_id)?.nombre || '')}</b></td><td class="r">${l.dias}</td><td class="r mono">${money(l.devengado)}</td><td class="r mono">${money(l.deducciones)}</td><td class="r mono"><b>${money(l.neto)}</b></td><td class="r mono">${money(l.aportes)}</td><td class="r mono">${money(l.provisiones)}</td>
-        <td class="r nowrap"><button class="sm" data-dp="${i}">Desprendible</button>${anulada ? '' : `<a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${l.tercero_id}">Pagar</a>`}</td></tr>`).join('')}
+        <td class="r nowrap"><button class="sm" data-dp="${i}">Desprendible</button>${anulada || borr ? '' : `<a class="btn sm ghost" href="#/compranueva?tipo=CE&tercero=${l.tercero_id}">Pagar</a>`}</td></tr>`).join('')}
       <tr class="strong"><td>Total</td><td></td><td class="r mono">${tot('devengado')}</td><td class="r mono">${tot('deducciones')}</td><td class="r mono">${tot('neto')}</td><td class="r mono">${tot('aportes')}</td><td class="r mono">${tot('provisiones')}</td><td></td></tr></tbody></table></div>
       ${n.observaciones ? `<p><b>Observaciones:</b> ${esc(n.observaciones)}</p>` : ''}</section>
-    <section class="panel stack"><h3>Contabilización</h3>${tablaAsiento(ms)}${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
+    <section class="panel stack"><h3>${borr ? 'Contabilización (así quedará al contabilizar)' : 'Contabilización'}</h3>${tablaAsiento(ms)}${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
       <p class="hint">El pago a cada empleado y a cada entidad se hace con un comprobante de egreso: ahí aparecen los saldos de nómina por pagar.</p></section>`;
   const imprimirN = ls => { $('print').innerHTML = ls.map(l => hojaDesprendible(n, l)).join(''); const t = document.title; document.title = `Nómina NE ${n.numero} - ${emp().nombre}`; window.print(); document.title = t; };
   $('imprimir').onclick = () => imprimirN(n.lineas || []);
   m.querySelectorAll('[data-dp]').forEach(b => b.onclick = () => imprimirN([n.lineas[Number(b.dataset.dp)]]));
+  if ($('contab')) $('contab').onclick = async () => {
+    $('contab').disabled = true;
+    try { await store.save('nominas', { id: n.id, estado: 'contabilizado' }); await cargarEmpresa(); toast('Nómina contabilizada.'); route(); }
+    catch (e) { toast(faltaTablaNomina(e), true); $('contab').disabled = false; }
+  };
+  if ($('eliminar')) $('eliminar').onclick = () => dialogo(`<h2>Eliminar borrador NE ${n.numero}</h2><p>El borrador se borra del todo. Como no estaba contabilizado, no afecta la contabilidad.</p>${pie('Eliminar')}`, async () => {
+    try { await store.remove('nominas', n.id); } catch (e) { throw new Error(faltaTablaNomina(e)); }
+    await cargarEmpresa();
+    // Sin el permiso de borrar (021), Supabase no borra ni avisa: se revisa que ya no esté.
+    if (nominaById(n.id)) throw new Error('No se pudo eliminar. Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.');
+    toast('Borrador eliminado.'); location.hash = '#/nomina';
+  });
   if ($('anular')) $('anular').onclick = () => {
     const pagada = compras().some(c => c.tipo === 'CE' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.aplicaciones || []).some(a => a.cuenta && (n.lineas || []).some(l => l.tercero_id === c.tercero_id)));
     dialogo(`<h2>Anular nómina NE ${n.numero}</h2><p>Sus movimientos dejan de sumar en los informes. El número no se vuelve a usar.${pagada ? ' <b>Hay egresos que pagaron saldos de nómina a estos empleados después de esta fecha: revísalos.</b>' : ''}</p>
