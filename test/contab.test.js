@@ -219,3 +219,8 @@ test('medios magnéticos: cálculo débito, crédito, saldo o pago por regla', a
   assert.equal(con('credito'), 200);
   assert.equal(con('saldo'), 1300); // acumulado desde el inicio
 });
+
+test('la caja o banco del recibo lleva el tercero del recibo', () => {
+  const ms = asiento(rc, { aplicaciones: [], docs: [], param: {} });
+  assert.ok(ms.length && ms.every(m => m.tercero_id === 't1'));
+});
