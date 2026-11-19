@@ -1,6 +1,6 @@
 import './style.css';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
-import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
+import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
@@ -37,7 +37,7 @@ const itemsDe = id => (S.d?.items || []).filter(i => i.documento_id === id).sort
 const aplDe = id => (S.d?.aplicaciones || []).filter(a => a.recibo_id === id);
 const numDoc = d => d.numero ? `${d.prefijo || ''}${d.prefijo ? ' ' : ''}${d.numero}` : 'Borrador';
 const nomDoc = d => `${TIPOS[d.tipo].corto} ${numDoc(d)}`;
-const docId = t => t ? `${TIPOS_ID.find(x => x[0] === t.tipo_id)?.[1] === 'NIT' ? 'NIT' : (TIPOS_ID.find(x => x[0] === t.tipo_id)?.[1] || '')} ${fmtNit(t.numero)}${t.dv != null && t.tipo_id === '31' ? '-' + t.dv : ''}` : '';
+const docId = t => t ? `${SIGLA_ID[t.tipo_id] || ''} ${fmtNit(t.numero)}${t.dv != null && t.tipo_id === '31' ? '-' + t.dv : ''}` : '';
 
 function toast(msg, err) { const t = $('toast'); t.textContent = msg; t.className = err ? 'bad' : ''; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, err ? 6000 : 3500); }
 const fail = e => toast(e?.message || String(e), true);
@@ -993,7 +993,7 @@ function formTercero(t = {}, despues, modo = 'cliente') {
   const quien = prov ? 'proveedor' : empl ? 'empleado' : 'cliente';
   const esProv = t.id ? !!t.es_proveedor : prov, esCli = t.id ? t.es_cliente !== false : !prov && !empl;
   const f = dialogo(`<h2>${t.id ? `Editar ${quien}` : `Nuevo ${quien}`}</h2>
-    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID, t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
+    <div class="grid2">${campoSel('tipo_id', 'Tipo de documento', TIPOS_ID.map(([k, n]) => [k, SIGLA_ID[k] === n ? n : `${SIGLA_ID[k]} · ${n}`]), t.tipo_id || '31')}${campoNit('numero', 'Número', t.numero, t.dv)}</div>
     ${campoSel('tipo_persona', 'Tipo de persona', [['juridica', 'Persona jurídica'], ['natural', 'Persona natural']], t.tipo_persona || personaDe('', t, t.tipo_id || '31'))}
     <div data-p="juridica">${campo('razon_social', 'Razón social', t.razon_social || (t.tipo_persona !== 'natural' ? t.nombre : '') || '', 'maxlength="200"')}</div>
     <div data-p="natural" class="grid2">${(pn => `${campo('primer_nombre', 'Primer nombre', pn.primer_nombre || '', 'maxlength="60"')}${campo('segundo_nombre', 'Segundo nombre', pn.segundo_nombre || '', 'maxlength="60"')}
