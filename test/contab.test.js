@@ -226,3 +226,24 @@ test('la caja o banco del recibo lleva el tercero del recibo', () => {
   const ms = asiento(rc, { aplicaciones: [], docs: [], param: {} });
   assert.ok(ms.length && ms.every(m => m.tercero_id === 't1'));
 });
+
+test('resumen del panel: ingresos y gastos por mes, utilidad del año, cartera por edades', async () => {
+  const { resumenMensual, carteraEdades } = await import('../src/contab.js');
+  const ms = [
+    { fecha: '2026-10-05', cuenta: '41350501', debito: 0, credito: 1000, tipo: 'FV' },
+    { fecha: '2026-11-03', cuenta: '41350501', debito: 0, credito: 3000, tipo: 'FV' },
+    { fecha: '2026-11-03', cuenta: '41750501', debito: 500, credito: 0, tipo: 'NC' },
+    { fecha: '2026-11-10', cuenta: '51050601', debito: 800, credito: 0, tipo: 'NO' },
+    { fecha: '2025-12-20', cuenta: '41350501', debito: 0, credito: 9000, tipo: 'FV' },
+    { fecha: '2025-12-31', cuenta: '41350501', debito: 9000, credito: 0, tipo: 'CI' },
+    { fecha: '2026-11-25', cuenta: '41350501', debito: 0, credito: 7000, tipo: 'FV' },
+    { fecha: '2026-11-03', cuenta: '13050501', debito: 3000, credito: 0, tipo: 'FV' },
+  ];
+  const r = resumenMensual(ms, '2026-11-19', 12);
+  assert.equal(r.meses.length, 12); assert.equal(r.meses[0], '2025-12'); assert.equal(r.meses.at(-1), '2026-11');
+  assert.equal(r.ingresos.at(-1), 2500); assert.equal(r.gastos.at(-1), 800); assert.equal(r.ingresos.at(-2), 1000);
+  assert.equal(r.ingresos[0], 9000, 'el cierre no resta');
+  assert.equal(r.utilidad, 2700, 'solo el año de la fecha y hasta la fecha');
+  const e = carteraEdades([{ saldo: 100, diasVencida: 0 }, { saldo: 50, diasVencida: 10 }, { saldo: 20, diasVencida: 45 }, { saldo: 5, diasVencida: 90 }, { saldo: 0, diasVencida: 90 }]);
+  assert.deepEqual(e.map(x => x[1]), [100, 50, 20, 5]);
+});
