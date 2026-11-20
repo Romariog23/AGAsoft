@@ -1022,7 +1022,7 @@ function representacion(d, opc = {}) {
         <p class="rep-small">Software: AGAsoft · Proveedor tecnológico: Factus</p></div></section>` : '';
   const bloqueRes = d.tipo === 'FV' && n?.resolucion ? `<p class="rep-small rep-res">Resolución DIAN No. ${esc(n.resolucion)}${n.fecha_resolucion ? ' del ' + fFecha(n.fecha_resolucion) : ''}. Numeración autorizada ${esc(n.prefijo)} ${n.desde} a ${esc(n.prefijo)} ${n.hasta}${n.vigencia_hasta ? `, vigente hasta ${fFecha(n.vigencia_hasta)}` : ''}.</p>` : '';
   const arriba = D.ubic_fe === 'arriba';
-  return `<article class="rep rep-${D.plantilla}${D.codigo ? '' : ' sin-cod'}${D.descuento ? '' : ' sin-desc'}" style="--rep-color:${D.color}">
+  return `<article class="rep rep-doc rep-${D.plantilla}${D.codigo ? '' : ' sin-cod'}${D.descuento ? '' : ' sin-desc'}" style="--rep-color:${D.color}">
     ${d.tipo !== 'RC' && d.electronica && !envioAceptado(d.id) ? '<p class="aviso">Factura electrónica pendiente de transmitir a la DIAN: todavía no ha sido validada.</p>' : ''}
     ${d.estado === 'anulado' ? `<p class="aviso bad">ANULADO${d.anulado_motivo ? ': ' + esc(d.anulado_motivo) : ''}</p>` : ''}
     <header class="rep-head">
@@ -1061,9 +1061,10 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
       ${tot.neto !== tot.total ? `<dt class="strong">Neto a pagar</dt><dd class="mono strong">${money(tot.neto)}</dd>` : ''}</dl></section>`}
     ${d.observaciones ? `<p class="rep-obs"><b>Observaciones:</b> ${esc(d.observaciones)}</p>` : ''}
     ${d.tipo === 'RC' ? '<div class="firmas"><span>Elaboró</span><span>Recibí conforme</span></div>' : ''}
+    <div class="rep-final">
     ${!arriba && (bloqueFE || bloqueRes) ? `<footer class="rep-pie">${bloqueFE}${bloqueRes}</footer>` : ''}
     ${d.tipo === 'FV' && pie ? `<p class="rep-small rep-pie-txt">${esc(pie)}</p>` : ''}
-    <p class="rep-small">Elaborado con AGAsoft.</p>
+    <p class="rep-small">Elaborado con AGAsoft.</p></div>
   </article>`;
 }
 /* ---------- Habilitación ante la DIAN ---------- */
