@@ -300,7 +300,12 @@ dialog::backdrop{background:rgb(8 22 29 / .45)}
   body{font-size:11pt}
   .rep{max-width:none}
   .aviso{border:1px solid #9a5b00}
-  @page{margin:14mm}
+  /* Margen 0 en la página: así el navegador no imprime fecha, título y dirección; el margen lo da #print. */
+  @page{margin:0}
+  #print{padding:12mm 14mm;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+  /* Factura de una hoja: el bloque DIAN (QR, CUFE, resolución) queda pegado al pie de la página. */
+  #print .rep-doc{min-height:calc(100vh - 26mm)}
+  #print .rep-doc .rep-final{margin-top:auto}
 }
 .neg{color:var(--bad)}
 .tbl.comp small.hint{display:block;margin-top:2px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -371,6 +376,7 @@ button.bad{color:var(--bad)}
 .rep-head{border-bottom-color:var(--rep-color)}
 .rep-num b{color:var(--rep-color)}
 .rep-items thead th{color:var(--rep-color)}
+.rep-final{display:flex;flex-direction:column;gap:14px}
 .rep-pie{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
 .rep-pie .rep-fe{margin:0}
 .rep.sin-cod .rep-items th:nth-child(2),.rep.sin-cod .rep-items td:nth-child(2),.rep.sin-desc .rep-items th:nth-child(6),.rep.sin-desc .rep-items td:nth-child(6){display:none}
