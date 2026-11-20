@@ -415,3 +415,8 @@ button.bad{color:var(--bad)}
 .w-bar{grid-column:1/-1;display:block;height:5px;border-radius:3px;background:var(--ch-bar, var(--accent, #2f6f5e));opacity:.75}
 .w-tot{border-top:1px solid var(--line);padding-top:6px;font-weight:600}
 .w-opc{display:flex;flex-direction:column;gap:10px}.w-opc .check{align-items:flex-start}
+/* Estado de resultados comparativo: una raya entre cada mes y el total resaltado */
+.tbl.erc th+th,.tbl.erc td+td{border-left:1px solid var(--line)}
+.tbl.erc th:last-child,.tbl.erc td:last-child{border-left:2px solid var(--fg);background:var(--surface-2)}
+.tbl.erc tr.erc-tit td{border-left:0;background:none}
+@media print{.tbl.erc th+th,.tbl.erc td+td{border-left:1px solid #999}.tbl.erc th:last-child,.tbl.erc td:last-child{border-left:2px solid #000}}
