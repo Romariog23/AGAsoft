@@ -1520,7 +1520,9 @@ const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, p
 const movs = () => movimientos({ ...S.d, param: param(), tarifas: tarifasIva(emp()?.contabilidad) });
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
 const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
-const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: hoy() };
+// Hasta el fin del mes en curso: la nómina y los cierres se contabilizan con fecha del último día del mes.
+const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); return d.toISOString().slice(0, 10); };
+const F = { desde: hoy().slice(0, 4) + '-01-01', hasta: finMes(hoy()) };
 const linkDoc = m => m.origen === 'nomina' ? `<a class="mono" href="#/nominadoc/${m.doc_id}">${esc(m.ref)}</a>` : m.origen === 'compra' ? `<a class="mono" href="#/compra/${m.doc_id}">${esc(TIPOS_COMPRA[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : m.origen === 'comp' ? `<a class="mono" href="#/comp/${m.doc_id}">${esc(TIPOS_COMP[m.tipo].corto)} ${esc(m.ref.replace(/^\w+ /, ''))}</a>` : `<a class="mono" href="#/doc/${m.doc_id}">${esc(TIPOS[m.tipo].corto)} ${esc(m.ref)}</a>`;
 const valor = v => v ? money(v) : '';
 function tablaAsiento(ms, nuevas = {}) {
@@ -1536,7 +1538,7 @@ function filtroFechas(id, conDesde, onChange) {
     box.querySelectorAll('input[type=date]').forEach(i => i.onchange = () => { F[i.name] = i.value; onChange(); });
     box.querySelectorAll('[data-per]').forEach(b => b.onclick = () => {
       const h = hoy(), y = h.slice(0, 4), mth = h.slice(0, 7);
-      const per = { mes: [mth + '-01', h], ano: [y + '-01-01', h], anterior: [(y - 1) + '-01-01', (y - 1) + '-12-31'] }[b.dataset.per];
+      const per = { mes: [mth + '-01', finMes(h)], ano: [y + '-01-01', y + '-12-31'], anterior: [(y - 1) + '-01-01', (y - 1) + '-12-31'] }[b.dataset.per];
       [F.desde, F.hasta] = per; box.querySelector('[name=desde]') && (box.querySelector('[name=desde]').value = F.desde); box.querySelector('[name=hasta]').value = F.hasta; onChange();
     });
   });
@@ -1693,7 +1695,6 @@ const esEmpleado = tid => empleados().some(e => e.tercero_id === tid);
 const pNom = () => paramNomina(emp()?.contabilidad);
 const siguienteNomina = () => Math.max(0, ...nominas().map(n => Number(n.numero) || 0)) + 1;
 const nomArea = a => (AREAS.find(x => x[0] === a) || AREAS[0])[1];
-const finMes = f => { const d = new Date(f.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(0); return d.toISOString().slice(0, 10); };
 const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /borrador|nominas_estado_check|row-level security/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
 // El tercero de la propia empresa (mismo NIT), si está creado.
 const terceroEmpresa = () => { const nit = String(emp()?.nit || '').replace(/\D/g, ''); return nit ? S.d?.terceros.find(t => String(t.numero).replace(/\D/g, '') === nit)?.id || '' : ''; };
