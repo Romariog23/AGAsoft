@@ -649,13 +649,20 @@ function notasTag(d) {
   return ['NC', 'ND'].map(t => { const n = ns.filter(x => x.tipo === t).length; return n ? ` <span class="tag warn" title="${ns.filter(x => x.tipo === t).map(x => esc(numDoc(x))).join(', ')}">Con nota ${t === 'NC' ? 'crédito' : 'débito'}${n > 1 ? ` (${n})` : ''}</span>` : ''; }).join('');
 }
 const claseTag = d => d.electronica ? '<span class="tag el">Electrónica</span>' : '<span class="tag">Normal</span>';
+// Notas y recibos: la factura que afectan y su saldo actual en cartera (factura de contado = 0).
+function celdasSaldoRef(d, cart) {
+  const fs = d.tipo === 'RC' ? S.d.aplicaciones.filter(a => a.recibo_id === d.id).map(a => docById(a.factura_id)).filter(Boolean) : [docById(d.ref_id)].filter(Boolean);
+  if (!fs.length) return `<td class="muted">${d.tipo === 'RC' ? 'Anticipo' : '—'}</td><td class="r mono">—</td>`;
+  const saldo = r2(fs.reduce((t, f) => t + Math.max(0, cart[f.id]?.saldo || 0), 0));
+  return `<td class="mono">${fs.map(f => esc(numDoc(f))).join(', ')}</td><td class="r mono">${saldo > 0.009 ? money(saldo) : `${money(0)} <span class="tag ok">Sin saldo</span>`}</td>`;
+}
 function tablaDocs(list, conTipo) {
   if (!list.length) return '';
   const cart = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones).map(c => [c.factura.id, c]));
-  return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${conTipo ? '<th>Documento</th>' : '<th>Número</th>'}<th>Fecha</th><th>Cliente</th><th class="r">Total</th>${!conTipo && list[0]?.tipo === 'FV' ? '<th class="r">Saldo</th>' : ''}<th>Estado</th></tr></thead><tbody>
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${conTipo ? '<th>Documento</th>' : '<th>Número</th>'}<th>Fecha</th><th>Cliente</th><th class="r">Total</th>${!conTipo && list[0]?.tipo === 'FV' ? '<th class="r">Saldo</th>' : ''}${!conTipo && list[0] && list[0].tipo !== 'FV' ? '<th>Factura</th><th class="r">Saldo en cartera</th>' : ''}<th>Estado</th></tr></thead><tbody>
     ${list.map(d => { const c = cart[d.id]; return `<tr class="click" data-go="#/${d.estado === 'borrador' ? 'editar' : 'doc'}/${d.id}">
       <td class="mono"><a href="#/${d.estado === 'borrador' ? 'editar' : 'doc'}/${d.id}">${conTipo ? esc(nomDoc(d)) : esc(numDoc(d))}</a></td><td>${fFecha(d.fecha)}</td><td>${esc(terc(d.tercero_id)?.nombre || '')}</td>
-      <td class="r mono">${money(d.tipo === 'RC' ? d.total : d.neto)}</td>${!conTipo && d.tipo === 'FV' ? `<td class="r mono">${c ? (c.saldo > 0.009 ? money(c.saldo) + (c.diasVencida ? ` <span class="tag bad">${c.diasVencida} d</span>` : '') : '<span class="tag ok">Pagada</span>') : d.estado === 'emitido' ? money(0) : '—'}</td>` : ''}<td>${estadoTag(d)}</td></tr>`; }).join('')}
+      <td class="r mono">${money(d.tipo === 'RC' ? d.total : d.neto)}</td>${!conTipo && d.tipo !== 'FV' ? celdasSaldoRef(d, cart) : ''}${!conTipo && d.tipo === 'FV' ? `<td class="r mono">${c ? (c.saldo > 0.009 ? money(c.saldo) + (c.diasVencida ? ` <span class="tag bad">${c.diasVencida} d</span>` : '') : '<span class="tag ok">Pagada</span>') : d.estado === 'emitido' ? money(0) : '—'}</td>` : ''}<td>${estadoTag(d)}</td></tr>`; }).join('')}
   </tbody></table></div>`;
 }
 document.addEventListener('click', ev => { const tr = ev.target.closest('tr[data-go]'); if (tr && !ev.target.closest('a,button')) location.hash = tr.dataset.go; });
