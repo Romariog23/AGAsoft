@@ -725,7 +725,8 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   if (id) {
     const d = docById(id);
     if (!d) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
-    if (d.estado !== 'borrador' && (d.estado !== 'emitido' || d.electronica)) { location.replace('#/doc/' + id); return; }
+    // Guardados se pueden editar; los electrónicos solo hasta que la DIAN los acepte.
+    if (d.estado !== 'borrador' && (d.estado !== 'emitido' || (d.electronica && envioAceptado(id)))) { location.replace('#/doc/' + id); return; }
     doc = { ...d }; items = itemsDe(id).map(i => ({ ...i })); apl = aplDe(id).map(a => ({ ...a })); tipo = d.tipo;
   } else {
     if (!TIPOS[tipo]) { location.replace('#/inicio'); return; }
@@ -741,7 +742,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
   const RET_V = { retefuente: ['rfC', 'rf'], reteiva: ['riC', 'ri'], reteica: ['ricaC', 'rica'] };
-  // Documento ya guardado (no electrónico) que el dueño está editando: conserva su número.
+  // Documento ya guardado (con número) que el dueño está editando: conserva su número.
   const editando = !!id && doc.estado === 'emitido';
   // Solo los electrónicos tienen borrador y se emiten; los demás contabilizan al guardar.
   const esElec = () => tipo === 'FV' ? !!doc.electronica : esNota ? !!docById(($('ref') && $('ref').value) || doc.ref_id)?.electronica : false;
@@ -890,9 +891,9 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   // Electrónico: borrador y Emitir. Los demás: un solo botón Guardar que contabiliza.
   const pintarBotones = () => {
     const el = esElec() && !editando;
-    $('saveB').hidden = !el; $('emitB').textContent = el ? 'Emitir' : 'Guardar';
-    $('edSub').textContent = editando ? 'Al guardar se actualiza la contabilización. El número no cambia.' : el ? 'Borrador: puedes cambiarlo hasta que lo emitas.' : 'Al guardar queda con número y contabilizado. Después se puede editar o anular.';
-    $('asiHint').textContent = el ? 'Vista previa. Se registra al emitir.' : 'Vista previa. Se registra al guardar.';
+    $('saveB').hidden = !el; $('emitB').textContent = 'Guardar';
+    $('edSub').textContent = editando ? `Al guardar se actualiza la contabilización. El número no cambia.${doc.electronica ? ' Se bloquea cuando la DIAN la acepte.' : ''}` : el ? 'Al guardar toma su número y se contabiliza. Puedes seguir editándola hasta que la envíes a la DIAN.' : 'Al guardar queda con número y contabilizado. Después se puede editar o anular.';
+    $('asiHint').textContent = 'Vista previa. Se registra al guardar.';
   };
 
   // Eventos
@@ -1004,7 +1005,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
     }
     // Los que no son electrónicos crean su numeración solos si falta.
-    if (esElec() && !feHabilitada()) return 'La facturación electrónica de esta empresa todavía no está habilitada ante la DIAN (falta superar el set de pruebas). Guárdala como borrador o emite una factura normal.';
+    if (esElec() && !feHabilitada()) return 'La facturación electrónica de esta empresa todavía no está habilitada ante la DIAN (falta superar el set de pruebas). Guárdala como borrador o haz una factura normal.';
     if (esElec()) try { numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones); } catch (e) { return e.message; }
     return '';
   };
@@ -1034,9 +1035,9 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       return;
     }
     const n = numeracionPara({ ...doc, empresa_id: S.eid, tipo }, S.d.numeraciones);
-    if (!await confirmar(`Emitir ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Después de emitida no se puede modificar: se corrige con una nota.`, 'Emitir')) return;
+    if (!await confirmar(`Guardar ${T.nombre.toLowerCase()}${tipo === 'FV' ? (doc.electronica ? ' electrónica' : ' normal') : ''}`, `Quedará con el número <b class="mono">${esc(n.prefijo || '')} ${n.siguiente}</b> por <b>${money(esRC ? doc.total : doc.neto)}</b> a nombre de <b>${esc(terc(doc.tercero_id)?.nombre)}</b>.<br>Puedes seguir editándola hasta que la envíes a la DIAN. Cuando la DIAN la acepte ya no se modifica: se corrige con una nota.`, 'Guardar')) return;
     $('emitB').disabled = true;
-    try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`${nomDoc(e)} ${tipo === 'RC' ? 'emitido' : 'emitida'}.`); location.hash = '#/doc/' + e.id; }
+    try { const g = await guardar(); const e = await store.emitir(g.id); await cargarEmpresa(); toast(`${nomDoc(e)} guardada. Cuando esté lista, envíala a la DIAN.`); location.hash = '#/doc/' + e.id; }
     catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
   };
   if ($('delB')) $('delB').onclick = async () => { if (!await confirmar('Borrar borrador', 'El borrador se elimina.', 'Borrar')) return; try { await store.remove('documentos', id); await cargarEmpresa(); location.hash = '#/' + tipo; } catch (e) { fail(e); } };
@@ -1226,7 +1227,7 @@ function vDoc(m, id) {
   const rel = S.d.documentos.filter(x => x.estado !== 'borrador' && (x.ref_id === id || S.d.aplicaciones.some(a => a.recibo_id === x.id && a.factura_id === id)));
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/${d.tipo}">← ${TIPOS[d.tipo].plural}</a><h2>${esc(nomDoc(d))}</h2></div>
     <div class="row">${d.tipo === 'FV' && d.estado === 'emitido' ? `${c?.saldo > 0.009 ? `<a class="btn" href="#/nuevo/RC?ref=${id}">Recibir pago</a>` : ''}<a class="btn" href="#/nuevo/NC?ref=${id}">Nota crédito</a><a class="btn" href="#/nuevo/ND?ref=${id}">Nota débito</a>` : ''}
-    ${d.estado === 'emitido' && !d.electronica ? `<a class="btn" href="#/editar/${id}">Editar</a>` : ''}
+    ${d.estado === 'emitido' && (!d.electronica || !envioAceptado(id)) ? `<a class="btn" href="#/editar/${id}">Editar</a>` : ''}
     ${d.estado === 'emitido' && !d.electronica ? '<button id="anular">Anular</button>' : ''}
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}

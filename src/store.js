@@ -70,8 +70,8 @@ function localStore() {
     async saveDoc(doc, items, apl) {
       const prev = doc.id && db.documentos.find(d => d.id === doc.id);
       if (prev && prev.estado === 'anulado') throw new Error('El documento está anulado.');
-      if (prev && prev.estado === 'emitido' && prev.electronica) throw new Error('Los documentos electrónicos no se modifican: se corrigen con una nota.');
-      const d = await api.save('documentos', prev && prev.estado === 'emitido' ? { ...doc, tipo: prev.tipo, electronica: false, estado: 'emitido', prefijo: prev.prefijo, numero: prev.numero, numeracion_id: prev.numeracion_id } : { ...doc, estado: 'borrador' });
+      if (prev && prev.estado === 'emitido' && prev.electronica && (db.fe_envios || []).some(e => e.documento_id === prev.id && e.estado === 'aceptado')) throw new Error('Este documento ya fue aceptado por la DIAN: no se modifica, se corrige con una nota.');
+      const d = await api.save('documentos', prev && prev.estado === 'emitido' ? { ...doc, tipo: prev.tipo, electronica: !!prev.electronica, estado: 'emitido', prefijo: prev.prefijo, numero: prev.numero, numeracion_id: prev.numeracion_id } : { ...doc, estado: 'borrador' });
       db.items = db.items.filter(r => r.documento_id !== d.id).concat(items.map((it, i) => ({ ...it, id: uid(), documento_id: d.id, empresa_id: d.empresa_id, orden: i })));
       db.aplicaciones = db.aplicaciones.filter(r => r.recibo_id !== d.id).concat((apl || []).map(a => ({ ...a, id: uid(), recibo_id: d.id, empresa_id: d.empresa_id })));
       persist(); return d;

@@ -40,7 +40,7 @@ test('notas crédito y débito referencian el número de la factura en Factus', 
 test('validación previa y lectura de la respuesta de Factus', () => {
   assert.deepEqual(erroresFE({ doc: fv, tercero, numeracion }), []);
   const e = erroresFE({ doc: { ...fv, estado: 'borrador' }, tercero: { ...tercero, ciudad: '' }, numeracion: { resolucion: '' } }).join(' ');
-  assert.match(e, /emite/); assert.match(e, /municipio/); assert.match(e, /resolución/);
+  assert.match(e, /guarda el documento/); assert.match(e, /municipio/); assert.match(e, /resolución/);
   const ok = leerRespuestaFE({ status: 'Created', message: 'validado con éxito', data: { number: 'SETP990000550', cufe: 'cufe1', is_validated: true, errors: {}, links: { qr: 'https://catalogo-vpfe-hab.dian.gov.co/document/searchqr?documentkey=cufe1', public_url: 'https://x' } } });
   assert.equal(ok.aceptado, true); assert.equal(ok.cufe, 'cufe1'); assert.equal(ok.numero, 'SETP990000550'); assert.match(ok.qr, /searchqr/);
   const r = leerRespuestaFE({ message: 'Error', data: { is_validated: false, errors: { FAJ44b: 'Regla FAJ44b rechazo' } } });
