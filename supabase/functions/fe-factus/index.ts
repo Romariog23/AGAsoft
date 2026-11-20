@@ -5,18 +5,19 @@
 //   { accion: 'cuenta', empresa_id, ambiente, usuario, clave, client_id, client_secret } → guarda la cuenta y la prueba.
 //   { accion: 'probar', empresa_id }                                                   → prueba la cuenta y trae los rangos.
 //   { accion: 'enviar', documento_id, tipo, body }                                     → envía un documento emitido.
-// Secretos opcionales: FACTUS_URL_PRODUCCION (host de producción que da Factus), FACTUS_URL_PRUEBAS,
+// Secretos opcionales: FACTUS_URL_PRODUCCION (por defecto https://api.factus.com.co), FACTUS_URL_PRUEBAS,
 // FACTUS_CLIENT_ID y FACTUS_CLIENT_SECRET (si Factus te da un client_id único de integrador).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { MUNICIPIOS } from './municipios.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const URLS: Record<string, string> = {
   pruebas: (Deno.env.get('FACTUS_URL_PRUEBAS') || 'https://api-sandbox.factus.com.co').replace(/\/+$/, ''),
-  produccion: (Deno.env.get('FACTUS_URL_PRODUCCION') || '').replace(/\/+$/, ''),
+  produccion: (Deno.env.get('FACTUS_URL_PRODUCCION') || 'https://api.factus.com.co').replace(/\/+$/, ''),
 };
 const RUTA: Record<string, string> = { FV: '/v2/bills/validate', NC: '/v2/credit-notes/validate', ND: '/v2/debit-notes/validate' };
-const BORRAR: Record<string, string> = { FV: '/v2/bills/destroy/reference/', NC: '/v2/credit-notes/destroy/reference/', ND: '/v2/debit-notes/destroy/reference/' };
+const BORRAR: Record<string, string> = { FV: '/v2/bills/destroy/reference/', NC: '/v2/credit-notes/reference/', ND: '/v2/debit-notes/reference/' };
 
 type Cuenta = { ambiente: string; usuario: string; clave: string; client_id: string; client_secret: string };
 
@@ -36,6 +37,17 @@ async function factus(t: { base: string; tk: string }, path: string, init: Reque
   return { status: r.status, data };
 }
 const lista = (d: any): any[] => Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.data?.data) ? d.data.data : [];
+// Código DANE del municipio, por nombre (y departamento si hay dos con el mismo nombre). Factus no tiene catálogo en la API v2.
+const MUN = MUNICIPIOS.split(';').map(x => x.split('|'));
+function municipio(ciudad: string, depto: string) {
+  const n = norm(ciudad), d = norm(depto);
+  if (!n) return '';
+  if (/^\d{5}$/.test(String(ciudad).trim())) return String(ciudad).trim();
+  let c = MUN.filter(x => norm(x[1]) === n);
+  if (!c.length) c = MUN.filter(x => norm(x[1]).startsWith(n) || n.startsWith(norm(x[1])));
+  const m = c.find(x => d && (norm(x[2]) === d || norm(x[2]).startsWith(d) || d.startsWith(norm(x[2])))) || (c.length === 1 || !d ? c[0] : null);
+  return m ? m[0] : '';
+}
 const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 // Sin los archivos en base64: el historial guarda solo lo necesario.
@@ -118,10 +130,8 @@ Deno.serve(async req => {
       // Municipio: Factus pide el código DANE; se busca por nombre (y departamento) en su catálogo.
       const mu = body.customer?._municipio; if (body.customer) delete body.customer._municipio;
       if (mu?.ciudad) {
-        const r = await factus(t, `/v1/municipalities?name=${encodeURIComponent(mu.ciudad)}`);
-        const n = norm(mu.ciudad), dep = norm(mu.departamento), cand = lista(r.data).filter((x: any) => norm(x.name) === n);
-        const m = cand.find((x: any) => !dep || norm(x.department) === dep || norm(x.department?.name) === dep) || cand[0];
-        if (m) body.customer.municipality_code = String(m.code ?? m.id); else avisos.push(`No encontré el municipio ${mu.ciudad} en el catálogo de Factus.`);
+        const m = municipio(mu.ciudad, mu.departamento);
+        if (m) body.customer.municipality_code = m; else avisos.push(`No encontré el municipio ${mu.ciudad} en el catálogo de Factus.`);
       }
       // Rango de numeración: el de Factus con el mismo prefijo; en pruebas, el primero activo del tipo.
       const rangos = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, doc.tipo));
