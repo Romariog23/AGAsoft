@@ -1,7 +1,7 @@
 import './style.css';
 import { jsonFE, erroresFE, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
-import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, excedenteDe, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
+import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
@@ -760,14 +760,10 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       ${esRC ? `<div><label for="rfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="rfp">${optsContado(fVenta(), doc.cuenta_pago || (doc.id ? (doc.medio_pago === 'efectivo' ? param().caja : param().bancos) : ''))}</select></div>` : ''}
       ${tipo === 'FV' || esRC ? `<div id="wMp"><label for="mp">Medio de pago</label><select id="mp">${opts(MEDIOS_PAGO, doc.medio_pago)}</select></div>` : ''}
       ${esNota ? `<div class="span2"><label for="ref">Factura que corrige</label><select id="ref" required></select></div>
-        <div class="span2"><label for="con">Concepto de la ${T.corto.toLowerCase()}</label><select id="con">${opts(tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND, doc.concepto)}</select></div>
-        ${tipo === 'NC' ? '<div class="span2" id="excW"></div>' : ''}` : ''}
+        <div class="span2"><label for="con">Concepto de la ${T.corto.toLowerCase()}</label><select id="con">${opts(tipo === 'NC' ? CONCEPTOS_NC : CONCEPTOS_ND, doc.concepto)}</select></div>` : ''}
     </section>
     ${esRC ? `<section class="panel stack"><h3>Facturas que paga</h3><div id="aplW"></div>
-      <div class="grid2"><div><label for="ant">Anticipo o pago sin factura</label><input id="ant" type="number" min="0" step="0.01" class="mono" value="${num(doc.anticipo) || ''}"></div></div>
-      <div class="grid2"><div><label for="exV">Valor recibido de más</label><input id="exV" type="number" min="0" step="0.01" class="mono" value="${excedenteDe(doc) || ''}"></div>
-        <div><label for="exC">Cuenta del valor de más (clase 4 o 5)</label><select id="exC"><option value="">Escoge la cuenta…</option>${optsCta(ctasExcedente(), doc.retenciones?.excedente?.cuenta || '')}</select></div></div>
-      <p class="hint">Lo que el cliente pague por encima del saldo de sus facturas no baja la cartera: va como anticipo o, si escribes un valor de más, a una cuenta de aprovechamiento (clase 4) o de gasto (clase 5).</p></section>` :
+      <div class="grid2"><div><label for="ant">Anticipo o pago sin factura</label><input id="ant" type="number" min="0" step="0.01" class="mono" value="${num(doc.anticipo) || ''}"></div></div></section>` :
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
       <datalist id="prodsN">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.nombre)}">${esc(p.codigo)} · ${money(p.precio)}</option>`).join('')}</datalist>
@@ -800,7 +796,6 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     doc.observaciones = $('obs').value;
     if ($('rf')) { doc.retenciones = leerRet('venta', RET_V, r2(items.reduce((s2, it) => s2 + linea(it).base, 0))); Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) }); }
     if ($('ant')) doc.anticipo = num($('ant').value);
-    if ($('exV')) { const v = r2(num($('exV').value)); doc.retenciones = { ...(doc.retenciones || {}), excedente: v > 0 ? { cuenta: $('exC').value, valor: v } : undefined }; }
   };
   // Cuenta que usará la línea si no se escoge otra: la del producto o la de la empresa.
   const ctaDefecto = it => {
@@ -817,24 +812,10 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     const ap = (apl || []).map(a => ({ ...a, recibo_id: '__tmp' }));
     box.innerHTML = tablaAsiento(asiento(tmp, { items: its, aplicaciones: ap, productos: S.d.productos, param: param(), docs: S.d.documentos, tarifas: tarifasIva(emp()?.contabilidad) }));
   };
-  // Nota crédito: lo que pase del saldo de cartera de la factura (de contado = 0) va a una cuenta de la clase 4 o 5.
-  let excCta = doc.retenciones?.excedente?.cuenta || '';
-  const saldoFacturaNC = f => { const c = cartera(S.d.documentos.filter(x => x.id !== doc.id), S.d.aplicaciones).find(x => x.factura.id === f.id); return c ? Math.max(0, c.saldo) : 0; };
-  const pintarExc = () => {
-    const box = $('excW'), f = docById(doc.ref_id); if (!box) return;
-    if ($('excC')) excCta = $('excC').value;
-    if (!f) { box.innerHTML = ''; doc.retenciones = { ...(doc.retenciones || {}), excedente: undefined }; return; }
-    const saldo = saldoFacturaNC(f), exc = Math.max(0, r2(num(doc.neto) - saldo));
-    doc.retenciones = { ...(doc.retenciones || {}), excedente: exc > 0 ? { cuenta: excCta, valor: exc } : undefined };
-    box.innerHTML = `<p class="hint">Saldo en cartera de la factura ${esc(numDoc(f))}: <b class="mono">${money(saldo)}</b>${String(f.cuenta_pago || '').trim() ? ' (factura de contado)' : ''}.</p>
-      ${exc > 0 ? `<label for="excC">La nota supera el saldo en <b class="mono">${money(exc)}</b>. Escoge a qué cuenta va ese valor (aprovechamiento clase 4 o gasto clase 5)</label>
-        <select id="excC"><option value="">Escoge la cuenta…</option>${optsCta(ctasExcedente(), excCta)}</select>` : ''}`;
-    if ($('excC')) $('excC').onchange = () => { excCta = $('excC').value; doc.retenciones.excedente.cuenta = excCta; vistaAsiento(); };
-  };
   const calcular = () => {
     leerCab();
     if (esRC) {
-      const t = r2(apl.reduce((s, a) => s + num(a.valor), 0) + num(doc.anticipo) + excedenteDe(doc));
+      const t = r2(apl.reduce((s, a) => s + num(a.valor), 0) + num(doc.anticipo));
       Object.assign(doc, { bruto: t, descuento: 0, base: t, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: t, neto: t });
       $('tot').innerHTML = `<dl class="tot"><dt>Total recibido</dt><dd class="big mono">${money(t)}</dd></dl><p class="hint letras">${enLetras(t)}</p>`;
       vistaAsiento(); return;
@@ -853,7 +834,6 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       ${t.neto !== t.total ? `<dt class="strong">Neto a pagar</dt><dd class="mono big">${money(t.neto)}</dd>` : ''}
     </dl><p class="hint letras">${enLetras(t.neto)}</p>`;
     items.forEach((it, i) => { const c = m.querySelector(`[data-lt="${i}"]`); if (c) c.textContent = money(linea(it).total); });
-    if (tipo === 'NC') pintarExc();
     vistaAsiento();
   };
   const pintarItems = () => {
@@ -993,14 +973,10 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       if (doc.fecha < f.fecha) return 'La nota no puede tener fecha anterior a la factura.';
       if (tipo === 'NC') {
         const disp = r2(num(f.total) - acreditado(S.d.documentos, f.id, doc.id)); if (doc.total > disp + 0.001) return `La nota crédito (${money(doc.total)}) supera lo pendiente por acreditar de la factura (${money(disp)}).`;
-        const ex = doc.retenciones?.excedente;
-        if (ex?.valor > 0 && !/^[45]\d{7}$/.test(String(ex.cuenta || ''))) return `La nota supera el saldo en cartera de la factura en ${money(ex.valor)}. Escoge la cuenta de aprovechamiento (clase 4) o de gasto (clase 5) para ese valor.`;
       }
     }
     if (esRC) {
       if (doc.total <= 0) return 'Escribe el valor que paga en al menos una factura, o un anticipo.';
-      const ex = doc.retenciones?.excedente;
-      if (ex?.valor > 0 && !/^[45]\d{7}$/.test(String(ex.cuenta || ''))) return `Escoge la cuenta de aprovechamiento (clase 4) o de gasto (clase 5) para el valor recibido de más (${money(ex.valor)}).`;
       const c = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones.filter(a => a.recibo_id !== doc.id)).map(x => [x.factura.id, x]));
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
     }
@@ -1018,6 +994,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if (!doc.tercero_id) return errEd('Escoge el cliente.');
     const msg = validarEmision(); if (msg) return errEd(msg);
     if (esNota) doc.electronica = !!docById(doc.ref_id)?.electronica;
+    if (doc.retenciones?.excedente) { const { excedente: _e, ...r } = doc.retenciones; doc.retenciones = r; }
     if (editando) {
       $('emitB').disabled = true;
       try { const g = await guardar(); toast(`Cambios guardados: ${nomDoc(g)}.`); location.hash = '#/doc/' + g.id; } catch (e) { errEd(e.message); } finally { $('emitB').disabled = false; }
@@ -2948,7 +2925,6 @@ const refAplicacion = a => { if (a.cuenta) return { ...a, ref: `${nomCta(a.cuent
 const proveedores = (incluir) => [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
 const cxp = () => cuentasPorPagar(compras(), hoy());
 const ctasDe = re => cuentasAux().filter(c => re.test(c.codigo));
-const ctasExcedente = () => cuentasAux().filter(c => /^[45]/.test(c.codigo));
 const optsCta = (lista, sel) => lista.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('');
 
 function vCompras(m, tipo) {
