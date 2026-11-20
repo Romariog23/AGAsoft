@@ -1053,7 +1053,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
     <section class="rep-tot"><p class="letras">Son: ${enLetras(tot.neto)}</p><dl class="tot">
       <dt>Subtotal</dt><dd class="mono">${money(tot.bruto)}</dd>${tot.descuento ? `<dt>Descuentos</dt><dd class="mono">−${money(tot.descuento)}</dd>` : ''}
       <dt>Base gravable</dt><dd class="mono">${money(tot.base)}</dd>
-      ${tot.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}% sobre ${money(x.base)}</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}
+      ${tot.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}%</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}
       <dt class="strong">Total</dt><dd class="mono strong">${money(tot.total)}</dd>
       ${tot.retefuente ? `<dt>Retefuente ${num(d.retefuente_pct)}%</dt><dd class="mono">−${money(tot.retefuente)}</dd>` : ''}
       ${tot.reteiva ? `<dt>ReteIVA ${num(d.reteiva_pct)}%</dt><dd class="mono">−${money(tot.reteiva)}</dd>` : ''}
