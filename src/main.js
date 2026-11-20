@@ -1206,7 +1206,7 @@ function vDoc(m, id) {
     <div class="row">${d.tipo === 'FV' && d.estado === 'emitido' ? `${c?.saldo > 0.009 ? `<a class="btn" href="#/nuevo/RC?ref=${id}">Recibir pago</a>` : ''}<a class="btn" href="#/nuevo/NC?ref=${id}">Nota crédito</a><a class="btn" href="#/nuevo/ND?ref=${id}">Nota débito</a>` : ''}
     ${d.estado === 'emitido' && (!d.electronica || !envioAceptado(id)) ? `<a class="btn" href="#/editar/${id}">Editar</a>` : ''}
     ${d.estado === 'emitido' && !d.electronica ? '<button id="anular">Anular</button>' : ''}
-    ${d.estado === 'emitido' && d.electronica && TIPOS_FE.includes(d.tipo) && !envios(d.id).some(envioValidado) ? '<button id="eliminar">Eliminar</button>' : ''}
+    ${d.estado !== 'borrador' && ['FV', 'NC', 'ND', 'RC'].includes(d.tipo) && !(d.electronica && envios(d.id).some(envioValidado)) ? '<button id="eliminar">Eliminar</button>' : ''}
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
@@ -1228,7 +1228,7 @@ function vDoc(m, id) {
   if ($('eliminar')) $('eliminar').onclick = async () => {
     const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones, S.d.fe_envios || []);
     if (motivo) return fail(new Error(motivo));
-    if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. ${d.electronica ? 'Todavía no la ha validado la DIAN' : 'No es electrónica'}, así que no queda reportada.<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
+    if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `${d.tipo === 'RC' ? 'Se borra el recibo con su contabilización y sus pagos dejan de aplicarse a las facturas.' : `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. ${d.electronica ? 'Todavía no la ha validado la DIAN' : 'No es electrónica'}, así que no queda reportada.`}<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
     try { await store.eliminar(d.id); await cargarEmpresa(); toast(`${nomDoc(d)} eliminada.`); location.hash = '#/' + d.tipo; } catch (e) { fail(e); }
   };
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>${d.tipo === 'RC' ? 'Los pagos de este recibo dejan de aplicarse a las facturas.' : 'Su contabilización deja de sumar en los informes.'} El número no se vuelve a usar.</p>
@@ -2898,10 +2898,14 @@ function vComp(m, id) {
   const anulado = c.estado === 'anulado';
   const ms = asientoComprobante({ ...c, estado: 'contabilizado' });
   m.innerHTML = `<header class="vhead noprint"><div>${c.tipo === 'PN' ? '<a class="back" href="#/nominapagos">← Pagos de nómina</a>' : '<a class="back" href="#/comprobantes">← Comprobantes</a>'}<h2>${esc(nomComp(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
-    <div class="row">${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compeditar/${c.id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <div class="row"><button id="eliminar">Eliminar</button>${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compeditar/${c.id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     <section class="panel stack">${hojaComp(c, ms)}</section>
     ${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}`;
   $('imprimir').onclick = () => { $('print').innerHTML = hojaComp(c, ms, true); const t = document.title; document.title = `${nomComp(c)} - ${emp().nombre}`; window.print(); document.title = t; };
+  $('eliminar').onclick = async () => {
+    if (!await confirmar(`Eliminar ${esc(nomComp(c))}`, 'Se borra el comprobante con todos sus movimientos. Si es el último número, ese número se vuelve a usar. Esto no se puede deshacer.', 'Eliminar')) return;
+    try { await store.remove('comprobantes', c.id); await cargarEmpresa(); if (compById(c.id)) throw new Error('No se pudo eliminar. Falta correr en Supabase el archivo supabase/028_eliminar_documentos.sql.'); toast(`${nomComp(c)} eliminado.`); location.hash = c.tipo === 'PN' ? '#/nominapagos' : '#/comprobantes'; } catch (e) { fail(e); }
+  };
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomComp(c))}</h2><p>Sus movimientos dejan de sumar en el balance, el auxiliar y los estados financieros. El número no se vuelve a usar.</p>
     <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular comprobante')}`, async fd => {
     const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
@@ -3130,11 +3134,16 @@ function vCompra(m, id) {
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === id);
   const pagos = compras().filter(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/compras/${c.tipo}">← ${T.plural}</a><h2>${esc(nomCompra(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
-    <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}<button id="eliminar">Eliminar</button>${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     <section class="panel stack">${hojaCompra(c)}</section>
     <section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)))}${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}</section>
     ${pagos.length ? `<section class="panel stack noprint"><h3>Pagos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${pagos.map(e => `<tr class="click" data-go="#/compra/${e.id}"><td>${fFecha(e.fecha)}</td><td><a href="#/compra/${e.id}">Egreso ${e.numero}</a></td><td class="r mono">${money(e.aplicaciones.find(a => a.compra_id === id).valor)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
   $('imprimir').onclick = () => { $('print').innerHTML = hojaCompra(c, true); const t = document.title; document.title = `${nomCompra(c)} - ${emp().nombre}`; window.print(); document.title = t; };
+  $('eliminar').onclick = async () => {
+    if (pagos.length) return toast('Este documento tiene pagos. Elimina o anula primero el comprobante de egreso.', true);
+    if (!await confirmar(`Eliminar ${esc(nomCompra(c))}`, `Se borra el documento con su contabilización${c.tipo === 'CE' ? ' y las facturas que pagaba vuelven a quedar pendientes' : ''}. Si es el último número, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
+    try { await store.remove('compras', c.id); await cargarEmpresa(); if (compraById(c.id)) throw new Error('No se pudo eliminar. Falta correr en Supabase el archivo supabase/028_eliminar_documentos.sql.'); toast(`${nomCompra(c)} eliminado.`); location.hash = '#/compras/' + c.tipo; } catch (e) { fail(e); }
+  };
   if ($('anular')) $('anular').onclick = () => {
     if (pagos.length) return toast('Este documento tiene pagos. Anula primero el comprobante de egreso.', true);
     dialogo(`<h2>Anular ${esc(nomCompra(c))}</h2><p>Sus movimientos dejan de sumar en los informes${c.tipo === 'CE' ? ' y las facturas que pagaba vuelven a quedar pendientes' : ''}. El número no se vuelve a usar.</p>

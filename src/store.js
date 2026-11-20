@@ -29,10 +29,10 @@ function envioValidado(e) {
   const d = e.respuesta?.data || {};
   return [d, d.credit_note, d.debit_note, d.bill].some(x => x && x.is_validated === true);
 }
-// Facturas y notas se pueden eliminar aunque estén emitidas, salvo las electrónicas que la DIAN ya validó. Devuelve el motivo si no se puede.
+// Facturas, notas y recibos se pueden eliminar aunque estén emitidos, salvo los electrónicos que la DIAN ya validó. Devuelve el motivo si no se puede.
 function motivoNoEliminar(d, documentos, aplicaciones, envios = []) {
   if (!d) return 'Documento no encontrado.';
-  if (!['FV', 'NC', 'ND'].includes(d.tipo)) return 'Los recibos de caja no se eliminan: se anulan.';
+  if (!['FV', 'NC', 'ND', 'RC'].includes(d.tipo)) return 'Este documento no se puede eliminar.';
   if (d.electronica && d.estado !== 'borrador' && envios.some(e => e.documento_id === d.id && envioValidado(e))) return 'Este documento ya fue validado por la DIAN: no se elimina, se corrige con una nota.';
   if (d.tipo === 'FV') {
     if (documentos.some(x => x.ref_id === d.id && x.estado !== 'borrador')) return 'La factura tiene notas crédito o débito. Elimínalas primero.';

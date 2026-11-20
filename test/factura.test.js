@@ -23,7 +23,7 @@ test('se eliminan facturas y notas sin notas ni pagos vigentes; las electrónica
   assert.equal(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'rechazado', cufe: '' }]), '');
   assert.match(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'aceptado', cufe: 'x' }]), /validado por la DIAN/);
   assert.match(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'rechazado', cufe: '', respuesta: { data: { credit_note: { is_validated: true } } } }]), /validado/);
-  assert.match(motivoNoEliminar({ id: 'r', tipo: 'RC', estado: 'emitido' }, [], []), /anulan/);
+  assert.equal(motivoNoEliminar({ id: 'r', tipo: 'RC', estado: 'emitido' }, [], []), '');
   const nc = { id: 'nc', tipo: 'NC', estado: 'emitido', ref_id: 'f' };
   assert.match(motivoNoEliminar(fv, [fv, nc], []), /notas/);
   assert.equal(motivoNoEliminar(fv, [fv, { ...nc, estado: 'borrador' }], []), '');
