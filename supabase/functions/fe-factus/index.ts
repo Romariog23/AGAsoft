@@ -59,6 +59,17 @@ function errores(d: any): string[] {
   add(d?.data?.errors); add(d?.errors);
   return [...new Set(out)].slice(0, 30);
 }
+// Respuesta de validación: Factus la manda en data o dentro de data.credit_note / data.debit_note / data.bill.
+// Validado = is_validated en true (en cualquiera de los dos niveles) y con CUFE.
+function leerFactus(resp: any) {
+  const d0 = resp?.data && typeof resp.data === 'object' ? resp.data : {};
+  const de = [d0.credit_note, d0.debit_note, d0.bill].find(v => v && typeof v === 'object') || {};
+  const data = { ...d0, ...de, links: { ...(d0.links || {}), ...(de.links || {}) } };
+  delete data.credit_note; delete data.debit_note; delete data.bill;
+  const cufe = String(data.cufe || data.cude || '');
+  const ok = (de.is_validated === true || d0.is_validated === true) && !!cufe;
+  return { ok, cufe, numero: String(data.number || ''), pdf: data.links?.public_url || '', data };
+}
 const esFactura = (r: any) => /factura/i.test(String(r.document ?? '')) || String(r.document) === '21';
 const esTipo = (r: any, tipo: string) => tipo === 'FV' ? esFactura(r) : tipo === 'NC' ? /cr[eé]dito/i.test(String(r.document)) || String(r.document) === '22' : /d[eé]bito/i.test(String(r.document)) || String(r.document) === '23';
 
@@ -138,15 +149,25 @@ Deno.serve(async req => {
       const rg = rangos.find((r: any) => String(r.prefix || '') === String(doc.prefijo || '')) || (c.ambiente === 'pruebas' ? rangos[0] : null);
       if (rg) body.numbering_range_id = rg.id;
       else if (rangos.length) return json({ error: `En Factus no hay una numeración activa con el prefijo ${doc.prefijo || '(sin prefijo)'}. Pídele a Factus que asocie esa resolución o ajusta el prefijo en Numeraciones.` }, 400);
+      // Si un envío anterior quedó marcado como rechazado pero Factus sí lo validó (respuesta anidada), se recupera sin reenviar.
+      const { data: previos } = await sb.from('fe_envios').select('respuesta, ambiente').eq('documento_id', doc.id).order('creado_en', { ascending: false }).limit(5);
+      const rec = (previos || []).map((e: any) => ({ e, x: leerFactus(e.respuesta) })).find(o => o.x.ok);
+      if (rec) {
+        const l = { estado: 'aceptado', cufe: rec.x.cufe, mensaje: String(rec.e.respuesta?.message || 'Validado por la DIAN.'), errores: errores(rec.e.respuesta), pdf: rec.x.pdf };
+        const fila = { empresa_id: doc.empresa_id, documento_id: doc.id, ambiente: rec.e.ambiente || c.ambiente, ...l, respuesta: { ...rec.e.respuesta, data: rec.x.data } };
+        const { data: guardado, error: e2 } = await sb.from('fe_envios').insert(fila).select().single();
+        return json({ ...l, avisos, http: 200, numero: rec.x.numero, envio: guardado, error_guardar: e2?.message || null });
+      }
       let r = await factus(t, RUTA[doc.tipo], { method: 'POST', body: JSON.stringify(body) });
       // 409: quedó uno sin validar con la misma referencia (un rechazo anterior). Se borra y se crea de nuevo.
       if (r.status === 409) { await factus(t, BORRAR[doc.tipo] + encodeURIComponent(ref), { method: 'DELETE' }); r = await factus(t, RUTA[doc.tipo], { method: 'POST', body: JSON.stringify(body) }); }
-      const d = r.data?.data || {}, ok = r.status < 300 && d.is_validated === true && !!d.cufe;
-      const l = { estado: ok ? 'aceptado' : r.status < 300 ? 'rechazado' : 'error', cufe: d.cufe || '', mensaje: String(r.data?.message || (r.status >= 300 ? `Factus respondió ${r.status}` : '')), errores: errores(r.data), pdf: d.links?.public_url || '' };
-      if (ok && rg && String(d.number || '') !== `${doc.prefijo || ''}${doc.numero}`) avisos.push(`Factus numeró el documento como ${d.number}.`);
-      const fila = { empresa_id: doc.empresa_id, documento_id: doc.id, ambiente: c.ambiente, ...l, respuesta: recortar(r.data) };
+      const x = leerFactus(r.data), ok = r.status < 300 && x.ok;
+      const l = { estado: ok ? 'aceptado' : r.status < 300 ? 'rechazado' : 'error', cufe: x.cufe, mensaje: String(r.data?.message || (r.status >= 300 ? `Factus respondió ${r.status}` : '')), errores: errores(r.data), pdf: x.pdf };
+      if (ok && rg && x.numero !== `${doc.prefijo || ''}${doc.numero}`) avisos.push(`Factus numeró el documento como ${x.numero}.`);
+      // respuesta.data queda plana (número, CUFE, links) aunque Factus la mande dentro de credit_note / debit_note / bill.
+      const fila = { empresa_id: doc.empresa_id, documento_id: doc.id, ambiente: c.ambiente, ...l, respuesta: recortar(r.data && typeof r.data === 'object' ? { ...r.data, data: x.data } : r.data) };
       const { data: guardado, error: e2 } = await sb.from('fe_envios').insert(fila).select().single();
-      return json({ ...l, avisos, http: r.status, numero: d.number || '', envio: guardado, error_guardar: e2?.message || null });
+      return json({ ...l, avisos, http: r.status, numero: x.numero, envio: guardado, error_guardar: e2?.message || null });
     }
     return json({ error: 'Acción desconocida.' }, 400);
   } catch (e) {

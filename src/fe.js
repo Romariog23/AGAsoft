@@ -71,9 +71,11 @@ function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
   return out;
 }
 
-// Lee la respuesta de Factus: aceptado solo si viene validado y con CUFE.
+// Lee la respuesta de Factus (en data o dentro de data.credit_note / debit_note / bill): aceptado solo si viene validado y con CUFE.
 function leerRespuestaFE(r) {
-  const d = r?.data || {}, valido = d.is_validated === true && !!d.cufe;
+  const d0 = r?.data || {}, de = [d0.credit_note, d0.debit_note, d0.bill].find(v => v && typeof v === 'object') || {};
+  const d = { ...d0, ...de, links: { ...(d0.links || {}), ...(de.links || {}) } };
+  const valido = (de.is_validated === true || d0.is_validated === true) && !!d.cufe;
   const errores = [];
   const add = x => { if (x == null) return; if (Array.isArray(x)) x.forEach(add); else if (typeof x === 'object') Object.values(x).forEach(add); else errores.push(String(x)); };
   add(d.errors); add(r?.errors);
