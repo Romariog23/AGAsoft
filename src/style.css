@@ -426,3 +426,12 @@ button.bad{color:var(--bad)}
 .tbl.erc th:last-child,.tbl.erc td:last-child{border-left:2px solid var(--fg);background:var(--surface-2)}
 .tbl.erc tr.erc-tit td{border-left:0;background:none}
 @media print{.tbl.erc th+th,.tbl.erc td+td{border-left:1px solid #999}.tbl.erc th:last-child,.tbl.erc td:last-child{border-left:2px solid #000}}
+/* Planes: tarjetas, cupo y módulos fuera del plan */
+.lp-plan.dest{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.lp-plan .tag{align-self:flex-start}
+.lp-plan button{margin-top:auto}
+.lp-inc{margin:6px 0;padding-left:18px;font-size:.88rem;display:flex;flex-direction:column;gap:3px}
+.barra{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:4px;max-width:260px}
+.barra i{display:block;height:100%;background:var(--accent)}
+.barra i.warn{background:var(--warn)}.barra i.bad{background:var(--bad)}
+.nav .lock{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:0 5px;margin-left:4px;white-space:nowrap}

@@ -130,7 +130,7 @@ const sobreLimite = c => { const p = planDe(c); return p && ((p.max_empresas !==
 function pintar() {
   const clientes = S.cuentas.filter(c => !c.es_admin);
   const activas = clientes.filter(c => estado(c)[0] === 'Activa');
-  const ingreso = activas.reduce((s, c) => s + Number(planDe(c)?.precio_mensual || 0), 0);
+  const ingreso = activas.reduce((s, c) => { const p = planDe(c); return s + Number(p?.precio_mensual || 0) * (p?.por_empresa ? Math.max(1, c.empresas || 0) : 1); }, 0);
   const pend = clientes.filter(porAprobar).length, prueba = clientes.filter(enPrueba).length;
   const vencen = clientes.filter(c => c.plan_vence && c.plan_vence >= hoy() && c.plan_vence <= new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10)).length;
   $('main').innerHTML = `${store.mode === 'local' ? '<p class="aviso">Modo demostración: datos de ejemplo guardados solo en este navegador. Con Supabase configurado, aquí ves las cuentas reales.</p>' : ''}
@@ -242,14 +242,15 @@ function formDueno(e) {
   });
 }
 
+const MODS = [['nomina', 'Nómina'], ['exogena', 'Medios magnéticos'], ['importar', 'Importar plantillas']];
 function pintarPlanes() {
   const usan = id => S.cuentas.filter(c => c.plan_id === id).length;
   const lim = v => v === null || v === undefined ? 'Sin límite' : Number(v).toLocaleString('es-CO');
   $('tabC').innerHTML = `<header class="vhead"><p class="hint">Los límites se aplican al dueño de cada cuenta, sumando todas sus contabilidades. Deja un límite vacío para que no tenga tope.</p><button class="primary" id="nuevoP">Nuevo plan</button></header>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plan</th><th class="r">Precio mensual</th><th class="r">Contabilidades</th><th class="r">Documentos al mes</th><th class="r">Personas con acceso</th><th class="r">Cuentas</th><th></th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plan</th><th class="r">Precio mensual</th><th class="r">Contabilidades</th><th class="r">Documentos al mes</th><th class="r">Personas con acceso</th><th class="r">Electrónicos al mes por empresa</th><th class="r">Empleados por empresa</th><th>Módulos</th><th class="r">Cuentas</th><th></th></tr></thead><tbody>
     ${S.planes.map(p => `<tr class="${p.activo ? '' : 'muted'}"><td><b>${esc(p.nombre)}</b>${p.activo ? '' : ' <span class="tag">Inactivo</span>'}<br><small class="muted">${esc(p.descripcion)}</small></td>
-      <td class="r mono">${money(p.precio_mensual)}</td><td class="r mono">${lim(p.max_empresas)}</td><td class="r mono">${lim(p.max_documentos_mes)}</td><td class="r mono">${lim(p.max_usuarios)}</td><td class="r mono">${usan(p.id)}</td>
-      <td class="r"><button class="sm" data-ep="${p.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay planes.</td></tr>'}</tbody></table></div>`;
+      <td class="r mono">${money(p.precio_mensual)}${p.por_empresa ? '<br><small class="muted">por empresa</small>' : ''}</td><td class="r mono">${lim(p.max_empresas)}</td><td class="r mono">${lim(p.max_documentos_mes)}</td><td class="r mono">${lim(p.max_usuarios)}</td><td class="r mono">${lim(p.max_documentos_fe_mes)}</td><td class="r mono">${lim(p.max_empleados)}</td><td><small>${MODS.filter(([k]) => p.modulos?.[k] !== false).map(([, t]) => t).join(', ') || 'Ninguno'}</small></td><td class="r mono">${usan(p.id)}</td>
+      <td class="r"><button class="sm" data-ep="${p.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="10" class="muted">No hay planes.</td></tr>'}</tbody></table></div>`;
   $('nuevoP').onclick = () => formPlan({ activo: true, orden: S.planes.length + 1 });
   $('tabC').querySelectorAll('[data-ep]').forEach(b => b.onclick = () => formPlan(S.planes.find(p => p.id === b.dataset.ep)));
 }
@@ -263,14 +264,21 @@ function formPlan(p) {
       <div><label for="p_d">Documentos al mes</label><input id="p_d" name="max_documentos_mes" type="number" min="0" class="mono" value="${n(p.max_documentos_mes)}" placeholder="Sin límite"></div>
       <div><label for="p_u">Personas con acceso</label><input id="p_u" name="max_usuarios" type="number" min="0" class="mono" value="${n(p.max_usuarios)}" placeholder="Sin límite"></div></div>
     <p class="hint">Documentos: facturas, notas y recibos emitidos, compras y comprobantes contables del mes. Personas: a quienes el dueño da acceso, sin contarlo a él.</p>
+    <label class="check"><input type="checkbox" name="por_empresa" ${p.por_empresa ? 'checked' : ''}> El precio es por empresa (se cobra por cada contabilidad de la cuenta)</label>
+    <div class="grid2"><div><label for="p_fe">Documentos electrónicos al mes, por empresa</label><input id="p_fe" name="max_documentos_fe_mes" type="number" min="0" class="mono" value="${n(p.max_documentos_fe_mes)}" placeholder="Sin límite"></div>
+      <div><label for="p_em">Empleados activos, por empresa</label><input id="p_em" name="max_empleados" type="number" min="0" class="mono" value="${n(p.max_empleados)}" placeholder="Sin límite"></div></div>
+    <p class="hint">Electrónicos: facturas y notas crédito y débito electrónicas del mes (cuentan también las anuladas). Al llegar al tope no se pueden emitir más ese mes.</p>
+    <fieldset class="stack"><legend>Módulos incluidos</legend>${MODS.map(([k, t]) => `<label class="check"><input type="checkbox" name="mod_${k}" ${p.modulos?.[k] !== false ? 'checked' : ''}> ${t}</label>`).join('')}</fieldset>
     <div><label for="p_ds">Descripción</label><input id="p_ds" name="descripcion" maxlength="200" value="${esc(p.descripcion)}"></div>
     <label class="check"><input type="checkbox" name="activo" ${p.activo !== false ? 'checked' : ''}> Activo (se puede asignar a cuentas)</label>
     ${p.id && !enUso ? '<button type="button" class="ghost" id="delP">Borrar este plan</button>' : p.id ? `<p class="hint">${enUso} cuenta(s) usan este plan: para dejar de ofrecerlo, desmárcalo como activo.</p>` : ''}`, async fd => {
     const lim = k => { const v = String(fd.get(k) ?? '').trim(); return v === '' ? null : Math.max(0, Math.round(Number(v))); };
     const row = { nombre: String(fd.get('nombre')).trim(), precio_mensual: Math.max(0, Number(fd.get('precio_mensual')) || 0), max_empresas: lim('max_empresas'), max_documentos_mes: lim('max_documentos_mes'),
-      max_usuarios: lim('max_usuarios'), descripcion: String(fd.get('descripcion') || '').trim(), activo: fd.get('activo') === 'on', orden: p.orden ?? S.planes.length + 1 };
+      max_usuarios: lim('max_usuarios'), por_empresa: fd.get('por_empresa') === 'on', max_documentos_fe_mes: lim('max_documentos_fe_mes'), max_empleados: lim('max_empleados'),
+      modulos: Object.fromEntries(MODS.map(([k]) => [k, fd.get('mod_' + k) === 'on'])), descripcion: String(fd.get('descripcion') || '').trim(), activo: fd.get('activo') === 'on', orden: p.orden ?? S.planes.length + 1 };
     if (!row.nombre) throw new Error('Escribe el nombre del plan.');
-    await api.guardarPlan(p.id ? { ...row, id: p.id } : row); toast('Plan guardado.'); await cargar();
+    try { await api.guardarPlan(p.id ? { ...row, id: p.id } : row); } catch (e) { throw /por_empresa|max_documentos_fe_mes|max_empleados|modulos/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/029_planes_permisos.sql.') : e; }
+    toast('Plan guardado.'); await cargar();
   });
   const del = f.querySelector('#delP');
   if (del) del.onclick = async () => { try { await api.borrarPlan(p.id); $('dlg').close(); toast('Plan borrado.'); await cargar(); } catch (e) { fail(e); } };

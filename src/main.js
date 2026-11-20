@@ -13,6 +13,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
+import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, avisoCupo, planDesde, incluye } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
@@ -51,7 +52,9 @@ $('lpEntrar').onclick = () => irForm(false);
 $('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
 // Planes públicos (si la base los deja ver sin sesión: supabase/022_planes_publicos.sql).
 (async () => { try { const ps = await store.planesActivos(); if (!ps?.length) return;
-  $('lpPlanesList').innerHTML = ps.map(p => `<article class="lp-plan"><h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b><span class="muted">al mes</span><p class="hint">${esc(p.descripcion || '')}</p></article>`).join('');
+  $('lpPlanesList').innerHTML = ps.map((p, i) => `<article class="lp-plan${ps.length > 2 && i === 1 ? ' dest' : ''}">${ps.length > 2 && i === 1 ? '<span class="tag el">El más escogido</span>' : ''}<h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b><span class="muted">al mes${p.por_empresa ? ' por empresa' : ''}</span>
+    <ul class="lp-inc">${incluye(p).map(t => `<li>${esc(t)}</li>`).join('')}</ul><p class="hint">${esc(p.descripcion || '')}</p><button type="button" class="${ps.length > 2 && i === 1 ? 'primary' : ''}" data-prueba>Empezar 15 días gratis</button></article>`).join('');
+  $('lpPlanesList').querySelectorAll('[data-prueba]').forEach(b => b.onclick = () => irForm(true));
   $('lpPlanes').hidden = false; $('lpNavPlanes').hidden = false; } catch (_) {} })();
 $('aToggle').onclick = () => {
   registro = !registro;
@@ -105,6 +108,8 @@ async function iniciar() {
   $('demoTag').hidden = store.mode !== 'local';
   $('salir').hidden = store.mode === 'local';
   $('who').textContent = store.mode === 'local' ? '' : (S.perfil?.nombre || S.user.email);
+  S.plan = null;
+  if (store.mode === 'supabase' && !S.perfil?.es_admin) { try { S.plan = (await store.miPlan())?.plan || null; } catch (_) { /* falta 009: sin límites */ } }
   S.empresas = await store.listEmpresas();
   let guardada = null; try { guardada = localStorage.getItem('agasoft-empresa'); } catch (_) {}
   S.eid = S.empresas.find(e => e.id === guardada)?.id || S.empresas[0]?.id || null;
@@ -204,7 +209,7 @@ const MENU = [
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
   ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'],
+  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'], ['miplan', 'Mi plan'],
 ];
 function renderNav(actual) {
   const items = [...MENU];
@@ -213,7 +218,7 @@ function renderNav(actual) {
   const grupos = []; let g = null;
   for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
   $('nav').innerHTML = grupos.map(x => {
-    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}</a>`).join('');
+    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
     if (!x.t) return links;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
     return `<details class="nav-g" data-g="${x.t}" ${open ? 'open' : ''}><summary>${x.t}</summary>${links}</details>`;
@@ -234,6 +239,9 @@ function route() {
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
   try {
+    if (v === 'miplan') return vMiPlan(m);
+    const mod = moduloDeRuta(v);
+    if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
     if (TIPOS[v]) return vLista(m, v);
     if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero'), clase: q.get('clase') });
@@ -527,6 +535,7 @@ function vInicio(m) {
   const medios = WIDGETS.filter(([k]) => W(k) && WIDGET_HTML[k]).map(([k]) => WIDGET_HTML[k]({ R, edades, em, cart }));
   m.innerHTML = `<header class="vhead"><div><h2>${esc(e.nombre)}</h2><p class="sub mono">NIT ${fmtNit(e.nit)}-${e.dv}</p></div>
     <div class="row"><button id="iniCfg" title="Escoger qué se ve en el Inicio">Personalizar</button></div></header>
+  ${avisoFe()}
   ${faltan.length ? `<section class="panel stack callout"><h3>Para empezar a facturar</h3><ol class="steps-list">${faltan.map(([k, t]) => `<li><a href="#/${k}">${t}</a></li>`).join('')}</ol></section>` : ''}
   ${W('kpis') ? `<section class="kpis">
     <div class="kpi"><span>Ventas del mes (sin IVA)</span><b class="mono">${money(ventas)}</b>${varPct !== null ? `<small class="${varPct >= 0 ? 'k-up' : 'k-down'}">${varPct >= 0 ? '▲' : '▼'} ${Math.abs(varPct)} % vs. ${MESES_NOM[+mesAnt.slice(5) - 1]}</small>` : ''}</div>
@@ -748,6 +757,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   const esElec = () => tipo === 'FV' ? !!doc.electronica : esNota ? !!docById(($('ref') && $('ref').value) || doc.ref_id)?.electronica : false;
   const clientes = [...S.d.terceros].filter(t => t.es_cliente !== false || t.id === doc.tercero_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead"><div><h2>${editando ? `Editar ${esc(nomDoc(doc))}` : `${id ? 'Editar' : 'Nueva'} ${T.nombre.toLowerCase()}`}${tipo === 'FV' && !editando ? ` <span id="claseTag">${claseTag(doc)}</span>` : ''}</h2><p class="sub" id="edSub"></p></div></header>
+  ${['FV', 'NC', 'ND'].includes(tipo) ? avisoFe() : ''}
   <form id="ed" class="stack" novalidate>
     <section class="panel grid-doc">
       <div class="span2"><label for="cli">Cliente</label>
@@ -3271,8 +3281,49 @@ function tuPlan(x, planes = []) {
   if (dp !== null) return `<h3>Tu plan</h3><dl class="kv"><dt>Plan</dt><dd><b>Prueba gratis</b> hasta el ${fFecha(x.prueba_hasta)} <span class="tag ${dp <= 3 ? 'bad' : 'el'}">${dp ? `Quedan ${dp} día${dp === 1 ? '' : 's'}` : 'Último día'}</span></dd>${uso}</dl>
     <p class="sub">${pedido ? `Pediste el plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo aprueba y sigues sin interrupciones.` : 'Escoge el plan que quieres para cuando termine la prueba. AGAsoft lo aprueba y sigues sin interrupciones.'}</p>
     ${opcionesPlan(planes, pedido?.id)}<div class="row"><button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button></div>`;
-  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(p.precio_mensual)} al mes</dd>
+  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(precioCuenta(p, x.empresas))} al mes${p.por_empresa ? ` <span class="hint">(${money(p.precio_mensual)} × ${Math.max(1, x.empresas)} empresa${x.empresas === 1 ? '' : 's'})</span>` : ''}</dd>
     <dt>Pagado hasta</dt><dd>${x.plan_vence ? fFecha(x.plan_vence) + (x.plan_vence < hoy() ? ' <span class="tag bad">Vencido</span>' : '') : 'Sin vencimiento'}</dd>
     ${uso}</dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
-    <p class="hint">Para cambiar de plan o renovarlo, comunícate con AGAsoft.</p>`;
+    <p class="sub">${pedido ? `Pediste cambiar al plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo revisa y lo aprueba.` : 'Para cambiar de plan, escógelo y pídelo. AGAsoft lo aprueba.'}</p>
+    ${opcionesPlan(planes, pedido?.id || p?.id)}<div class="row"><button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button></div>`;
+}
+
+// Uso de la empresa abierta frente al plan: documentos electrónicos del mes y empleados activos.
+function usoEmpresa() {
+  const p = S.plan, d = S.d;
+  const fe = docsFeMes(d?.documentos, hoy().slice(0, 7)), emps = empleados().filter(e => e.activo !== false).length;
+  return { fe, maxFe: p?.max_documentos_fe_mes ?? null, emps, maxEmps: p?.max_empleados ?? null, aviso: avisoCupo(fe, p?.max_documentos_fe_mes) };
+}
+// Aviso de cupo de documentos electrónicos (desde el 80 %). Vacío si no aplica.
+function avisoFe() {
+  const u = usoEmpresa(); if (!u.aviso) return '';
+  return u.aviso === 'lleno'
+    ? `<p class="aviso bad">Usaste los ${u.maxFe} documentos electrónicos de este mes de tu plan ${esc(S.plan.nombre)}. No puedes emitir más facturas ni notas electrónicas hasta el 1.° del próximo mes o hasta que subas de plan. <a href="#/miplan">Ver Mi plan</a></p>`
+    : `<p class="aviso">Llevas ${u.fe} de ${u.maxFe} documentos electrónicos este mes. Cuando llegues al tope no podrás emitir más hasta el próximo mes. <a href="#/miplan">Ver Mi plan</a></p>`;
+}
+const barra = (v, max) => max === null || max === undefined ? '' : `<div class="barra" role="progressbar" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${v}"><i class="${v >= max ? 'bad' : v >= Math.ceil(max * 0.8) ? 'warn' : ''}" style="width:${max ? Math.min(100, Math.round(v / max * 100)) : 100}%"></i></div>`;
+
+async function vMiPlan(m) {
+  const e = emp(), u = usoEmpresa(), p = S.plan;
+  const cupo = (v, max, que) => `<dt>${que}</dt><dd><span class="mono">${v}${max === null ? '' : ' de ' + max}</span>${max === null ? ' <span class="hint">sin límite</span>' : ''}${barra(v, max)}</dd>`;
+  m.innerHTML = `<header class="vhead"><div><h2>Mi plan</h2><p class="sub">Lo que incluye tu plan, lo que llevas usado este mes y cómo cambiarlo.</p></div></header>
+    ${avisoFe()}
+    <section class="panel stack"><h3>Esta empresa: ${esc(e?.nombre || '')}</h3>
+      <dl class="kv">${cupo(u.fe, u.maxFe, `Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}`)}${tieneModulo(p, 'nomina') ? cupo(u.emps, u.maxEmps, 'Empleados activos') : '<dt>Nómina</dt><dd><span class="muted">No incluida en tu plan</span></dd>'}</dl>
+      <p class="hint">Cuentan las facturas, notas crédito y notas débito electrónicas guardadas en el mes (también las anuladas, porque ya se enviaron). Los recibos, comprobantes y compras no gastan cupo. El contador vuelve a cero el 1.° de cada mes.</p></section>
+    ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>'
+      : `<section class="panel stack"><h3>Tu plan</h3><p class="muted">${store.mode === 'local' ? 'En la demostración no hay plan ni límites. Estos son los planes de AGAsoft:' : 'Eres administrador: tu cuenta no tiene límites.'}</p><div class="lp-planes" id="planesDemo"></div></section>`}
+    <section class="panel stack"><h3>Pagar</h3>
+      <div class="row"><button class="primary" disabled>Pagar en línea</button><span class="tag">Pronto: PSE, tarjeta y Nequi</span></div>
+      <p class="hint">Mientras activamos el pago en línea, AGAsoft te envía el cobro y activa o renueva el plan al recibir el pago.</p></section>`;
+  if ($('miPlan')) cargarMiPlan();
+  if ($('planesDemo')) { const ps = await store.planesActivos().catch(() => []); if ($('planesDemo')) $('planesDemo').innerHTML = ps.map(x => `<article class="lp-plan"><h3>${esc(x.nombre)}</h3><b class="p">${money(x.precio_mensual)}</b><span class="muted">al mes${x.por_empresa ? ' por empresa' : ''}</span><ul class="lp-inc">${incluye(x).map(t => `<li>${esc(t)}</li>`).join('')}</ul></article>`).join(''); }
+}
+
+// Módulo apagado por el plan.
+async function vBloqueado(m, mod) {
+  m.innerHTML = `<section class="panel stack bloq"><h2>${esc(MODULOS[mod].nombre)}</h2>
+    <p class="sub">Tu plan <b>${esc(S.plan?.nombre || '')}</b> no incluye ${esc(MODULOS[mod].nombre.toLowerCase())}.<span id="desde"></span></p>
+    <div class="row"><a class="btn primary" href="#/miplan">Ver Mi plan</a><a class="btn ghost" href="#/inicio">Volver al inicio</a></div></section>`;
+  try { const d = planDesde(await store.planesActivos(), mod); if (d && $('desde')) $('desde').textContent = ` Está disponible desde el plan ${d.nombre} (${money(d.precio_mensual)} al mes).`; } catch (_) {}
 }

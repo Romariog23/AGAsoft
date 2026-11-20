@@ -2,6 +2,7 @@
 //  - "supabase": datos en la nube, con usuarios y permisos (producción).
 //  - "local": datos solo en este navegador, para probar sin configurar nada (modo demostración).
 import { createClient } from '@supabase/supabase-js';
+import { PLANES_DEMO } from './planes.js';
 
 const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -125,6 +126,8 @@ function localStore() {
     async listPerfiles() { return []; },
     async setPerfil() {},
     async guardarTema() {},
+    async planesActivos() { return PLANES_DEMO; },
+    async miPlan() { return null; },
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
   };
   return api;
