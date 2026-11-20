@@ -640,7 +640,13 @@ function estadoTag(d) {
   const c = d.tipo === 'RC' ? '' : ' ' + claseTag(d);
   if (d.estado === 'borrador') return '<span class="tag">Borrador</span>' + c;
   if (d.estado === 'anulado') return '<span class="tag bad">Anulado</span>';
-  return '<span class="tag ok">Emitido</span>' + c;
+  return '<span class="tag ok">Emitido</span>' + c + notasTag(d);
+}
+// Factura con notas crédito o débito emitidas que la corrigen.
+function notasTag(d) {
+  if (d.tipo !== 'FV') return '';
+  const ns = S.d.documentos.filter(x => x.ref_id === d.id && x.estado === 'emitido');
+  return ['NC', 'ND'].map(t => { const n = ns.filter(x => x.tipo === t).length; return n ? ` <span class="tag warn" title="${ns.filter(x => x.tipo === t).map(x => esc(numDoc(x))).join(', ')}">Con nota ${t === 'NC' ? 'crédito' : 'débito'}${n > 1 ? ` (${n})` : ''}</span>` : ''; }).join('');
 }
 const claseTag = d => d.electronica ? '<span class="tag el">Electrónica</span>' : '<span class="tag">Normal</span>';
 function tablaDocs(list, conTipo) {
