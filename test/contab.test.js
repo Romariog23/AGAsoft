@@ -247,3 +247,17 @@ test('resumen del panel: ingresos y gastos por mes, utilidad del año, cartera p
   const e = carteraEdades([{ saldo: 100, diasVencida: 0 }, { saldo: 50, diasVencida: 10 }, { saldo: 20, diasVencida: 45 }, { saldo: 5, diasVencida: 90 }, { saldo: 0, diasVencida: 90 }]);
   assert.deepEqual(e.map(x => x[1]), [100, 50, 20, 5]);
 });
+test('excedente de nota crédito y recibo sobre el saldo de cartera', async () => {
+  const { cartera } = await import('../src/calc.js');
+  const exc = 20000, nc2 = { ...nc, id: 'n1x', retenciones: { excedente: { cuenta: '42509501', valor: exc } } };
+  const a = asiento(nc2, { ...S, items: [...S.items, ...ncIts.map(i => ({ ...i, documento_id: 'n1x' }))], docs: S.documentos }); assert.ok(cuadra(a));
+  assert.equal(a.find(m => m.cuenta === '42509501').credito, exc);
+  assert.equal(a.find(m => m.cuenta === '13050501').credito, Math.round((nc.neto - exc) * 100) / 100);
+  // La cartera solo baja lo que no fue excedente.
+  const base = cartera([fv], []).find(c => c.factura.id === 'f1').saldo;
+  const con = cartera([fv, nc2], []).find(c => c.factura.id === 'f1').saldo;
+  assert.equal(Math.round((base - con) * 100) / 100, Math.round((nc.neto - exc) * 100) / 100);
+  const rc2 = { ...rc, id: 'r3', total: 650000, retenciones: { excedente: { cuenta: '42509501', valor: 50000 } } };
+  const r = asiento(rc2, { ...S, aplicaciones: [{ recibo_id: 'r3', factura_id: 'f1', valor: 500000 }], docs: S.documentos }); assert.ok(cuadra(r));
+  assert.equal(r.find(m => m.cuenta === '42509501').credito, 50000);
+});
