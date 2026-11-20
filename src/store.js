@@ -22,11 +22,18 @@ function numeracionPara(doc, numeraciones) {
   return n;
 }
 
-// Facturas y notas normales (no electrónicas) se pueden eliminar aunque estén emitidas. Devuelve el motivo si no se puede.
-function motivoNoEliminar(d, documentos, aplicaciones) {
+// Un envío cuenta como validado por la DIAN si quedó aceptado o si su respuesta trae CUFE validado (también anidado en credit_note / debit_note / bill).
+function envioValidado(e) {
+  if (!e) return false;
+  if (e.estado === 'aceptado' || String(e.cufe || '')) return true;
+  const d = e.respuesta?.data || {};
+  return [d, d.credit_note, d.debit_note, d.bill].some(x => x && x.is_validated === true);
+}
+// Facturas y notas se pueden eliminar aunque estén emitidas, salvo las electrónicas que la DIAN ya validó. Devuelve el motivo si no se puede.
+function motivoNoEliminar(d, documentos, aplicaciones, envios = []) {
   if (!d) return 'Documento no encontrado.';
   if (!['FV', 'NC', 'ND'].includes(d.tipo)) return 'Los recibos de caja no se eliminan: se anulan.';
-  if (d.electronica && d.estado !== 'borrador') return 'Las facturas y notas electrónicas no se eliminan: se corrigen con una nota.';
+  if (d.electronica && d.estado !== 'borrador' && envios.some(e => e.documento_id === d.id && envioValidado(e))) return 'Este documento ya fue validado por la DIAN: no se elimina, se corrige con una nota.';
   if (d.tipo === 'FV') {
     if (documentos.some(x => x.ref_id === d.id && x.estado !== 'borrador')) return 'La factura tiene notas crédito o débito. Elimínalas primero.';
     const rc = new Set(documentos.filter(x => x.tipo === 'RC' && x.estado === 'emitido').map(x => x.id));
@@ -34,7 +41,7 @@ function motivoNoEliminar(d, documentos, aplicaciones) {
   }
   return '';
 }
-function revisarEliminar(d, documentos, aplicaciones) { const m = motivoNoEliminar(d, documentos, aplicaciones); if (m) throw new Error(m); }
+function revisarEliminar(d, documentos, aplicaciones, envios) { const m = motivoNoEliminar(d, documentos, aplicaciones, envios); if (m) throw new Error(m); }
 
 /* ---------- Modo local ---------- */
 function localStore() {
@@ -99,7 +106,8 @@ function localStore() {
     },
     async eliminar(id) {
       const d = db.documentos.find(x => x.id === id);
-      revisarEliminar(d, db.documentos, db.aplicaciones);
+      revisarEliminar(d, db.documentos, db.aplicaciones, db.fe_envios || []);
+      db.fe_envios = (db.fe_envios || []).filter(e => e.documento_id !== id);
       if (d.tipo === 'FV') {
         for (const b of db.documentos.filter(x => x.ref_id === id && x.estado === 'borrador')) await api.remove('documentos', b.id);
         db.aplicaciones = db.aplicaciones.filter(a => a.factura_id !== id);
@@ -195,4 +203,4 @@ function crearStore() {
   return url && key ? supabaseStore(url, key) : localStore();
 }
 
-export { crearStore, numeracionPara, motivoNoEliminar };
+export { crearStore, numeracionPara, motivoNoEliminar, envioValidado };

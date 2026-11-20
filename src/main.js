@@ -1,6 +1,6 @@
 import './style.css';
 import { jsonFE, erroresFE, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
-import { crearStore, numeracionPara, motivoNoEliminar } from './store.js';
+import { crearStore, numeracionPara, motivoNoEliminar, envioValidado } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
 import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
@@ -1206,6 +1206,7 @@ function vDoc(m, id) {
     <div class="row">${d.tipo === 'FV' && d.estado === 'emitido' ? `${c?.saldo > 0.009 ? `<a class="btn" href="#/nuevo/RC?ref=${id}">Recibir pago</a>` : ''}<a class="btn" href="#/nuevo/NC?ref=${id}">Nota crédito</a><a class="btn" href="#/nuevo/ND?ref=${id}">Nota débito</a>` : ''}
     ${d.estado === 'emitido' && (!d.electronica || !envioAceptado(id)) ? `<a class="btn" href="#/editar/${id}">Editar</a>` : ''}
     ${d.estado === 'emitido' && !d.electronica ? '<button id="anular">Anular</button>' : ''}
+    ${d.estado === 'emitido' && d.electronica && TIPOS_FE.includes(d.tipo) && !envios(d.id).some(envioValidado) ? '<button id="eliminar">Eliminar</button>' : ''}
     <button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     ${c ? `<section class="kpis noprint"><div class="kpi"><span>Neto factura</span><b class="mono">${money(c.neto)}</b></div><div class="kpi"><span>Notas crédito</span><b class="mono">${money(c.nc)}</b></div><div class="kpi"><span>Pagos</span><b class="mono">${money(c.pagos)}</b></div><div class="kpi ${c.saldo > 0.009 && c.diasVencida ? 'warn' : ''}"><span>Saldo${c.diasVencida && c.saldo > 0.009 ? ` · vencida ${c.diasVencida} días` : ''}</span><b class="mono">${money(c.saldo)}</b></div></section>` : ''}
     <section class="panel">${representacion(d)}</section>
@@ -1225,9 +1226,9 @@ function vDoc(m, id) {
     } catch (e) { fail(e); b.disabled = false; b.textContent = 'Enviar a la DIAN'; }
   };
   if ($('eliminar')) $('eliminar').onclick = async () => {
-    const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones);
+    const motivo = motivoNoEliminar(d, S.d.documentos, S.d.aplicaciones, S.d.fe_envios || []);
     if (motivo) return fail(new Error(motivo));
-    if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. No es electrónica, así que no se reportó a la DIAN.<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
+    if (!await confirmar(`Eliminar ${esc(nomDoc(d))}`, `Se borra ${d.tipo === 'FV' ? 'la factura' : 'la nota'} con su contabilización. ${d.electronica ? 'Todavía no la ha validado la DIAN' : 'No es electrónica'}, así que no queda reportada.<br>Si es el último número de su consecutivo, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
     try { await store.eliminar(d.id); await cargarEmpresa(); toast(`${nomDoc(d)} eliminada.`); location.hash = '#/' + d.tipo; } catch (e) { fail(e); }
   };
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomDoc(d))}</h2><p>${d.tipo === 'RC' ? 'Los pagos de este recibo dejan de aplicarse a las facturas.' : 'Su contabilización deja de sumar en los informes.'} El número no se vuelve a usar.</p>
