@@ -60,7 +60,7 @@ function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
   const out = [];
   if (!TIPOS_FE.includes(doc.tipo)) out.push('Solo se envían facturas, notas crédito y notas débito.');
   if (!doc.electronica) out.push('El documento no es electrónico.');
-  if (doc.estado !== 'emitido') out.push('Primero emite el documento.');
+  if (doc.estado !== 'emitido') out.push('Primero guarda el documento.');
   if (doc.tipo === 'FV' && !String(numeracion?.resolucion || '').trim()) out.push('La numeración no tiene número de resolución.');
   if (!tercero) out.push('El documento no tiene cliente.');
   else {
