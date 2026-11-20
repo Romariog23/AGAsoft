@@ -16,11 +16,14 @@ test('cada clase de factura usa su numeración', () => {
   assert.equal(numeracionPara({ empresa_id: 'x', tipo: 'NC', electronica: true, fecha: '2026-11-18' }, nums).id, 'c');
 });
 
-test('solo se eliminan facturas y notas normales sin notas ni pagos vigentes', () => {
+test('se eliminan facturas y notas sin notas ni pagos vigentes; las electrónicas solo si la DIAN no las validó', () => {
   const fv = { id: 'f', tipo: 'FV', estado: 'emitido', electronica: false };
   assert.equal(motivoNoEliminar(fv, [fv], []), '');
-  assert.match(motivoNoEliminar({ ...fv, electronica: true }, [], []), /electrónicas/);
-  assert.match(motivoNoEliminar({ id: 'r', tipo: 'RC', estado: 'emitido' }, [], []), /anulan/);
+  const fe = { ...fv, electronica: true };
+  assert.equal(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'rechazado', cufe: '' }]), '');
+  assert.match(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'aceptado', cufe: 'x' }]), /validado por la DIAN/);
+  assert.match(motivoNoEliminar(fe, [fe], [], [{ documento_id: 'f', estado: 'rechazado', cufe: '', respuesta: { data: { credit_note: { is_validated: true } } } }]), /validado/);
+  assert.equal(motivoNoEliminar({ id: 'r', tipo: 'RC', estado: 'emitido' }, [], []), '');
   const nc = { id: 'nc', tipo: 'NC', estado: 'emitido', ref_id: 'f' };
   assert.match(motivoNoEliminar(fv, [fv, nc], []), /notas/);
   assert.equal(motivoNoEliminar(fv, [fv, { ...nc, estado: 'borrador' }], []), '');
