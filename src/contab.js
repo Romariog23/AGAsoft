@@ -1,7 +1,7 @@
 // Contabilización automática de los documentos de venta e informes contables.
 // Todo es derivado: los asientos se calculan desde los documentos emitidos, así siempre cuadran con ellos.
 import { cuentaIva } from './impuestos.js';
-import { r2, num, linea } from './calc.js';
+import { r2, num, linea, excedenteDe } from './calc.js';
 import { asientoCompra } from './compras.js';
 import { asientoNomina } from './nomina.js';
 import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
@@ -32,6 +32,8 @@ function asiento(d, ctx) {
       mov(P.clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`);
     }
     mov(P.anticipos, 0, d.anticipo, 'Anticipo recibido');
+    const ex = d.retenciones?.excedente;
+    if (ex?.cuenta) mov(ex.cuenta, 0, num(ex.valor), 'Valor recibido de más');
     return cuadrar(out, P);
   }
 
@@ -63,7 +65,10 @@ function asiento(d, ctx) {
   const det = `${TIPO_NOMBRE[d.tipo]} ${ref}`;
   // La forma de pago de contado lleva el valor a caja, bancos u otra cuenta en vez de clientes. Las notas siguen a su factura.
   const fac = d.tipo === 'FV' ? d : (ctx.docs || []).find(x => x.id === d.ref_id);
-  lado(String(fac?.cuenta_pago || '').trim() || P.clientes, d.neto, det, true);
+  // Nota crédito por encima del saldo de cartera: el excedente va a la cuenta escogida (clase 4 o 5), no a clientes.
+  const exc = d.tipo === 'NC' && d.retenciones?.excedente?.cuenta ? excedenteDe(d) : 0;
+  lado(String(fac?.cuenta_pago || '').trim() || P.clientes, r2(d.neto - exc), det, true);
+  if (exc) mov(d.retenciones.excedente.cuenta, 0, exc, `Excedente sobre el saldo de la factura · ${det}`);
   // Retenciones: la cuenta del concepto escogido en el documento (las notas sin concepto propio siguen a su factura).
   // Naturaleza débito en ventas; la nota crédito la lleva al crédito.
   for (const [k, nom] of [['retefuente', 'Retención en la fuente'], ['reteiva', 'ReteIVA'], ['reteica', 'ReteICA']]) {

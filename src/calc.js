@@ -67,13 +67,17 @@ function totales(items, ret = {}) {
 /* ---------- Cartera ---------- */
 // Saldo de cada factura emitida: neto − notas crédito + notas débito − pagos de recibos.
 // docs: todos los documentos de la empresa; apl: aplicaciones de recibos [{recibo_id, factura_id, valor}]
+// Excedente de una nota crédito o un recibo sobre el saldo de cartera: va a una cuenta de la clase 4 o 5.
+// Se guarda en documentos.retenciones.excedente = { cuenta, valor }.
+const excedenteDe = d => r2(num(d?.retenciones?.excedente?.valor));
 function cartera(docs, apl, hoy = new Date()) {
   const vivos = docs.filter(d => d.estado === 'emitido');
   const byId = Object.fromEntries(vivos.map(d => [d.id, d]));
   const res = {};
   for (const f of vivos.filter(d => d.tipo === 'FV' && !String(d.cuenta_pago || '').trim())) res[f.id] = { factura: f, neto: num(f.neto), nc: 0, nd: 0, pagos: 0 };
   for (const d of vivos) {
-    if ((d.tipo === 'NC' || d.tipo === 'ND') && res[d.ref_id]) res[d.ref_id][d.tipo === 'NC' ? 'nc' : 'nd'] += num(d.neto);
+    // De la nota crédito solo baja la cartera lo que no se llevó como excedente (cuenta de la clase 4 o 5).
+    if ((d.tipo === 'NC' || d.tipo === 'ND') && res[d.ref_id]) res[d.ref_id][d.tipo === 'NC' ? 'nc' : 'nd'] += num(d.neto) - (d.tipo === 'NC' ? excedenteDe(d) : 0);
   }
   for (const a of apl || []) if (byId[a.recibo_id] && res[a.factura_id]) res[a.factura_id].pagos += num(a.valor);
   const t0 = new Date(hoy); t0.setHours(0, 0, 0, 0);
@@ -138,4 +142,4 @@ const SIGLA_ID = { '31': 'NIT', '13': 'CC', '22': 'CE', '41': 'PA', '12': 'TI', 
 const FORMAS_PAGO = [['contado', 'Contado'], ['credito', 'Crédito']];
 const MEDIOS_PAGO = [['efectivo', 'Efectivo'], ['transferencia', 'Transferencia'], ['consignacion', 'Consignación'], ['tarjeta', 'Tarjeta'], ['cheque', 'Cheque']];
 
-export { r2, num, dvOf, parseNit, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO };
+export { r2, num, dvOf, parseNit, fmtNit, linea, totales, cartera, excedenteDe, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO };
