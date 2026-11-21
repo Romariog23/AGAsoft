@@ -1107,13 +1107,11 @@ function vHabilitacion(m) {
   <section class="panel stack"><h3>1. Activa tu cuenta en Factus</h3><ol class="steps-list">
     <li>Pide la activación a Factus con los documentos de la empresa: <b>Cámara de Comercio</b> de menos de 30 días, <b>cédula del representante legal</b>, <b>RUT</b> y la <b>resolución de numeración</b> autorizada por la DIAN.</li>
     <li>Factus hace la habilitación ante la DIAN con tu NIT y el certificado de firma. Las pruebas van en el ambiente de habilitación y <b>no tocan tu contabilidad</b>.</li>
-    <li>Factus te entrega el <b>correo y la contraseña</b> de tu cuenta (y, si aplica, el <b>client_id</b> y el <b>client_secret</b>). Escríbelos en el paso 2.</li></ol></section>
+    <li>Factus te entrega el <b>correo y la contraseña</b> de tu cuenta. Escríbelos en el paso 2. Lo demás de la conexión ya lo tiene AGAsoft.</li></ol></section>
   <section class="panel stack"><h3>2. Conecta AGAsoft con tu cuenta de Factus</h3>
     <div class="grid2"><div><label for="hAmb">Ambiente</label><select id="hAmb"><option value="pruebas">Pruebas (sandbox de Factus)</option><option value="produccion">Producción (facturas reales)</option></select></div>
       <div><label for="hUs">Correo de la cuenta</label><input id="hUs" type="email" value="${esc(h.usuario || '')}" autocomplete="off"></div></div>
-    <div class="grid3"><div><label for="hPw">Contraseña</label><input id="hPw" type="password" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : ''}"></div>
-      <div><label for="hCi">Client ID</label><input id="hCi" class="mono" autocomplete="off" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div>
-      <div><label for="hCs">Client secret</label><input id="hCs" type="password" class="mono" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div></div>
+    <div class="grid2"><div><label for="hPw">Contraseña</label><input id="hPw" type="password" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : ''}"></div></div>
     <div class="row"><button class="primary" id="hGuardar">Guardar y probar</button>${h.usuario ? '<button id="hProbar">Volver a probar</button>' : ''}</div>
     <p class="hint">Las credenciales se guardan en el servidor y no se vuelven a mostrar. Deja en blanco lo que no cambias.</p></section>
   <section class="panel stack"><h3>3. Estado</h3>
@@ -1129,7 +1127,7 @@ function vHabilitacion(m) {
     try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡Listo! Tu empresa ya factura electrónicamente.'); else if (r.hab?.estado === 'error') toast(r.hab.mensaje, true); vHabilitacion(m); }
     catch (err) { fail(err); b.disabled = false; b.textContent = t; }
   };
-  $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value, client_id: $('hCi').value.trim(), client_secret: $('hCs').value });
+  $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value });
   if ($('hProbar')) $('hProbar').onclick = () => accion('hProbar', 'probar');
 }
 
