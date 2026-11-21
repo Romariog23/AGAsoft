@@ -1,12 +1,16 @@
 // Edge Function "fe-factus": puente entre AGAsoft y Factus (proveedor tecnológico autorizado por la DIAN).
-// Cada empresa tiene su propia cuenta en Factus. Sus credenciales se guardan en la tabla fe_cuentas, que solo
+// Cada empresa tiene su propia cuenta en Factus (correo y contraseña). Se guardan en la tabla fe_cuentas, que solo
 // lee esta función con la llave de servicio: el navegador nunca las vuelve a ver.
+// El client_id y el client_secret son del software (AGAsoft como integrador) y son los mismos para todas las empresas:
+// van como secretos de esta función, no en cada empresa.
 // Acciones:
-//   { accion: 'cuenta', empresa_id, ambiente, usuario, clave, client_id, client_secret } → guarda la cuenta y la prueba.
+//   { accion: 'cuenta', empresa_id, ambiente, usuario, clave }                         → guarda la cuenta y la prueba.
 //   { accion: 'probar', empresa_id }                                                   → prueba la cuenta y trae los rangos.
 //   { accion: 'enviar', documento_id, tipo, body }                                     → envía un documento emitido.
 // Secretos opcionales: FACTUS_URL_PRODUCCION (por defecto https://api.factus.com.co), FACTUS_URL_PRUEBAS,
-// FACTUS_CLIENT_ID y FACTUS_CLIENT_SECRET (si Factus te da un client_id único de integrador).
+// Secretos del integrador: FACTUS_CLIENT_ID y FACTUS_CLIENT_SECRET (producción) y, si Factus da otros para el
+// sandbox, FACTUS_CLIENT_ID_PRUEBAS y FACTUS_CLIENT_SECRET_PRUEBAS (si no están, el sandbox usa los de producción).
+// Las empresas conectadas antes con su propio client_id lo siguen usando mientras no estén los secretos.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 import { MUNICIPIOS } from './municipios.ts';
 
@@ -24,10 +28,13 @@ type Cuenta = { ambiente: string; usuario: string; clave: string; client_id: str
 async function token(c: Cuenta) {
   const base = URLS[c.ambiente];
   if (!base) throw new Error('Falta el secreto FACTUS_URL_PRODUCCION en Supabase (la dirección de producción que te da Factus).');
-  const f = new URLSearchParams({ grant_type: 'password', client_id: c.client_id || Deno.env.get('FACTUS_CLIENT_ID') || '', client_secret: c.client_secret || Deno.env.get('FACTUS_CLIENT_SECRET') || '', username: c.usuario, password: c.clave });
+  const sec = (k: string) => (c.ambiente === 'pruebas' && Deno.env.get(k + '_PRUEBAS')) || Deno.env.get(k) || '';
+  const client_id = sec('FACTUS_CLIENT_ID') || c.client_id || '', client_secret = sec('FACTUS_CLIENT_SECRET') || c.client_secret || '';
+  if (!client_id || !client_secret) throw new Error('Falta configurar en Supabase los secretos FACTUS_CLIENT_ID y FACTUS_CLIENT_SECRET de la función fe-factus (los da Factus al integrador).');
+  const f = new URLSearchParams({ grant_type: 'password', client_id, client_secret, username: c.usuario, password: c.clave });
   const r = await fetch(base + '/oauth/token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, body: f });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.access_token) throw new Error(`Factus no aceptó las credenciales (HTTP ${r.status}). Revisa el correo, la contraseña, el client_id y el client_secret.`);
+  if (!r.ok || !d.access_token) throw new Error(`Factus no aceptó las credenciales (HTTP ${r.status}). Revisa el correo y la contraseña de la cuenta de Factus.`);
   return { base, tk: d.access_token as string };
 }
 async function factus(t: { base: string; tk: string }, path: string, init: RequestInit = {}) {
