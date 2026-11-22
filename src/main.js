@@ -259,6 +259,7 @@ function renderNav(actual) {
   actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
+    if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
     const n = x.l.reduce((s, [k]) => s + (av[k]?.[0] || 0), 0);
@@ -1633,12 +1634,12 @@ function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}<div><label for="f_unidad">Unidad de medida <a class="hint" href="#/unidades">Crear</a></label><select id="f_unidad" name="unidad">${optsUnidad(p.unidad || 'UND')}</select></div></div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
-    <div class="grid2">${campoSel('tipo', 'Tipo', TIPOS_ITEM, p.tipo || 'producto')}${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}</div>
-    <div class="grid2">${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}<div data-inv>${campoSel('bodega_id', 'Bodega donde entra al comprar', bodegas().map(b => [b.id, `${b.codigo} · ${b.nombre}`]), p.bodega_id || '')}</div></div>
+    <div class="grid2">${campoSel('tipo', 'Tipo', conInv() ? TIPOS_ITEM : [['producto', 'Producto'], ['servicio', 'Servicio']], p.tipo || 'producto')}${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}</div>
+    <div class="grid2">${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}<div data-inv ${conInv() ? '' : 'hidden'}>${campoSel('bodega_id', 'Bodega donde entra al comprar', bodegas().map(b => [b.id, `${b.codigo} · ${b.nombre}`]), p.bodega_id || '')}</div></div>
     <h3>Contabilización</h3>
     <div class="grid2">${selCuenta('cuenta_ingreso', 'Cuenta en factura y nota débito', /^4[12]/, p.cuenta_ingreso, param().ingresos)}${selCuenta('cuenta_devolucion', 'Cuenta en nota crédito y devolución', /^4/, p.cuenta_devolucion, param().devoluciones)}</div>
-    <div class="grid2" data-inv>${selCuenta('cuenta_costo', 'Cuenta de costo de ventas', /^6/, p.cuenta_costo, param().costo_ventas)}<div><label>Cuenta de inventario</label><p class="hint">La da la bodega (clase 14). Se configura en <a href="#/inventariocfg">Inventario</a>.</p></div></div>
-    <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas. Los servicios no llevan inventario.</p>
+    <div class="grid2" data-inv ${conInv() ? '' : 'hidden'}>${selCuenta('cuenta_costo', 'Cuenta de costo de ventas', /^6/, p.cuenta_costo, param().costo_ventas)}<div><label>Cuenta de inventario</label><p class="hint">La da la bodega (clase 14). Se configura en <a href="#/inventariocfg">Inventario</a>.</p></div></div>
+    <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas. ${conInv() ? 'Los servicios no llevan inventario.' : 'Tu plan no incluye el control de inventario: los productos se venden y compran sin existencias ni costo de ventas automático.'}</p>
     ${ccCfg().activo ? `<h3>Centro de costo</h3><div id="pcc"></div><p class="hint">Opcional. Las líneas de este producto o servicio toman este centro (o el reparto por porcentajes) cuando no se escoge otro en el documento.</p>` : ''}
     ${p.id ? check('activo', 'Activo (aparece al facturar)', p.activo !== false) : ''}
     ${pie()}`, async fd => {
@@ -1647,13 +1648,13 @@ function formProducto(p = {}) {
     if (S.d.productos.some(x => x.id !== p.id && x.codigo.toLowerCase() === codigo.toLowerCase())) throw new Error('Ya existe un producto con ese código.');
     const tipo = fd.get('tipo') === 'servicio' ? 'servicio' : 'producto';
     const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true,
-      tipo, cuenta_costo: tipo === 'producto' ? fd.get('cuenta_costo') || '' : '', bodega_id: tipo === 'producto' ? fd.get('bodega_id') || null : null };
+      tipo, cuenta_costo: tipo === 'producto' ? (conInv() ? fd.get('cuenta_costo') || '' : p.cuenta_costo || '') : '', bodega_id: tipo === 'producto' ? (conInv() ? fd.get('bodega_id') || null : p.bodega_id || null) : null };
     if (getCC) { const d = getCC(), errs = erroresDist(d, ccCfg(), centros()); if (errs.length) throw new Error(errs.join(' ')); row.cc = d; }
     try { await store.save('productos', p.id ? { ...row, id: p.id } : row); }
     catch (e) { throw /\bcc\b/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/035_centros_documentos.sql.') : /tipo|cuenta_costo|bodega_id/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : e; }
     await cargarEmpresa(); toast('Guardado.'); route();
   });
-  const verInv = () => $('dlgForm').querySelectorAll('[data-inv]').forEach(x => x.hidden = $('f_tipo').value === 'servicio');
+  const verInv = () => $('dlgForm').querySelectorAll('[data-inv]').forEach(x => x.hidden = !conInv() || $('f_tipo').value === 'servicio');
   $('f_tipo').onchange = verInv; verInv();
   const getCC = $('pcc') ? editorDist($('pcc'), p.cc) : null;
 }
@@ -1808,7 +1809,9 @@ const nomForma = (formas, credito, cuenta) => { if (credito) return formas.find(
 const optsContado = (formas, cuenta) => { const fs = formas.filter(f => !f.credito); const sel = fs.find(f => f.cuenta === cuenta) || (cuenta ? null : fs[0]);
   return (cuenta && !sel ? `<option value="${esc(cuenta)}" selected>${esc(cuenta)} ${esc(nomCta(cuenta))}</option>` : '') + fs.map(f => `<option value="${esc(f.cuenta)}" ${f === sel ? 'selected' : ''}>${esc(f.nombre)} · ${esc(f.cuenta)}</option>`).join(''); };
 const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos, tarifas: tarifasIva(emp()?.contabilidad) });
-const movs = () => movimientos({ ...S.d, param: param(), tarifas: tarifasIva(emp()?.contabilidad), metodoInv: cfgInventario(emp()?.contabilidad).metodo, cc: ccCfg() });
+const movs = () => movimientos({ ...S.d, param: param(), tarifas: tarifasIva(emp()?.contabilidad), metodoInv: cfgInventario(emp()?.contabilidad).metodo, cc: ccCfg(), inventario: conInv() });
+// ¿El plan incluye el control de inventario? Sin él quedan Productos y servicios y Unidades, sin existencias ni costo.
+const conInv = () => tieneModulo(S.plan, 'inventario');
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
 const nomCta = cod => idxCuentas()[cod]?.nombre || '(no está en el plan)';
 // Hasta el fin del mes en curso: la nómina y los cierres se contabilizan con fecha del último día del mes.
@@ -1922,7 +1925,7 @@ function vInventarioCfg(m) {
   // La bodega principal que aún no existe (se crea al primer uso) también se edita: al guardar se crea con la cuenta escogida.
   const formB = (b = {}, principal = false) => dialogo(`<h2>${b.id || principal ? 'Editar bodega' : 'Nueva bodega'}</h2>
     <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
-    <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><input id="f_cuenta" name="cuenta" list="ctas14" class="mono" value="${esc(b.cuenta || param().inventario)}" autocomplete="off" required><datalist id="ctas14">${optsLista(cuentasAux().filter(c => /^14/.test(c.codigo)))}</datalist>
+    <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><select id="f_cuenta" name="cuenta" class="mono" required>${(() => { const sel = b.cuenta || param().inventario, l = cuentasAux().filter(c => /^14/.test(c.codigo)); return (l.some(c => c.codigo === sel) ? '' : `<option value="${esc(sel)}" selected>${esc(sel)}</option>`) + l.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join(''); })()}</select>
       <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
     ${b.id ? check('activa', 'Activa', b.activa !== false) : ''}${pie()}`, async fd => {
     const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true };
@@ -4104,7 +4107,8 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
   const pagado = !esCE && id && compras().some(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
   const RET_C = { retefuente: ['krfC', 'krf'], reteiva: ['kriC', 'kri'], reteica: ['kricaC', 'krica'] };
-  const prodsInv = S.d.productos.filter(p => p.activo !== false && esInventariable(p));
+  // Sin el módulo de inventario las compras van por cuenta (salvo una compra vieja que ya tenga líneas por producto).
+  const prodsInv = conInv() || (c.lineas || []).some(l => l.producto_id) ? S.d.productos.filter(p => p.activo !== false && esInventariable(p)) : [];
   const optsBod = sel => bodegas().map(b => `<option value="${b.id}" ${b.id === (sel || '') ? 'selected' : ''}>${esc(b.codigo)} · ${esc(b.nombre)}</option>`).join('');
   const prodPorId = id => S.d.productos.find(p => p.id === id);
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/compras/${tipo}">← ${T.plural}</a><h2>${id ? `Editar ${esc(nomCompra(c))}` : T.nuevo}</h2>

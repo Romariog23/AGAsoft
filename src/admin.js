@@ -242,7 +242,7 @@ function formDueno(e) {
   });
 }
 
-const MODS = [['nomina', 'Nómina'], ['exogena', 'Medios magnéticos'], ['importar', 'Importar plantillas'], ['informes', 'Informes de ventas y cartera'], ['avanzados', 'Informes avanzados y exportar a Excel'], ['consulta', 'Usuarios de solo consulta']];
+const MODS = [['nomina', 'Nómina'], ['exogena', 'Medios magnéticos'], ['importar', 'Importar plantillas'], ['informes', 'Informes de ventas y cartera'], ['avanzados', 'Informes avanzados y exportar a Excel'], ['consulta', 'Usuarios de solo consulta'], ['inventario', 'Control de inventario']];
 function pintarPlanes() {
   const usan = id => S.cuentas.filter(c => c.plan_id === id).length;
   const lim = v => v === null || v === undefined ? 'Sin límite' : Number(v).toLocaleString('es-CO');
