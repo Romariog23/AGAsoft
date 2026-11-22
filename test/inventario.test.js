@@ -101,3 +101,28 @@ test('inventario inicial contra la misma cuenta 14: solo cantidades, sin asiento
   const a = asientoInventario(costear(movimientosInv(S)), { productos: S.productos, bodegas: S.bodegas, param: {} });
   assert.equal(a.filter(m => m.doc_id === 'a1').length, 0);
 });
+
+import { kardex, costoPorProducto } from '../src/inventario.js';
+test('traslado: mueve cantidades entre bodegas sin cambiar costo ni existencia; asiento solo si las cuentas 14 son distintas', () => {
+  const prods = [{ id: 'p', tipo: 'producto' }];
+  const bods = [{ id: 'b1', cuenta: '14350501' }, { id: 'b2', cuenta: '14350502' }, { id: 'b3', cuenta: '14350501' }];
+  const base = { productos: prods, compras: [{ id: 'c', tipo: 'FC', estado: 'contabilizado', numero: 1, fecha: '2026-01-01', lineas: [{ producto_id: 'p', bodega_id: 'b1', cantidad: 10, costo: 100, cuenta: '14350501', base: 1000 }] }] };
+  const tr = (dest, q) => ({ id: 't' + dest, tipo: 'TR', numero: 1, fecha: '2026-01-02', tercero_id: 'x', estado: 'contabilizado', lineas: [{ producto_id: 'p', bodega_id: 'b1', bodega_destino: dest, cantidad: q }] });
+  const cs = costear(movimientosInv({ ...base, inventario_docs: [tr('b2', 4)] }));
+  const e = existencias(cs)[0];
+  assert.equal(e.cantidad, 10); assert.equal(e.valor, 1000); assert.equal(e.bodegas.b1, 6); assert.equal(e.bodegas.b2, 4);
+  const a = asientoInventario(cs, { productos: prods, bodegas: bods, param: {} });
+  assert.deepEqual(a.map(m => [m.cuenta, m.debito, m.credito]).sort(), [['14350501', 0, 400], ['14350502', 400, 0]]);
+  const cs2 = costear(movimientosInv({ ...base, inventario_docs: [tr('b3', 4)] }));
+  assert.equal(asientoInventario(cs2, { productos: prods, bodegas: bods, param: {} }).length, 0);
+  const k = kardex(cs, 'p', { bodega: 'b2' });
+  assert.equal(k.final.cantidad, 4); assert.equal(kardex(cs, 'p').final.cantidad, 10);
+});
+test('costo de ventas por producto: ventas menos devoluciones, costo y margen', () => {
+  const prods = [{ id: 'p', tipo: 'producto' }];
+  const S = { productos: prods, compras: [{ id: 'c', tipo: 'FC', estado: 'x', numero: 1, fecha: '2026-01-01', lineas: [{ producto_id: 'p', cantidad: 10, costo: 100, cuenta: '14350501', base: 1000 }] }],
+    documentos: [{ id: 'f', tipo: 'FV', estado: 'emitido', numero: 1, fecha: '2026-01-05' }, { id: 'n', tipo: 'NC', estado: 'emitido', numero: 1, fecha: '2026-01-06', concepto: '1', ref_id: 'f' }],
+    items: [{ documento_id: 'f', producto_id: 'p', cantidad: 4, precio: 200 }, { documento_id: 'n', producto_id: 'p', cantidad: 1, precio: 200 }] };
+  const r = costoPorProducto(costear(movimientosInv(S)), S.items, '2026-01-01', '2026-01-31')[0];
+  assert.equal(r.cantidad, 3); assert.equal(r.costo, 300); assert.equal(r.venta, 600); assert.equal(r.margen, 50);
+});

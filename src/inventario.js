@@ -54,7 +54,7 @@ export function entradasCompras(compras) {
 
 /* ---------- Kardex y costo (entrega 2) ---------- */
 // Documentos de inventario (tabla inventario_docs): AI ajuste (entradas y salidas con contrapartida) y, más adelante, TR traslado.
-export const TIPOS_INV = { AI: { nombre: 'Ajuste de inventario', corto: 'Ajuste inv.', plural: 'Ajustes de inventario' } };
+export const TIPOS_INV = { AI: { nombre: 'Ajuste de inventario', corto: 'Ajuste inv.', plural: 'Ajustes de inventario' }, TR: { nombre: 'Traslado entre bodegas', corto: 'Traslado', plural: 'Traslados entre bodegas' } };
 export const CONCEPTOS_AI = [['inicial', 'Inventario inicial'], ['conteo', 'Conteo físico'], ['faltante', 'Faltante'], ['sobrante', 'Sobrante'], ['otro', 'Otro']];
 // Notas crédito que devuelven mercancía: devolución (1) y anulación de la factura (2).
 export const NC_DEVUELVE = ['1', '2'];
@@ -68,6 +68,13 @@ export function movimientosInv(S) {
   for (const c of S.compras || []) {
     if (c.estado === 'anulado' || c.tipo === 'CE') continue;
     (c.lineas || []).forEach((l, i) => { if (esLineaProducto(l) && inv(l.producto_id)) out.push({ fecha: c.fecha, orden: 0, origen: 'compra', doc_id: c.id, tipo: c.tipo, ref: `${c.tipo} ${c.numero}`, linea: i, tercero_id: c.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: num(l.cantidad), costo: num(l.costo), dist: primeraDist(l.cc, prods[l.producto_id]?.cc, c.cc) }); });
+  }
+  // Traslados: sale de una bodega y entra a otra la misma cantidad, al costo del momento (no cambia el costo ni la existencia total).
+  for (const t of S.inventario_docs || []) {
+    if (t.estado === 'anulado' || t.tipo !== 'TR') continue;
+    (t.lineas || []).forEach((l, i) => { if (!inv(l.producto_id) || !num(l.cantidad) || (l.bodega_id || '') === (l.bodega_destino || '')) return; const q = Math.abs(num(l.cantidad));
+      const b = { fecha: t.fecha, orden: 4, origen: 'traslado', doc_id: t.id, tipo: 'TR', ref: `TR ${t.numero}`, linea: i, tercero_id: t.tercero_id, producto_id: l.producto_id, costo: null };
+      out.push({ ...b, bodega_id: l.bodega_id || '', bodega_par: l.bodega_destino || '', cantidad: -q }, { ...b, bodega_id: l.bodega_destino || '', bodega_par: l.bodega_id || '', cantidad: q }); });
   }
   for (const a of S.inventario_docs || []) {
     if (a.estado === 'anulado' || a.tipo !== 'AI') continue;
@@ -97,6 +104,12 @@ export function costear(movs, metodo = 'promedio') {
   const st = {}, salidaFV = {}, out = [];
   for (const m0 of movs) {
     const m = { ...m0 }, s = st[m.producto_id] ||= { cant: 0, valor: 0, capas: [], ultimo: 0 }, q = Math.abs(m.cantidad);
+    if (m.origen === 'traslado') {
+      // Solo mueve cantidades entre bodegas: el costo es el del momento y la existencia total no cambia.
+      const c = r4(s.cant > 1e-9 && s.valor > 0 ? s.valor / s.cant : s.ultimo);
+      Object.assign(m, { costo: c, total: r2(Math.sign(m.cantidad) * q * c), saldo: s.cant, valor: s.valor, promedio: s.cant > 1e-9 ? r4(s.valor / s.cant) : s.ultimo });
+      out.push(m); continue;
+    }
     if (m.cantidad > 0) {
       // Entrada: compra o ajuste a su costo; devolución al costo con que salió en su factura (o al costo actual).
       let c = m.costo;
@@ -157,6 +170,13 @@ export function asientoInventario(costeados, { productos, bodegas, param }) {
   };
   for (const m of costeados) {
     if (m.origen === 'compra' || !m.total) continue;
+    if (m.origen === 'traslado') {
+      // Entre bodegas con la misma cuenta 14 no hay asiento; con cuentas distintas, de la 14 de origen a la de destino.
+      if (cta14(m.bodega_id) === cta14(m.bodega_par)) continue;
+      const v = Math.abs(m.total), c = cta14(m.bodega_id);
+      if (m.total > 0) mov(m, c, v, 0, `Entrada por traslado ${m.ref}`); else mov(m, c, 0, v, `Salida por traslado ${m.ref}`);
+      continue;
+    }
     const v = Math.abs(m.total), costo = prods[m.producto_id]?.cuenta_costo || P.costo_ventas, inv = cta14(m.bodega_id);
     if (m.origen === 'venta') { mov(m, costo, v, 0, `Costo de ventas ${m.ref}`); mov(m, inv, 0, v, `Salida de inventario ${m.ref}`); }
     else if (m.origen === 'devolucion') { mov(m, inv, v, 0, `Devolución al inventario ${m.ref}`); mov(m, costo, 0, v, `Reversión del costo ${m.ref}`); }
@@ -170,3 +190,35 @@ export function asientoInventario(costeados, { productos, bodegas, param }) {
   return Object.values(out);
 }
 export const inventarioContable = (S, contab) => asientoInventario(costear(movimientosInv(S), cfgInventario(contab).metodo), { productos: S.productos, bodegas: S.bodegas, param: contab?.parametros ?? S.param });
+
+// Kardex de un producto: movimientos con entradas, salidas y saldo. Con bodega, el saldo es el de esa bodega (en cantidades).
+export function kardex(costeados, productoId, { desde = '', hasta = '9999-12-31', bodega = null, bodegaDef = '' } = {}) {
+  const ms = costeados.filter(m => m.producto_id === productoId && (bodega == null || (m.bodega_id || bodegaDef) === bodega));
+  let cant = 0, inicial = { cantidad: 0, valor: 0 };
+  const filas = [];
+  for (const m of ms) {
+    if (m.fecha > hasta) break;
+    cant = r4(cant + m.cantidad);
+    const f = { ...m, entrada: m.cantidad > 0 ? m.cantidad : 0, salida: m.cantidad < 0 ? -m.cantidad : 0, saldoBodega: cant };
+    if (desde && m.fecha < desde) { inicial = { cantidad: bodega == null ? m.saldo : cant, valor: m.valor }; continue; }
+    filas.push(f);
+  }
+  return { inicial, filas, final: filas.length ? { cantidad: bodega == null ? filas.at(-1).saldo : filas.at(-1).saldoBodega, valor: filas.at(-1).valor } : inicial };
+}
+// Costo de ventas por producto en un período: cantidad vendida neta (ventas menos devoluciones), costo y, con los ítems, la venta.
+export function costoPorProducto(costeados, items, desde, hasta) {
+  const por = {};
+  for (const m of costeados) {
+    if (m.fecha < desde || m.fecha > hasta || (m.origen !== 'venta' && m.origen !== 'devolucion')) continue;
+    const x = por[m.producto_id] ||= { producto_id: m.producto_id, cantidad: 0, costo: 0, venta: 0 };
+    x.cantidad = r4(x.cantidad - m.cantidad); x.costo = r2(x.costo - m.total);
+  }
+  const docs = new Set(costeados.filter(m => m.fecha >= desde && m.fecha <= hasta && (m.origen === 'venta' || m.origen === 'devolucion')).map(m => `${m.doc_id}|${m.origen}`));
+  for (const it of items || []) {
+    const v = docs.has(`${it.documento_id}|venta`) ? 1 : docs.has(`${it.documento_id}|devolucion`) ? -1 : 0;
+    if (!v || !por[it.producto_id]) continue;
+    const base = num(it.cantidad) * num(it.precio) * (1 - num(it.descuento_pct) / 100);
+    por[it.producto_id].venta = r2(por[it.producto_id].venta + v * base);
+  }
+  return Object.values(por).map(x => ({ ...x, utilidad: r2(x.venta - x.costo), margen: x.venta ? r2((x.venta - x.costo) / x.venta * 100) : 0 }));
+}
