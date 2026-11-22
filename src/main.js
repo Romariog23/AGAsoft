@@ -18,6 +18,7 @@ import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certi
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
+import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, movimientosInv, costear, existencias, asientoInventario } from './inventario.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -241,7 +242,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
-  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
 function avisosNav() {
@@ -296,6 +297,7 @@ function route() {
     if (v === 'numeraciones') return vNumeraciones(m);
     if (v === 'formaspago') return vFormasPago(m);
     if (v === 'inventariocfg') return vInventarioCfg(m);
+    if (v === 'centroscfg') return vCentrosCfg(m);
     if (v === 'existencias') return vExistencias(m);
     if (v === 'ajustesinv') return vAjustesInv(m);
     if (v === 'ajusteinvnuevo') return vAjusteInvEditor(m, {});
@@ -643,6 +645,7 @@ function vEmpresa(m) {
       ['tarifasiva', 'iva', 'Tarifas de IVA', 'Cuenta por tarifa', '#/tarifasiva'],
       ['exogenacfg', 'exogena', 'Medios magnéticos', 'Formatos y conceptos', '#/exogenacfg'],
       ['nominacfg', 'nomina', 'Nómina', 'Valores del año y entidades', '#/nominacfg'],
+      ['centroscfg', 'capas', 'Centros de costo', ccCfg().activo ? `${nivelesActivos(ccCfg()).map(n => n.nombre).join(' · ')} · ${ccCfg().alcance === 'todo' ? 'balance y resultado' : 'solo resultado'}` : 'Desactivados', '#/centroscfg', { id: 'ccOn', on: ccCfg().activo }],
       ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
     S.perfil?.es_admin && ['Administrador', [
@@ -657,6 +660,7 @@ function vEmpresa(m) {
     if (antes && on && !await antes()) { ev.target.checked = false; return; }
     try { await guardarContab(clave, on); toast(on ? msgOn : msgOff); } catch (er) { fail(er); ev.target.checked = !on; }
   }; };
+  if ($('ccOn')) $('ccOn').onchange = async ev => { try { await guardarContab('cc', { ...(emp()?.contabilidad?.cc || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Centros de costo activados: configúralos y crea los centros.' : 'Centros de costo desactivados.'); if (ev.target.checked) location.hash = '#/centroscfg'; else route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
   interruptor('factNormal', 'factura_normal', 'Facturas normales habilitadas para esta empresa.', 'Facturas normales ocultas: solo se ofrece la factura electrónica.');
   interruptor('feHab', 'fe_habilitada', 'Facturación electrónica habilitada para esta empresa.', 'Facturación electrónica deshabilitada para esta empresa.',
     () => confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada'));
@@ -1789,7 +1793,7 @@ function tablaAsiento(ms, nuevas = {}) {
   if (!ms.length) return '<p class="muted">Este documento no genera movimientos.</p>';
   const d = ms.reduce((s, m) => s + m.debito, 0), c = ms.reduce((s, m) => s + m.credito, 0);
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
-    ${ms.map(m => `<tr><td class="mono"><a href="#/auxiliar?cuenta=${m.cuenta}">${m.cuenta}</a></td><td>${esc(nuevas[m.cuenta] && !idxCuentas()[m.cuenta] ? `${nuevas[m.cuenta]} (se crea al guardar)` : nomCta(m.cuenta))}</td><td>${esc(m.tercero_id ? terc(m.tercero_id)?.nombre : '')}</td><td>${esc(m.detalle)}</td><td class="r mono">${valor(m.debito)}</td><td class="r mono">${valor(m.credito)}</td></tr>`).join('')}
+    ${ms.map(m => `<tr><td class="mono"><a href="#/auxiliar?cuenta=${m.cuenta}">${m.cuenta}</a></td><td>${esc(nuevas[m.cuenta] && !idxCuentas()[m.cuenta] ? `${nuevas[m.cuenta]} (se crea al guardar)` : nomCta(m.cuenta))}</td><td>${esc(m.tercero_id ? terc(m.tercero_id)?.nombre : '')}</td><td>${esc(m.detalle)}${ccTxt(m) ? `<br><small class="muted">${esc(ccTxt(m))}</small>` : ''}</td><td class="r mono">${valor(m.debito)}</td><td class="r mono">${valor(m.credito)}</td></tr>`).join('')}
     <tr class="strong"><td colspan="4">Sumas iguales</td><td class="r mono">${money(d)}</td><td class="r mono">${money(c)}</td></tr></tbody></table></div>`;
 }
 function filtroFechas(id, conDesde, onChange) {
@@ -2055,6 +2059,53 @@ function vAjusteInv(m, id) {
     const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
     await store.save('inventario_docs', { id: a.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() }); await cargarEmpresa(); toast('Ajuste anulado.'); route();
   });
+}
+/* ---------- Centros de costo ---------- */
+const ccCfg = () => cfgCC(emp()?.contabilidad);
+const centros = () => S.d?.centros_costo || [];
+const ccNom = id => { const c = centros().find(x => x.id === id); return c ? `${c.codigo} ${c.nombre}` : ''; };
+const ccTxt = m => [m.cc1, m.cc2, m.cc3].filter(Boolean).map(ccNom).filter(Boolean).join(' · ');
+const faltaSqlCC = e => /centros_costo/.test(e.message) && /exist|schema|relation/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/034_centros_costo.sql.') : e;
+// Selectores de centro de costo de una línea (uno por nivel habilitado). Deshabilitados si la cuenta no lleva centro.
+function selCC(l, i) {
+  const cfg = ccCfg(); if (!cfg.activo) return '';
+  const en = cuentaConCC(cfg, l.cuenta);
+  return nivelesActivos(cfg).map(n => `<select data-cc="${n.nivel}" data-i="${i}" class="sm-sel" aria-label="${esc(n.nombre)}" ${en ? '' : 'disabled'} title="${en ? esc(n.nombre) : 'Esta cuenta no lleva centro de costo'}">
+    <option value="">${en ? `${esc(n.nombre)}${n.obligatorio ? '' : ' (opcional)'}…` : '—'}</option>${centrosDe(centros(), n.nivel).map(c => `<option value="${c.id}" ${c.id === l['cc' + n.nivel] ? 'selected' : ''}>${esc(c.codigo)} · ${esc(c.nombre)}</option>`).join('')}</select>`).join('');
+}
+function vCentrosCfg(m) {
+  const cfg = ccCfg(), todos = centros();
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/config">← Configuración</a><h2>Centros de costo</h2><p class="sub">Un filtro de la misma contabilidad: los informes por centro de costo siempre suman igual que los contables.</p></div></header>
+  <section class="panel stack">
+    <label class="check"><input type="checkbox" id="ccA" ${cfg.activo ? 'checked' : ''}> <b>Trabajar con centros de costo</b></label>
+    <div class="grid2">${campoSel('cc_alc', 'Alcance', ALCANCES, cfg.alcance)}<div></div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Nivel</th><th>Nombre del nivel</th><th>Uso</th></tr></thead><tbody>
+      ${cfg.niveles.map(n => `<tr><td class="mono">${n.nivel}</td><td><input id="ccN${n.nivel}" maxlength="40" value="${esc(n.nombre)}" ${n.nivel > 1 && !n.activo ? 'placeholder="Por ejemplo: Obras"' : ''}></td>
+        <td>${n.nivel === 1 ? '<span class="tag ok">Obligatorio</span>' : `<label class="check"><input type="checkbox" id="ccH${n.nivel}" ${n.activo ? 'checked' : ''} ${n.nivel === 3 && !cfg.niveles[1].activo ? 'disabled' : ''}> Habilitado (opcional en cada línea)</label>`}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="hint">Cada nivel es una lista independiente: por ejemplo Nivel 1 <b>Máquinas</b> y Nivel 2 <b>Obras</b>, y en cada línea escoges la máquina y la obra donde trabajó. Con el centro activo, ninguna línea de una cuenta del alcance se guarda sin el nivel 1.</p>
+    <div class="row"><button class="primary" id="ccG">Guardar configuración</button></div>
+  </section>
+  ${cfg.niveles.filter(n => n.activo).map(n => `<section class="panel stack"><header class="vhead"><h3>${esc(n.nombre)} <span class="hint">nivel ${n.nivel}</span></h3><button data-nc="${n.nivel}">Nuevo</button></header>
+    ${centrosDe(todos, n.nivel, true).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th></th></tr></thead><tbody>${centrosDe(todos, n.nivel, true).map(c => `<tr class="${c.activo === false ? 'muted' : ''}"><td class="mono">${esc(c.codigo)}</td><td>${esc(c.nombre)}${c.activo === false ? ' <span class="tag">Inactivo</span>' : ''}</td><td class="r"><button class="sm ghost" data-ec="${c.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>` : `<p class="muted">Todavía no hay ${esc(n.nombre.toLowerCase())}.</p>`}
+  </section>`).join('')}`;
+  const leer = () => ({ activo: $('ccA').checked, alcance: $('f_cc_alc').value, niveles: [1, 2, 3].map(k => ({ nombre: $('ccN' + k).value.trim(), activo: k === 1 ? true : !!$('ccH' + k)?.checked && (k === 2 || $('ccH2').checked) })) });
+  if ($('ccH2')) $('ccH2').onchange = () => { $('ccH3').disabled = !$('ccH2').checked; if (!$('ccH2').checked) $('ccH3').checked = false; };
+  $('ccG').onclick = async () => {
+    const n = leer();
+    if (n.activo && !centrosDe(todos, 1).length && !await confirmar('Activar sin centros', `Todavía no has creado ${esc(cfgCC({ cc: n }).niveles[0].nombre.toLowerCase())}. Mientras no existan, no podrás guardar comprobantes con cuentas del alcance.`, 'Activar igual')) return;
+    try { await guardarContab('cc', n); toast('Centros de costo guardados.'); route(); } catch (er) { fail(er); }
+  };
+  const formC = (c) => dialogo(`<h2>${c.id ? 'Editar' : 'Nuevo'}: ${esc(cfg.niveles[c.nivel - 1].nombre.toLowerCase())}</h2>
+    <div class="grid2">${campo('codigo', 'Código', c.codigo || '', 'required maxlength="20" class="mono"')}${campo('nombre', 'Nombre', c.nombre || '', 'required maxlength="100"')}</div>
+    ${c.id ? check('activo', 'Activo', c.activo !== false) : ''}${pie()}`, async fd => {
+    const row = { empresa_id: S.eid, nivel: c.nivel, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), activo: c.id ? fd.get('activo') === 'on' : true };
+    const errs = erroresCentro({ ...row, id: c.id }, todos); if (errs.length) throw new Error(errs.join(' '));
+    try { await store.save('centros_costo', c.id ? { ...row, id: c.id } : row); } catch (er) { throw faltaSqlCC(er); }
+    await cargarEmpresa(); toast('Guardado.'); route();
+  });
+  m.querySelectorAll('[data-nc]').forEach(b => b.onclick = () => formC({ nivel: Number(b.dataset.nc), codigo: String(centrosDe(todos, Number(b.dataset.nc), true).length + 1).padStart(2, '0') }));
+  m.querySelectorAll('[data-ec]').forEach(b => b.onclick = () => formC(todos.find(x => x.id === b.dataset.ec)));
 }
 function vFormasPago(m) {
   const P = param(), todas = formasPago(emp()?.contabilidad, P);
@@ -3545,7 +3596,7 @@ function vCompEditor(m, { id, tipo }) {
     </section>
     <section class="panel stack"><div class="vhead"><h3>Movimientos</h3><div class="row"><button type="button" id="impL">Importar CSV</button><button type="button" id="addL">+ Agregar línea</button></div></div>
       <datalist id="ctasComp">${optsLista(aux)}</datalist>
-      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero <span class="hint">(obligatorio)</span></th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero <span class="hint">(obligatorio)</span></th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
       <div class="totbox" id="ctot"></div>
     </section>
     <div class="err" id="ceErr" hidden></div>
@@ -3556,6 +3607,7 @@ function vCompEditor(m, { id, tipo }) {
     $('lns').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" autocomplete="off" placeholder="Código o nombre"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
       <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero" required><option value="">Escoge…</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
+      ${ccCfg().activo ? `<td data-l="Centro de costo" class="c-cc" data-ccw="${i}">${selCC(l, i)}</td>` : ''}
       <td data-l="Detalle" class="c-desc"><input data-k="detalle" value="${esc(l.detalle)}" maxlength="200" aria-label="Detalle"></td>
       <td data-l="Débito"><input data-k="debito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.debito) || ''}" aria-label="Débito"></td>
       <td data-l="Crédito"><input data-k="credito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.credito) || ''}" aria-label="Crédito"></td>
@@ -3571,7 +3623,7 @@ function vCompEditor(m, { id, tipo }) {
     const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
     const l = c.lineas[Number(tr.dataset.i)];
     l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
-    if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = nomDe(l.cuenta);
+    if (el.dataset.k === 'cuenta') { m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = nomDe(l.cuenta); const w = m.querySelector(`[data-ccw="${tr.dataset.i}"]`); if (w && (w.querySelector('select')?.disabled ?? true) === cuentaConCC(ccCfg(), l.cuenta)) w.innerHTML = selCC(l, Number(tr.dataset.i)); }
     if (el.dataset.k === 'debito' || el.dataset.k === 'credito') {
       // Cada línea lleva solo débito o solo crédito: al escribir en uno se borra el otro.
       const otro = el.dataset.k === 'debito' ? 'credito' : 'debito';
@@ -3579,7 +3631,7 @@ function vCompEditor(m, { id, tipo }) {
       totales_();
     }
   });
-  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
+  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return; if (el.dataset.cc) c.lineas[Number(tr.dataset.i)]['cc' + el.dataset.cc] = el.value; else c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
   $('lns').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });
   $('addL').onclick = () => {
     // La línea nueva propone el valor que falta para cuadrar.
@@ -3592,8 +3644,8 @@ function vCompEditor(m, { id, tipo }) {
     ev.preventDefault();
     c.fecha = $('cf').value; c.descripcion = $('cd').value.trim();
     const lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito))
-      .map(l => ({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)) }));
-    const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas);
+      .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '' }, ccCfg()));
+    const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas).concat(erroresCC(lineas, ccCfg(), centros()));
     if (errs.length) { $('ceErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>') + (errs.length > 8 ? `<br>…y ${errs.length - 8} más.` : ''); $('ceErr').hidden = false; return; }
     $('ceErr').hidden = true; $('ceSave').disabled = true;
     try {
@@ -3605,7 +3657,7 @@ function vCompEditor(m, { id, tipo }) {
         catch (e) { await cargarEmpresa(); g = await store.save('comprobantes', { ...row, numero: siguienteComp(c.tipo), estado: 'contabilizado' }); }
       }
       await cargarEmpresa(); toast('Comprobante guardado.'); location.hash = '#/comp/' + g.id;
-    } catch (e) { $('ceErr').textContent = /comprobantes/.test(e.message) && /exist|schema|relation/i.test(e.message) ? 'Falta crear la tabla de comprobantes en Supabase (archivo supabase/004_comprobantes.sql).' : e.message; $('ceErr').hidden = false; }
+    } catch (e) { $('ceErr').textContent = /comprobantes/.test(e.message) && /exist|schema|relation/i.test(e.message) ? 'Falta crear la tabla de comprobantes en Supabase (archivo supabase/004_comprobantes.sql).' : faltaSqlCC(e).message; $('ceErr').hidden = false; }
     finally { $('ceSave').disabled = false; }
   };
   pintar();

@@ -565,3 +565,4 @@ button.cfg-main:hover{background:none}
 @media (max-width:720px){.tbl.comp td.c-na{display:none}}
 .tbl.comp .blk{display:block;text-align:right;padding-top:8px}
 .tbl.comp td[data-l=Producto]{min-width:190px}.tbl.comp td.c-desc{min-width:150px}
+.tbl.comp td.c-cc{min-width:170px}.tbl.comp td.c-cc select{display:block;margin-top:2px}

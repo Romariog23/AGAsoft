@@ -127,7 +127,8 @@ function asientoComprobante(c) {
   if (c.estado === 'anulado') return [];
   const ref = `${c.tipo} ${c.numero}`;
   return (c.lineas || []).map(l => ({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'comp', cuenta: a8(l.cuenta), tercero_id: l.tercero_id || null,
-    detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)) })).filter(m => m.debito || m.credito);
+    detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)),
+    ...(l.cc1 ? { cc1: l.cc1 } : {}), ...(l.cc2 ? { cc2: l.cc2 } : {}), ...(l.cc3 ? { cc3: l.cc3 } : {}) })).filter(m => m.debito || m.credito);
 }
 // Errores del comprobante (lista vacía si está bien). Solo se contabiliza en cuentas auxiliares de 8 dígitos.
 function erroresComprobante(c, cuentas) {
