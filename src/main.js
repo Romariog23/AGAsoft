@@ -207,20 +207,25 @@ const MENU = [
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
-  ['-', 'Informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
-  ['#', 'Impuestos'], ['iva', 'IVA del período'], ['retpracticadas', 'Retenciones practicadas'], ['certificados', 'Certificados de retención'], ['exogena', 'Medios magnéticos'],
+  ['!informes', 'Informes'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'], ['miplan', 'Mi plan'],
+  ['!config', 'Configuración'],
 ];
+// Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
+const HUB = {
+  informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg'],
+};
 function renderNav(actual) {
   const items = [...MENU];
   // Grupos desplegables: queda abierto el del módulo actual y los que la persona dejó abiertos.
   let abiertos = []; try { abiertos = JSON.parse(localStorage.getItem('agasoft-menu') || '[]'); } catch (_) {}
+  actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const grupos = []; let g = null;
-  for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
+  for (const [k, t] of items) { if (k[0] === '!') { grupos.push({ top: k.slice(1), t }); g = null; } else if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
   $('nav').innerHTML = grupos.map(x => {
+    if (x.top) return `<a class="nav-top" href="#/${x.top}" ${x.top === actual ? 'aria-current="page"' : ''}>${x.t}</a>`;
     const links = x.l.map(([k, t]) => k === '#' ? `<span class="nav-sub" style="display:block;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 14px 2px">${t}</span>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
     if (!x.t) return links;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
@@ -287,6 +292,7 @@ function route() {
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
     if (v === 'balance') return vBalance(m);
     if (v === 'auxiliar') return vAuxiliar(m, q);
+    if (v === 'informes') return vInformes(m);
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
@@ -466,60 +472,137 @@ function formEmpresa(e = {}) {
   }, { ancho: true });
   activarNit(f);
 }
-function vEmpresa(m) {
-  const e = emp();
-  const res = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa && n.electronica);
-  const resN = S.d.numeraciones.find(n => n.tipo === 'FV' && n.activa && !n.electronica);
-  m.innerHTML = `<header class="vhead"><div><h2>Configuración</h2><p class="sub">Datos de la empresa, resolución de facturación y ajustes contables.</p></div></header>
-  <section class="panel stack"><header class="vhead"><h3>Datos de la empresa</h3><button class="primary" id="edit">Modificar</button></header>
-    <dl class="kv">
-      <dt>Nombre</dt><dd>${esc(e.nombre)}</dd>
-      <dt>NIT</dt><dd class="mono">${fmtNit(e.nit)}-${e.dv}</dd>
-      <dt>Régimen</dt><dd>${esc(REGIMENES.find(r => r[0] === e.regimen)?.[1] || e.regimen)}</dd>
-      <dt>IVA</dt><dd>${e.responsable_iva ? 'Responsable de IVA' : 'No responsable de IVA'}</dd>
-      <dt>Dirección</dt><dd>${esc(ubic(e)) || '—'}</dd>
-      <dt>Contacto</dt><dd>${esc([e.telefono, e.correo].filter(Boolean).join(' · ')) || '—'}</dd>
-    </dl>
-  </section>
-  <section class="panel stack"><header class="vhead"><h3>Resolución de facturación DIAN</h3><button class="primary" id="editRes">${res ? 'Modificar' : 'Registrar'}</button></header>
-    ${res ? `<dl class="kv"><dt>Resolución</dt><dd class="mono">${esc(res.resolucion)}${res.fecha_resolucion ? ' del ' + fFecha(res.fecha_resolucion) : ''}</dd>
-      <dt>Prefijo y rango</dt><dd class="mono">${esc(res.prefijo) || '—'} ${res.desde} a ${res.hasta}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(res.prefijo)} ${res.siguiente}</dd>
-      <dt>Vigencia</dt><dd>${res.vigencia_hasta ? `${res.vigencia_desde ? fFecha(res.vigencia_desde) + ' a ' : 'hasta '}${fFecha(res.vigencia_hasta)}` : '—'}</dd></dl>`
-      : '<p class="muted">Todavía no has registrado la resolución. Sin ella no se pueden emitir facturas.</p>'}
-    <p class="hint">Cuando la DIAN te dé una resolución nueva, regístrala aquí y queda como la activa. Las notas y los recibos se manejan en <a href="#/numeraciones">Numeraciones</a>.</p></section>
-  <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
-    ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
-    <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p>
-    <label class="check"><input type="checkbox" id="factNormal" ${facturaNormal() ? 'checked' : ''}> Permitir facturas normales en esta empresa</label>
-    <p class="hint">Mientras esté apagado, Ventas › Facturas solo ofrece la factura electrónica. Las facturas normales que ya existan se siguen viendo y editando.</p></section>
-  ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Facturación electrónica (Factus)</h3><a class="btn" href="#/habilitacion">Conectar o probar</a></header>
-    <p class="hint">Solo la ve el administrador. La cuenta de Factus de la empresa se conecta en Configuración › Factura electrónica (DIAN). Al probar una cuenta de producción con numeración activa, la empresa queda habilitada sola.</p>
-    <label class="check"><input type="checkbox" id="feHab" ${feHabilitada() ? 'checked' : ''}> Empresa habilitada ante la DIAN (ya superó el set de pruebas)</label>
-    <p class="hint">Mientras esté apagado, la numeración electrónica sale como "Sin habilitar DIAN" y no se pueden emitir facturas ni notas electrónicas (sí borradores y facturas normales).</p>
-    <label class="check"><input type="checkbox" id="feActiva" ${feActiva() ? 'checked' : ''}> Mostrar "Enviar a la DIAN" en las facturas y notas electrónicas de esta empresa</label>
-    <p class="hint">Mientras esté apagado, las facturas electrónicas no muestran el botón de envío (siguen con el aviso de pendiente de transmitir).</p></section>` : ''}
-  ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>' : ''}
-  <section class="panel stack" id="apariencia"></section>
-  <section class="panel stack"><h3>Contabilidad</h3><p class="sub">Cuentas del PUC, homologación NIIF y cuentas a las que van facturas, notas y recibos.</p><div class="row"><a class="btn" href="#/puc">Abrir plan de cuentas</a></div></section>
-  <section class="panel stack danger"><h3>Zona de cuidado</h3>
-    <div class="row"><button id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button id="delDemo">Borrar todos los datos de demostración</button>' : ''}</div></section>`;
-  $('edit').onclick = () => formEmpresa(e);
-  cargarMiPlan();
-  pintarApariencia();
-  $('editRes').onclick = () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true });
-  if ($('feHab')) $('feHab').onchange = async ev => {
-    const on = ev.target.checked;
-    if (on && !await confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada')) { ev.target.checked = false; return; }
-    try { await guardarContab('fe_habilitada', on); toast(on ? 'Facturación electrónica habilitada para esta empresa.' : 'Facturación electrónica deshabilitada para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !on; }
+// Íconos de línea para las tarjetas de Configuración.
+const ICO = {
+  empresa: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1',
+  usuarios: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  color: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-7.8-9-7.8zM7.5 11.5h.01M10.5 7.5h.01M15.5 8.5h.01',
+  plan: 'M12 2l3 6.5 7 .9-5.2 4.8 1.4 7L12 17.8l-6.2 3.4 1.4-7L2 9.4l7-.9z',
+  resolucion: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 15l2 2 4-4',
+  normal: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5',
+  numero: 'M4 9h16M4 15h16M10 3L8 21M16 3l-2 18',
+  diseno: 'M3 3h18v18H3zM3 9h18M9 21V9',
+  pago: 'M2 5h20v14H2zM2 10h20M6 15h4',
+  dian: 'M22 2L11 13M22 2l-7 20-4-9-9-4z',
+  puc: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
+  ret: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  iva: 'M19 5L5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5M17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5',
+  exogena: 'M12 8c5 0 9-1.3 9-3s-4-3-9-3-9 1.3-9 3 4 3 9 3M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3',
+  nomina: 'M2 7h20v14H2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2',
+  admin: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10',
+  envio: 'M4 12h12M12 6l6 6-6 6M20 4v16',
+  balanza: 'M12 3v18M7 21h10M5 7h14M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z',
+  tendencia: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  columnas: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  lista: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+};
+const ico = k => `<span class="cfg-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICO[k]}"/></svg></span>`;
+
+// Página de tarjetas (Configuración e Informes): grupos [título, tarjetas], buscador y acciones.
+// Tarjeta: [clave, ícono, título, estado, acción (#ruta o función), interruptor {id, on}, etiqueta [clase, texto]]
+function pintarTarjetas(m, titulo, sub, grupos, buscar) {
+  const acciones = {};
+  const tarjeta = ([k, ic, t, est, acc, sw, tag]) => {
+    if (acc) acciones[k] = acc;
+    const bloq = typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2).split('/')[0]));
+    const cuerpo = `${ico(ic)}<span class="cfg-t"><b>${esc(t)}${tag ? ` <span class="tag ${tag[0]}">${tag[1]}</span>` : ''}${bloq ? ' <span class="tag">Plan superior</span>' : ''}</b><small>${esc(est)}</small></span>`;
+    const main = acc ? `<button type="button" class="cfg-main" data-acc="${k}">${cuerpo}${sw ? '' : '<span class="cfg-arrow" aria-hidden="true">›</span>'}</button>` : `<span class="cfg-main">${cuerpo}</span>`;
+    return `<div class="cfg-tile" data-q="${esc((t + ' ' + est).toLowerCase())}">${main}${sw ? `<label class="switch" title="${esc(t)}"><input type="checkbox" id="${sw.id}" ${sw.on ? 'checked' : ''} aria-label="${esc(t)}"><i></i></label>` : ''}</div>`;
   };
-  $('factNormal').onchange = async ev => { try { await guardarContab('factura_normal', ev.target.checked); toast(ev.target.checked ? 'Facturas normales habilitadas para esta empresa.' : 'Facturas normales ocultas: solo se ofrece la factura electrónica.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
-  if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
-  $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
+  m.innerHTML = `<header class="vhead cfg-top"><div><h2>${titulo}</h2><p class="sub">${sub}</p></div><input type="search" id="cfgBuscar" class="cfg-buscar" placeholder="${buscar}" aria-label="${buscar}"></header>
+  ${grupos.filter(Boolean).map(([g, l]) => `<section class="cfg-g"><h3>${g}</h3><div class="cfg-grid">${l.filter(Boolean).map(tarjeta).join('')}</div></section>`).join('')}
+  <p class="cfg-nada muted" hidden>Nada coincide con la búsqueda.</p>`;
+  m.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { const a = acciones[b.dataset.acc]; if (typeof a === 'string') location.hash = a; else a(); });
+  $('cfgBuscar').oninput = () => {
+    const q = $('cfgBuscar').value.trim().toLowerCase();
+    m.querySelectorAll('.cfg-g').forEach(g => { let n = 0; g.querySelectorAll('.cfg-tile').forEach(t => { const ok = !q || t.dataset.q.includes(q); t.hidden = !ok; n += ok; }); g.hidden = !n; });
+    m.querySelector('.cfg-nada').hidden = !!m.querySelector('.cfg-tile:not([hidden])');
+  };
+}
+// Informes: todos en tarjetas, por grupo.
+function vInformes(m) {
+  const d = S.d, cart = cartera(d.documentos, d.aplicaciones).filter(c => c.saldo > 0.009);
+  const porCobrar = r2(cart.reduce((s, c) => s + c.saldo, 0)), vencido = r2(cart.filter(c => c.diasVencida > 0).reduce((s, c) => s + c.saldo, 0));
+  pintarTarjetas(m, 'Informes', 'Escoge un informe. Todos se filtran por fechas y se pueden imprimir.', [
+    ['Contables', [
+      ['esf', 'balanza', 'Estado de situación financiera', 'Activos, pasivos y patrimonio', '#/esf'],
+      ['er', 'tendencia', 'Estado de resultados', 'Ingresos, costos y gastos', '#/er'],
+      ['ercomp', 'columnas', 'Resultados comparativo', 'Meses lado a lado', '#/ercomp'],
+      ['balance', 'lista', 'Balance de prueba', 'Saldos por cuenta y tercero', '#/balance'],
+      ['auxiliar', 'puc', 'Libro auxiliar', 'Movimientos de una cuenta', '#/auxiliar'],
+    ]],
+    ['Impuestos', [
+      ['iva', 'iva', 'IVA del período', 'Formulario 300', '#/iva'],
+      ['retpracticadas', 'ret', 'Retenciones practicadas', 'Formulario 350', '#/retpracticadas'],
+      ['certificados', 'resolucion', 'Certificados de retención', 'Por proveedor y año', '#/certificados'],
+      ['exogena', 'exogena', 'Medios magnéticos', 'Información exógena', '#/exogena'],
+    ]],
+    ['Cartera y pagos', [
+      ['cartera', 'pago', 'Cartera', porCobrar ? `${money(porCobrar)} por cobrar` : 'Sin saldos por cobrar', '#/cartera', null, vencido ? ['warn', 'Vencida'] : null],
+      ['cxp', 'envio', 'Cuentas por pagar', 'Lo que debes a proveedores', '#/cxp'],
+    ]],
+    ['Nómina', [
+      ['nominapasivos', 'nomina', 'Seguridad social y prestaciones', 'Saldos por entidad', '#/nominapasivos'],
+    ]],
+  ], 'Buscar un informe…');
+}
+
+// Configuración: tarjetas por grupo con el estado de cada ajuste; los interruptores se cambian ahí mismo.
+function vEmpresa(m) {
+  const e = emp(), d = S.d;
+  const res = d.numeraciones.find(n => n.tipo === 'FV' && n.activa && n.electronica);
+  const resN = d.numeraciones.find(n => n.tipo === 'FV' && n.activa && !n.electronica);
+  const tema = leerTema(), colorN = COLORES.find(c => c.id === tema.color)?.nombre || '', modoN = MODOS.find(x => x[0] === tema.modo)?.[1] || '';
+  const venceRes = res?.vigencia_hasta && res.vigencia_hasta < sumarDias(hoy(), 30);
+  // [clave, ícono, título, estado, acción (#ruta o función), interruptor {id, on}, etiqueta]
+  const grupos = [
+    ['Empresa', [
+      ['datos', 'empresa', 'Datos de la empresa', `NIT ${fmtNit(e.nit)}-${e.dv} · ${REGIMENES.find(r => r[0] === e.regimen)?.[1] || e.regimen || ''}`, () => formEmpresa(e)],
+      ['usuarios', 'usuarios', 'Usuarios', 'Quién entra y con qué permiso', '#/usuarios'],
+      ['apariencia', 'color', 'Apariencia', `${colorN} · ${modoN}`, abrirApariencia],
+      !S.perfil?.es_admin && ['miplan', 'plan', 'Mi plan', S.plan?.nombre ? `Plan ${S.plan.nombre}` : 'Lo que incluye tu plan', '#/miplan'],
+    ]],
+    ['Facturación', [
+      ['resolucion', 'resolucion', 'Resolución DIAN', res ? `${res.prefijo || ''} ${res.desde}–${res.hasta} · sigue ${res.siguiente}` : 'Sin registrar', () => res ? formNumeracion(res) : formNumeracion({ tipo: 'FV', prefijo: 'FE', electronica: true }), null, !res ? ['bad', 'Falta'] : venceRes ? ['warn', 'Por vencer'] : null],
+      ['dian', 'dian', 'Factura electrónica', feHabilitada() ? 'Conectada y habilitada' : 'Conectar con Factus y probar', '#/habilitacion', null, feHabilitada() ? ['ok', 'Activa'] : null],
+      ['normal', 'normal', 'Factura normal', resN ? `${resN.prefijo || ''} · sigue ${resN.siguiente}` : 'No electrónica, sin DIAN', () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 }), { id: 'factNormal', on: facturaNormal() }],
+      ['numeraciones', 'numero', 'Numeraciones', `${d.numeraciones.filter(n => n.activa).length} activas`, '#/numeraciones'],
+      ['disenofactura', 'diseno', 'Diseño de la factura', 'Logo, color y textos', '#/disenofactura'],
+      ['formaspago', 'pago', 'Formas de pago', `${formasPago(e.contabilidad, param()).length} configuradas`, '#/formaspago'],
+    ]],
+    ['Contabilidad e impuestos', [
+      ['puc', 'puc', 'Plan de cuentas', `${d.cuentas.length} cuentas · PUC y NIIF`, '#/puc'],
+      ['retenciones', 'ret', 'Conceptos de retención', 'Bases y tarifas', '#/retenciones'],
+      ['tarifasiva', 'iva', 'Tarifas de IVA', 'Cuenta por tarifa', '#/tarifasiva'],
+      ['exogenacfg', 'exogena', 'Medios magnéticos', 'Formatos y conceptos', '#/exogenacfg'],
+      ['nominacfg', 'nomina', 'Nómina', 'Valores del año y entidades', '#/nominacfg'],
+    ]],
+    S.perfil?.es_admin && ['Administrador', [
+      ['feHab', 'admin', 'Habilitada ante la DIAN', 'Ya superó el set de pruebas', null, { id: 'feHab', on: feHabilitada() }],
+      ['feActiva', 'envio', 'Botón "Enviar a la DIAN"', 'En facturas y notas electrónicas', null, { id: 'feActiva', on: feActiva() }],
+    ]],
+  ].filter(Boolean);
+  pintarTarjetas(m, 'Configuración', esc(e.nombre), grupos, 'Buscar un ajuste…');
+  m.insertAdjacentHTML('beforeend', `<div class="row cfg-peligro"><button class="ghost" id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button class="ghost" id="delDemo">Borrar datos de demostración</button>' : ''}</div>`);
+  const interruptor = (id, clave, msgOn, msgOff, antes) => { if ($(id)) $(id).onchange = async ev => {
+    const on = ev.target.checked;
+    if (antes && on && !await antes()) { ev.target.checked = false; return; }
+    try { await guardarContab(clave, on); toast(on ? msgOn : msgOff); } catch (er) { fail(er); ev.target.checked = !on; }
+  }; };
+  interruptor('factNormal', 'factura_normal', 'Facturas normales habilitadas para esta empresa.', 'Facturas normales ocultas: solo se ofrece la factura electrónica.');
+  interruptor('feHab', 'fe_habilitada', 'Facturación electrónica habilitada para esta empresa.', 'Facturación electrónica deshabilitada para esta empresa.',
+    () => confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada'));
+  interruptor('feActiva', 'fe_activa', 'Envío a la DIAN activado para esta empresa.', 'Envío a la DIAN oculto para esta empresa.');
   $('delEmp').onclick = async () => {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
   };
   if ($('delDemo')) $('delDemo').onclick = async () => { if (await confirmar('Borrar demostración', 'Se borran todas las empresas y documentos de este navegador.', 'Borrar todo')) { store.borrarDemo(); location.hash = ''; location.reload(); } };
+}
+function abrirApariencia() {
+  dialogo('<section id="apariencia" class="stack"></section><div class="row end"><button value="cancel" class="primary">Listo</button></div>', () => {});
+  pintarApariencia();
+  $('dlg').addEventListener('close', () => { if (/^#\/(config|empresa)/.test(location.hash)) route(); }, { once: true });
 }
 
 /* ---------- Inicio ---------- */
