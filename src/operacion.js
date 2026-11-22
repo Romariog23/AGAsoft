@@ -160,8 +160,12 @@ export function tarifaPara(r, tarifas, uso = 'pago') {
   return ok.sort((a, b) => peso(b) - peso(a) || String(b.desde || '').localeCompare(String(a.desde || '')))[0] || null;
 }
 // Cantidad, horas pagadas, tarifa, valor y recargos de un registro (lo que se le paga a la persona).
+export const esCargo = r => r?.clase === 'cargo';
 export function calcular(r, tipo, tarifas, uso = 'pago') {
-  const cfg = cfgTipo(tipo), v = variables(r, cfg), dia = diaDe(r.fecha);
+  const dia0 = diaDe(r.fecha);
+  // Cargo suelto (transporte, auxilio…): un valor fijo para la persona, sin cantidad ni recargos. Solo cuenta para el pago.
+  if (esCargo(r)) { const val = uso === 'pago' ? r2(n(r.datos?.valor)) : 0; return { cantidad: 0, pagadas: 0, dia: dia0, tarifa: null, modo: 'cargo', base: val, recargos: [], valor: val, fijo: false, cargo: String(r.datos?.concepto || 'Cargo') }; }
+  const cfg = cfgTipo(tipo), v = variables(r, cfg), dia = dia0;
   let cantidad = 0; try { cantidad = r2(evaluar(cfg.formulas.cantidad, v)); } catch (_) { cantidad = 0; }
   const pagadas = cfg.editar_pagadas && r.cantidad_pagada != null && r.cantidad_pagada !== '' ? r2(n(r.cantidad_pagada)) : cantidad;
   const t = tarifaPara(r, tarifas, uso), tarifa = t ? n(t.valor) : 0, modo = t?.modo || 'unidad';
@@ -183,8 +187,8 @@ export function resumen(registros, tipo, tarifas) {
     const c = calcular(r, tipo, tarifas);
     const p = out.get(r.tercero_id) || { tercero_id: r.tercero_id, lineas: new Map(), cantidad: 0, total: 0 };
     p.cantidad = r2(p.cantidad + c.pagadas);
-    const kt = c.tarifa?.id || 'sin-tarifa';
-    const l = p.lineas.get(kt) || { tarifa: c.tarifa, modo: c.modo, cantidad: 0, registros: 0, valor: 0 };
+    const kt = c.cargo ? 'cargo:' + c.cargo : c.tarifa?.id || 'sin-tarifa';
+    const l = p.lineas.get(kt) || { tarifa: c.tarifa, modo: c.modo, cargo: c.cargo, cantidad: 0, registros: 0, valor: 0 };
     l.cantidad = r2(l.cantidad + c.pagadas); l.registros++; l.valor = c.fijo ? r2(n(c.tarifa.valor)) : r2(l.valor + c.base);
     p.lineas.set(kt, l);
     for (const g of c.recargos) { const k = 'regla:' + g.nombre, x = p.lineas.get(k) || { regla: g.nombre, cantidad: 0, registros: 0, valor: 0 }; x.cantidad = r2(x.cantidad + c.pagadas); x.registros++; x.valor = r2(x.valor + g.valor); p.lineas.set(k, x); }
@@ -197,6 +201,7 @@ export function resumen(registros, tipo, tarifas) {
 // Lo que conviene revisar antes de cortar: lecturas que no empatan, horas pagadas distintas sin nota, soportes pendientes y registros sin tarifa.
 export function avisos(registros, tipo, tarifas) {
   const cfg = cfgTipo(tipo), out = [];
+  registros = registros.filter(r => !esCargo(r));
   const co = cfg.continuidad;
   if (co?.lectura && co?.por) {
     const grupos = new Map();
@@ -257,6 +262,7 @@ export function erroresRegistro(r, tipo) {
   const c = cfgTipo(tipo), e = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(r.fecha || '')) e.push('Escribe la fecha.');
   if (!r.tercero_id) e.push(`Escoge el ${c.persona.toLowerCase()}.`);
+  if (esCargo(r)) { if (!String(r.datos?.concepto || '').trim()) e.push('Escribe el concepto del cargo.'); if (!(n(r.datos?.valor) > 0)) e.push('El valor del cargo debe ser mayor que cero.'); return e; }
   for (const f of c.campos) {
     const x = r.datos?.[f.k];
     if (f.tipo === 'lectura') { const a = x?.ini, b = x?.fin, hay = v => v !== '' && v != null; if (hay(a) !== hay(b)) e.push(`${f.nombre}: escribe la lectura inicial y la final.`); else if (hay(a) && n(b) < n(a)) e.push(`${f.nombre}: la final no puede ser menor que la inicial.`); if (f.obligatorio && !hay(a)) e.push(`${f.nombre} es obligatorio.`); continue; }
@@ -293,8 +299,8 @@ export function volantes(registros, tipo, tarifas, { elementos = [], centros = [
   for (const r of [...registros].sort((a, b) => a.fecha.localeCompare(b.fecha))) {
     const c = calcular(r, tipo, tarifas), dist = ccDeRegistro(r, tipo, elementos, centros);
     const v = out.get(r.tercero_id) || { tercero_id: r.tercero_id, lineas: new Map(), registros: [] };
-    const kt = c.tarifa?.id || 'sin-tarifa';
-    const l = v.lineas.get(kt) || { clave: kt, tarifa_id: c.tarifa?.id || null, producto_id: c.tarifa?.producto_id || null, modo: c.modo, tarifa: c.tarifa ? n(c.tarifa.valor) : 0, nota: c.tarifa?.nota || '', cantidad: 0, registros: 0, valor: 0, partes: [] };
+    const kt = c.cargo ? 'cargo:' + c.cargo : c.tarifa?.id || 'sin-tarifa';
+    const l = v.lineas.get(kt) || { clave: kt, cargo: c.cargo || undefined, tarifa_id: c.tarifa?.id || null, producto_id: c.cargo ? r.datos?.producto_id || null : c.tarifa?.producto_id || null, modo: c.modo, tarifa: c.tarifa ? n(c.tarifa.valor) : 0, nota: c.tarifa?.nota || '', cantidad: 0, registros: 0, valor: 0, partes: [] };
     l.cantidad = r2(l.cantidad + c.pagadas); l.registros++;
     l.valor = c.fijo ? r2(n(c.tarifa.valor)) : r2(l.valor + c.base);
     l.partes.push({ dist, valor: c.fijo ? c.pagadas || 1 : c.base });
@@ -303,7 +309,7 @@ export function volantes(registros, tipo, tarifas, { elementos = [], centros = [
       const k = 'regla:' + g.nombre, x = v.lineas.get(k) || { clave: k, regla: g.nombre, producto_id: c.tarifa?.producto_id || null, cantidad: 0, registros: 0, valor: 0, partes: [] };
       x.cantidad = r2(x.cantidad + c.pagadas); x.registros++; x.valor = r2(x.valor + g.valor); x.partes.push({ dist, valor: g.valor }); v.lineas.set(k, x);
     }
-    v.registros.push({ id: r.id, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
+    v.registros.push({ id: r.id, cargo: c.cargo || undefined, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
     out.set(r.tercero_id, v);
   }
   return [...out.values()].map(v => {
@@ -314,6 +320,7 @@ export function volantes(registros, tipo, tarifas, { elementos = [], centros = [
 const pesos = x => '$ ' + Math.round(x).toLocaleString('es-CO');
 export function detalleLinea(l, unidad = '') {
   const u = unidad ? ' ' + unidad : '';
+  if (l.cargo) return l.registros > 1 ? `${l.cargo} (${l.registros})` : l.cargo;
   if (l.regla) return `${l.regla} · ${fx(l.cantidad)}${u}`;
   if (!l.tarifa_id) return `Sin tarifa · ${fx(l.cantidad)}${u}`;
   if (l.modo === 'fijo') return `Pago fijo${l.nota ? ' ' + l.nota : ''} (${fx(l.cantidad)}${u})`;
@@ -326,7 +333,7 @@ export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, product
   const lineas = v.lineas.filter(l => l.valor > 0).map(l => {
     const p = productos.find(x => x.id === l.producto_id), cuenta = String(p?.cuenta_costo || cuentaDefecto || '').trim();
     if (!cuenta) errores.push(`Falta la cuenta de "${p?.nombre || l.regla || 'la tarifa'}": ponla en el ítem de servicio o en Configurar › Salidas.`);
-    return { cuenta, descripcion: `${p?.nombre ? p.nombre + " · " : l.regla ? "" : tipoNombre + " · "}${l.detalle} · ${periodo}`.slice(0, 300), base: r2(l.valor), iva_pct: 0, ...(conCC && l.cc?.length ? { cc: l.cc } : {}) };
+    return { cuenta, descripcion: `${p?.nombre ? p.nombre + " · " : l.regla || l.cargo ? "" : tipoNombre + " · "}${l.detalle} · ${periodo}`.slice(0, 300), base: r2(l.valor), iva_pct: 0, ...(conCC && l.cc?.length ? { cc: l.cc } : {}) };
   });
   if (!lineas.length) errores.push('El volante no tiene valores para pagar.');
   return { errores, compra: { empresa_id, tipo: 'DS', fecha, vence: null, tercero_id: v.tercero_id, num_proveedor: '', lineas,
@@ -346,7 +353,7 @@ export function cotizacionPara(r, cotizaciones) {
   return (cotizaciones || []).filter(c => cotizacionVigente(c) && c.op_tipo_id === r.tipo_id && coincide(c.criterios, r))
     .sort((a, b) => pesoCrit(b.criterios) - pesoCrit(a.criterios) || String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
 }
-export const lineaCotPara = (r, cot) => (cot?.lineas || []).map((l, i) => ({ ...l, i })).filter(l => l.op !== false && coincide(l.criterios, r))
+export const lineaCotPara = (r, cot) => (cot?.lineas || []).map((l, i) => ({ ...l, i })).filter(l => l.op !== false && l.op !== 'fijo' && coincide(l.criterios, r))
   .sort((a, b) => pesoCrit(b.criterios) - pesoCrit(a.criterios) || a.i - b.i)[0] || null;
 // Cliente de un registro sin cotización: el tercero del primer elemento escogido que tenga uno (la obra, por lo general).
 export function clienteDe(r, tipo, elementos) {
@@ -355,9 +362,12 @@ export function clienteDe(r, tipo, elementos) {
 }
 export const totalLineaCot = l => r2(n(l.cantidad) * n(l.precio) * (1 - n(l.descuento_pct) / 100));
 // Registros sin facturar agrupados en facturas: una por cotización (o por cliente con tarifa de cobro).
-export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], elementos = [], centros = [], productos = [] } = {}) {
+// Líneas de la cotización: op true = se cobra con las horas; 'fijo' = una vez, en la primera factura (movilización); false = no sale desde Operación.
+export const COBRO_LINEA = [['horas', 'Con horas'], ['fijo', 'Una vez'], ['no', 'No']];
+export const cobroDeLinea = l => l.op === 'fijo' ? 'fijo' : l.op === false ? 'no' : 'horas';
+export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], elementos = [], centros = [], productos = [], fijoPendiente = (cot, i) => !cot.lineas?.[i]?.facturado } = {}) {
   const cfg = cfgTipo(tipo), grupos = new Map(), sinPrecio = [];
-  for (const r of [...registros].filter(x => x.tipo_id === tipo.id && !x.cierre_cobro).sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+  for (const r of [...registros].filter(x => x.tipo_id === tipo.id && !x.cierre_cobro && !esCargo(x)).sort((a, b) => a.fecha.localeCompare(b.fecha))) {
     const k = calcular(r, tipo, tarifas), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
     const cot = cotizacionPara(r, cotizaciones), lc = cot && lineaCotPara(r, cot);
     let cliente = null, clave = null, linea = null, motivo = '';
@@ -380,6 +390,10 @@ export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], 
     if (r.fecha > g.hasta) g.hasta = r.fecha;
     grupos.set(clave, g);
   }
+  // Líneas de una sola vez de cada cotización que todavía no se han facturado.
+  for (const g of grupos.values()) if (g.cotizacion) (g.cotizacion.lineas || []).forEach((l, i) => {
+    if (l.op === 'fijo' && fijoPendiente(g.cotizacion, i)) g.lineas.set('f' + i, { clave: 'f' + i, fijo_i: i, producto_id: l.producto_id || null, codigo: l.codigo || '', descripcion: l.descripcion || '', unidad: l.unidad || 'UND', precio: n(l.precio), descuento_pct: n(l.descuento_pct), iva_pct: n(l.iva_pct), modo: 'fijo', cantidad: n(l.cantidad) || 1, registros: 0, partes: [] });
+  });
   return {
     grupos: [...grupos.values()].map(g => {
       const lineas = [...g.lineas.values()].filter(l => l.cantidad > 0).map(({ partes, ...l }) => ({ ...l, cc: normDist(distPonderada(partes.filter(p => p.dist.length)) || []), valor: totalLineaCot(l) }));
@@ -390,7 +404,7 @@ export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], 
 }
 // Ítems de la factura de venta para un grupo (mismas columnas de la tabla items).
 export const itemsDeGrupo = (g, { periodo = '', conCC = false, bodega = () => null } = {}) => g.lineas.map(l => ({
-  producto_id: l.producto_id || null, bodega_id: bodega(l.producto_id) || null, codigo: l.codigo || '', descripcion: `${l.descripcion}${periodo ? ' · ' + periodo : ''}`.slice(0, 300), unidad: l.unidad || 'UND',
+  producto_id: l.producto_id || null, bodega_id: bodega(l.producto_id) || null, codigo: l.codigo || '', descripcion: `${l.descripcion}${periodo && l.fijo_i == null ? ' · ' + periodo : ''}`.slice(0, 300), unidad: l.unidad || 'UND',
   cantidad: l.cantidad, precio: l.precio, descuento_pct: l.descuento_pct || 0, iva_pct: l.iva_pct || 0, cuenta: '', ...(conCC && l.cc?.length ? { cc: l.cc } : {}),
 }));
 export function erroresCotizacion(c) {
@@ -409,7 +423,7 @@ export function erroresCotizacion(c) {
 export function porCerrar(registros, tipo, { hasta = '9999-12-31', tarifas = [], cotizaciones = [], elementos = [], centros = [], productos = [] } = {}) {
   const cfg = cfgTipo(tipo), regs = registros.filter(r => r.tipo_id === tipo.id && r.fecha <= hasta);
   const conPago = cfg.salidas.pago !== 'ninguno', conCobro = cfg.salidas.cobro !== 'ninguno';
-  const sinPago = conPago ? regs.filter(r => !r.cierre_pago) : [], sinCobro = conCobro ? regs.filter(r => !r.cierre_cobro) : [];
+  const sinPago = conPago ? regs.filter(r => !r.cierre_pago) : [], sinCobro = conCobro ? regs.filter(r => !r.cierre_cobro && !esCargo(r)) : [];
   const personas = resumen(sinPago, tipo, tarifas).map(p => {
     const rs = sinPago.filter(r => r.tercero_id === p.tercero_id);
     return { tercero_id: p.tercero_id, registros: rs.length, cantidad: p.cantidad, valor: p.total, desde: rs.reduce((m, r) => r.fecha < m ? r.fecha : m, rs[0]?.fecha || ''), enCorte: rs.filter(r => r.corte_id).length, pendientes: rs.filter(r => esPendiente(r, tipo)).length };
@@ -419,7 +433,7 @@ export function porCerrar(registros, tipo, { hasta = '9999-12-31', tarifas = [],
     conPago, conCobro,
     pago: { personas, registros: sinPago.length, valor: r2(personas.reduce((s, p) => s + p.valor, 0)) },
     cobro: { ...cobro, registros: sinCobro.length, valor: r2(cobro.grupos.reduce((s, g) => s + g.total, 0)) },
-    pagadoSinFacturar: conPago && conCobro ? regs.filter(r => r.cierre_pago && !r.cierre_cobro).length : 0,
+    pagadoSinFacturar: conPago && conCobro ? regs.filter(r => r.cierre_pago && !r.cierre_cobro && !esCargo(r)).length : 0,
     facturadoSinPagar: conPago && conCobro ? regs.filter(r => r.cierre_cobro && !r.cierre_pago).length : 0,
   };
 }

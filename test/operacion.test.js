@@ -146,3 +146,23 @@ test('horas por cerrar: falta pagar y falta facturar, cada lado por separado', (
   const soloPago = porCerrar(regs, { ...tipo, config: { ...tipo.config, salidas: { pago: 'ds', cobro: 'ninguno' } } }, { tarifas });
   assert.equal(soloPago.conCobro, false); assert.equal(soloPago.cobro.registros, 0);
 });
+
+test('cargos sueltos en el volante y líneas de una sola vez en la factura', () => {
+  const cargo = { id: 'k1', tipo_id: 'maq', clase: 'cargo', fecha: '2026-11-16', tercero_id: 'waldy', datos: { concepto: 'Transporte', valor: 40000, producto_id: 'pt' } };
+  const regs = [reg('a', '2026-11-14', 'waldy', 'bull', 'guac', 125.3, 131.3), cargo];
+  const [v] = volantes(regs, tipo, tarifas);
+  const lc = v.lineas.find(l => l.cargo);
+  assert.equal(lc.valor, 40000); assert.equal(lc.detalle, 'Transporte'); assert.equal(lc.producto_id, 'pt');
+  assert.equal(v.total, 36000 + 40000); assert.equal(v.cantidad, 6); assert.equal(v.registros.length, 2);
+  assert.deepEqual(avisos(regs, tipo, tarifas).filter(a => a.registro_id === 'k1'), []);
+  assert.ok(erroresRegistro({ ...cargo, datos: { concepto: '', valor: 0 } }, tipo).length === 2);
+  assert.deepEqual(erroresRegistro(cargo, tipo), []);
+  const ds = dsDeVolante(v, { empresa_id: 'e1', fecha: '2026-11-20', periodo: 'x', tipoNombre: 'Maquinaria', cuentaDefecto: '73559501' });
+  assert.ok(ds.compra.lineas.some(l => /Transporte/.test(l.descripcion) && l.base === 40000));
+  const cot = { id: 'q1', estado: 'abierta', op_tipo_id: 'maq', tercero_id: 'strabag', criterios: {}, lineas: [{ descripcion: 'Hora', precio: 100000 }, { descripcion: 'Movilización', op: 'fijo', cantidad: 1, precio: 800000 }] };
+  let { grupos } = facturables(regs, tipo, { cotizaciones: [cot] });
+  assert.equal(grupos[0].registros.length, 1); // el cargo no se factura
+  assert.equal(grupos[0].total, 600000 + 800000);
+  ({ grupos } = facturables(regs, tipo, { cotizaciones: [{ ...cot, lineas: [cot.lineas[0], { ...cot.lineas[1], facturado: 'fv1' }] }] }));
+  assert.equal(grupos[0].total, 600000);
+});

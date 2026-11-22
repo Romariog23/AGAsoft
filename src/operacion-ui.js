@@ -1,6 +1,6 @@
 // Pantallas de Operación (módulo opcional por empresa). La lógica está en operacion.js; aquí solo se pinta y se guarda.
 // main.js entrega sus utilidades con iniciarOperacion(ctx) para no duplicarlas.
-import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante, facturables, itemsDeGrupo, cotizacionVigente, porCerrar } from './operacion.js';
+import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante, facturables, itemsDeGrupo, cotizacionVigente, porCerrar, esCargo } from './operacion.js';
 import { totalesCompra, erroresCompra } from './compras.js';
 import { enLetras, totales } from './calc.js';
 
@@ -267,29 +267,47 @@ export function vOpRegistros(m, id, q) {
   const cols = c.campos;
   const celda = (r, fc) => { const v = r.datos?.[fc.k]; if (fc.tipo === 'elemento') return esc(elem(v)?.nombre || ''); if (fc.tipo === 'lectura') return v && v.ini !== '' && v.ini != null ? `<span class="mono">${cant(v.ini)} → ${cant(v.fin)}</span>` : '—'; if (fc.tipo === 'sino') return v ? 'Sí' : ''; return esc(v ?? ''); };
   const avDe = new Map(); for (const a of av) avDe.set(a.registro_id, [...(avDe.get(a.registro_id) || []), a.texto]);
-  const linea = l => l.regla ? `${esc(l.regla)} · ${cant(l.cantidad, c.unidad)}` : !l.tarifa ? `Sin tarifa · ${cant(l.cantidad, c.unidad)}` : l.modo === 'fijo' ? `Pago fijo${l.tarifa.nota ? ' · ' + esc(l.tarifa.nota) : ''} · ${cant(l.cantidad, c.unidad)}` : l.modo === 'registro' ? `${l.registros} × ${money(l.tarifa.valor)}` : `${cant(l.cantidad, c.unidad)} × ${money(l.tarifa.valor)}`;
+  const linea = l => l.cargo ? `${esc(l.cargo)}${l.registros > 1 ? ` (${l.registros})` : ''}` : l.regla ? `${esc(l.regla)} · ${cant(l.cantidad, c.unidad)}` : !l.tarifa ? `Sin tarifa · ${cant(l.cantidad, c.unidad)}` : l.modo === 'fijo' ? `Pago fijo${l.tarifa.nota ? ' · ' + esc(l.tarifa.nota) : ''} · ${cant(l.cantidad, c.unidad)}` : l.modo === 'registro' ? `${l.registros} × ${money(l.tarifa.valor)}` : `${cant(l.cantidad, c.unidad)} × ${money(l.tarifa.valor)}`;
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/operacion">← Operación</a><h2>${esc(t.nombre)}</h2><p class="sub">Estos registros no generan movimientos contables.</p></div>
-    <div class="row"><a class="btn ghost" href="#/opcfg/${t.id}">Configurar</a>${c.salidas.pago !== 'ninguno' ? `<a class="btn" href="#/opcortes/${t.id}">Cortes de pago</a>` : ''}${c.salidas.cobro === 'fv' ? `<a class="btn" href="#/opfacturar/${t.id}">Facturar</a>` : ''}<button class="primary" id="opNuevo">+ Registro</button></div></header>
+    <div class="row"><a class="btn ghost" href="#/opcfg/${t.id}">Configurar</a>${c.salidas.pago !== 'ninguno' ? `<a class="btn" href="#/opcortes/${t.id}">Cortes de pago</a>` : ''}${c.salidas.cobro === 'fv' ? `<a class="btn" href="#/opfacturar/${t.id}">Facturar</a>` : ''}${c.salidas.pago !== 'ninguno' ? '<button id="opCargo" title="Transporte, auxilio u otro valor para la persona">+ Cargo</button>' : ''}<button class="primary" id="opNuevo">+ Registro</button></div></header>
   <section class="panel row op-fil"><div><label for="opD">Desde</label><input type="date" id="opD" value="${f.desde}"></div><div><label for="opH">Hasta</label><input type="date" id="opH" value="${f.hasta}"></div>
     <div><label for="opP">${esc(c.persona)}</label><select id="opP"><option value="">Todos</option>${X.opts([...new Set(todos.map(r => r.tercero_id))].map(i => [i, nomT(i)]).sort((a, b) => a[1].localeCompare(b[1])), f.p)}</select></div></section>
-  <div class="kpis"><div class="kpi"><span>Registros</span><b>${regs.length}</b></div><div class="kpi"><span>Cantidad pagada</span><b>${cant(q2, c.unidad)}</b></div><div class="kpi"><span>Por pagar</span><b>${money(total)}</b></div><div class="kpi ${av.length ? 'op-warn' : ''}"><span>Avisos</span><b>${av.length}</b></div></div>
+  <div class="kpis"><div class="kpi"><span>Registros</span><b>${regs.filter(r => !esCargo(r)).length}</b></div><div class="kpi"><span>Cantidad pagada</span><b>${cant(q2, c.unidad)}</b></div><div class="kpi"><span>Por pagar</span><b>${money(total)}</b></div><div class="kpi ${av.length ? 'op-warn' : ''}"><span>Avisos</span><b>${av.length}</b></div></div>
   ${av.length ? `<section class="panel stack op-avisos"><h3>Para revisar</h3><ul>${av.map(a => `<li><button type="button" class="link" data-er="${a.registro_id}">${X.fFecha(a.fecha)} · ${esc(nomT(regs.find(r => r.id === a.registro_id)?.tercero_id))}</button> ${esc(a.texto)}</li>`).join('')}</ul></section>` : ''}
   <section class="panel stack"><div class="tbl-wrap"><table class="tbl op-reg"><thead><tr><th>Fecha</th><th>Día</th><th>${esc(c.persona)}</th>${cols.map(fc => `<th>${esc(fc.nombre)}</th>`).join('')}<th class="r">Cantidad</th>${c.editar_pagadas ? '<th class="r">Pagadas</th>' : ''}<th class="r">Valor</th><th></th></tr></thead><tbody>
     ${regs.map(r => { const k = calc.get(r.id), dia = NOMBRE_DIA[k.dia]; return `<tr class="${k.dia === 'domingo' || k.dia === 'festivo' ? 'op-fest' : ''}"><td class="nowrap">${X.fFecha(r.fecha)}</td><td>${dia ? `<span class="tag ${k.dia === 'sabado' ? '' : 'demo'}">${dia}</span>` : ''}</td><td>${esc(nomT(r.tercero_id))}${avDe.has(r.id) ? ` <span class="tag demo" title="${esc(avDe.get(r.id).join(' '))}">Revisar</span>` : ''}${r.nota ? `<br><small class="hint">${esc(r.nota)}</small>` : ''}</td>
-      ${cols.map(fc => `<td>${celda(r, fc)}</td>`).join('')}<td class="r mono">${cant(k.cantidad)}</td>${c.editar_pagadas ? `<td class="r mono">${k.pagadas !== k.cantidad ? '<b>' + cant(k.pagadas) + '</b>' : cant(k.pagadas)}</td>` : ''}
+      ${k.cargo ? `<td colspan="${cols.length + 1 + (c.editar_pagadas ? 1 : 0)}"><span class="tag">Cargo</span> ${esc(k.cargo)}${r.datos?.producto_id ? ` <small class="hint">· ${esc((X.S.d.productos || []).find(p => p.id === r.datos.producto_id)?.nombre || '')}</small>` : ''}</td>` : `${cols.map(fc => `<td>${celda(r, fc)}</td>`).join('')}<td class="r mono">${cant(k.cantidad)}</td>`}${c.editar_pagadas && !k.cargo ? `<td class="r mono">${k.pagadas !== k.cantidad ? '<b>' + cant(k.pagadas) + '</b>' : cant(k.pagadas)}</td>` : ''}
       <td class="r mono">${k.fijo ? '<span class="hint">Pago fijo</span>' : money(k.valor)}${k.recargos.length ? `<br><small class="hint">incluye ${k.recargos.map(x => esc(x.nombre.toLowerCase())).join(', ')}</small>` : ''}</td>
-      <td class="r nowrap">${r.cierre_pago || r.cierre_cobro ? `${r.cierre_pago ? '<span class="tag ok">Pagado</span>' : ''}${r.cierre_cobro ? ' <span class="tag ok">Facturado</span>' : ''}` : corteDe(r)?.estado === 'cerrado' ? '<span class="tag">En corte cerrado</span>' : `<button class="sm" data-er="${r.id}">Editar</button><button class="sm ghost" data-cr="${r.id}" title="Copiar para el día siguiente">Copiar</button><button class="sm ghost" data-br="${r.id}">Borrar</button>`}</td></tr>`; }).join('') || `<tr><td colspan="${6 + cols.length}" class="muted">No hay registros en estas fechas.</td></tr>`}</tbody></table></div></section>
+      <td class="r nowrap">${r.cierre_pago || r.cierre_cobro ? `${r.cierre_pago ? '<span class="tag ok">Pagado</span>' : ''}${r.cierre_cobro ? ' <span class="tag ok">Facturado</span>' : ''}` : corteDe(r)?.estado === 'cerrado' ? '<span class="tag">En corte cerrado</span>' : `<button class="sm" data-er="${r.id}">Editar</button>${k.cargo ? '' : `<button class="sm ghost" data-cr="${r.id}" title="Copiar para el día siguiente">Copiar</button>`}<button class="sm ghost" data-br="${r.id}">Borrar</button>`}</td></tr>`; }).join('') || `<tr><td colspan="${6 + cols.length}" class="muted">No hay registros en estas fechas.</td></tr>`}</tbody></table></div></section>
   ${res.length ? `<section class="panel stack"><header class="vhead"><div><h3>Resumen por ${esc(c.persona.toLowerCase())}</h3><p class="hint">Lo que será el volante de cada persona en el corte.</p></div><b class="mono">${money(total)}</b></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(c.persona)}</th><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
     ${res.sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id))).map(p => p.lineas.map((l, i) => `<tr${i ? '' : ' class="op-p"'}><td>${i ? '' : `<b>${esc(nomT(p.tercero_id))}</b>`}</td><td>${linea(l)}</td><td class="r mono">${money(l.valor)}</td></tr>`).join('') + `<tr class="grp"><td></td><td>Total ${esc(nomT(p.tercero_id))}</td><td class="r mono"><b>${money(p.total)}</b></td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
   const filtrar = () => { filtros[id] = { desde: X.$('opD').value || f.desde, hasta: X.$('opH').value || f.hasta, p: X.$('opP').value }; vOpRegistros(m, id); };
   X.$('opD').onchange = X.$('opH').onchange = X.$('opP').onchange = filtrar;
   X.$('opNuevo').onclick = () => formRegistro(t, { fecha: X.hoy(), tercero_id: f.p || '', datos: {} });
-  m.querySelectorAll('[data-er]').forEach(b => b.onclick = () => formRegistro(t, todos.find(r => r.id === b.dataset.er)));
+  if (X.$('opCargo')) X.$('opCargo').onclick = () => formCargo(t, { fecha: X.hoy(), tercero_id: f.p || '', clase: 'cargo', datos: {} });
+  m.querySelectorAll('[data-er]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.er); (esCargo(r) ? formCargo : formRegistro)(t, r); });
   m.querySelectorAll('[data-cr]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.cr), d = { ...r.datos };
     for (const fc of c.campos) if (fc.tipo === 'lectura') d[fc.k] = { ini: r.datos?.[fc.k]?.fin ?? '', fin: '' }; else if (!['elemento', 'lista'].includes(fc.tipo)) delete d[fc.k];
     formRegistro(t, { fecha: X.sumarDias(r.fecha, 1), tercero_id: r.tercero_id, datos: d }); });
   m.querySelectorAll('[data-br]').forEach(b => b.onclick = async () => { if (!await X.confirmar('Borrar registro', 'El registro se borra de Operación. No afecta la contabilidad.', 'Borrar')) return; try { await borrar('op_registros', b.dataset.br); X.toast('Registro borrado.'); X.route(); } catch (e) { X.fail(e); } });
+}
+// Cargo suelto para la persona (transporte, auxilio…): entra a su volante y a su documento soporte; no se factura al cliente.
+function formCargo(t, r) {
+  const { esc } = X, c = cfgTipo(t);
+  const conceptos = [...new Set(registrosDe(t).filter(esCargo).map(x => x.datos?.concepto).filter(Boolean))];
+  const servs = (X.S.d.productos || []).filter(p => p.activo !== false && p.tipo === 'servicio').sort((a, b) => a.nombre.localeCompare(b.nombre));
+  X.dialogo(`<h2>${r.id ? 'Editar cargo' : 'Nuevo cargo'} · ${esc(t.nombre)}</h2>
+    <div class="grid2">${X.campo('fecha', 'Fecha', r.fecha, 'type="date" required')}<div><label for="f_tercero_id">${esc(c.persona)} *</label><select id="f_tercero_id" name="tercero_id" required><option value="">Escoge…</option>${personas().map(p => `<option value="${p.id}" ${p.id === r.tercero_id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></div></div>
+    <div class="grid2">${X.campo('concepto', 'Concepto *', r.datos?.concepto || '', 'list="opConc" maxlength="80" placeholder="Transporte" required')}<datalist id="opConc">${conceptos.map(x => `<option value="${esc(x)}">`).join('')}</datalist>${X.campo('valor', 'Valor *', r.datos?.valor ?? '', 'class="mono" inputmode="decimal" required')}</div>
+    <div class="grid2"><div><label for="f_prod">Ítem de servicio del documento soporte</label><select id="f_prod" name="producto_id"><option value="">El de Configurar › Salidas</option>${servs.map(p => `<option value="${p.id}" ${p.id === r.datos?.producto_id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></div>${X.campo('nota', 'Nota', r.nota || '', 'maxlength="300"')}</div>
+    <p class="hint">El cargo se suma al volante de la persona en el corte y sale como una línea de su documento soporte. No se cobra al cliente.</p>${X.pie()}`, async fd => {
+    const row = { ...r, empresa_id: X.S.eid, tipo_id: t.id, clase: 'cargo', fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id') || null, nota: String(fd.get('nota') || '').trim(), cantidad_pagada: null,
+      datos: { concepto: String(fd.get('concepto') || '').trim(), valor: numIn(fd.get('valor')), producto_id: fd.get('producto_id') || null } };
+    delete row.creado_en;
+    const errs = erroresRegistro(row, t); if (errs.length) throw new Error(errs.join(' '));
+    await guardar('op_registros', row); X.toast('Cargo guardado.'); X.route();
+  });
 }
 function formRegistro(t, r) {
   const { esc } = X, c = cfgTipo(t), todos = registrosDe(t);
@@ -443,6 +461,8 @@ async function generarDS(c, t, lista) {
 // El rango es libre: no depende de los cortes de pago (se puede pagar cada semana y facturar cada quince días).
 const filtrosFac = {};
 const docVenta = id => (X.S.d.documentos || []).find(d => d.id === id);
+// Una línea de una sola vez ya se facturó si su factura existe y no está anulada (si se elimina o anula, vuelve a salir).
+const fijoPendiente = (cot, i) => { const f = cot.lineas?.[i]?.facturado, d = f && docVenta(f); return !d || d.estado === 'anulado'; };
 export function vOpFacturar(m, id, q) {
   const t = tipoById(id); if (!t) { location.hash = '#/operacion'; return; }
   const { esc, money } = X, cfg = cfgTipo(t), todos = registrosDe(t);
@@ -450,7 +470,7 @@ export function vOpFacturar(m, id, q) {
   const f = filtrosFac[id] = { desde: q?.get('desde') || filtrosFac[id]?.desde || sinFac[0]?.fecha || mesActual(), hasta: q?.get('hasta') || filtrosFac[id]?.hasta || X.hoy(), cot: q?.has('cot') ? q.get('cot') : filtrosFac[id]?.cot || '' };
   const cotsT = (X.S.d.cotizaciones || []).filter(c => c.op_tipo_id === t.id);
   const regs = sinFac.filter(r => r.fecha >= f.desde && r.fecha <= f.hasta);
-  const res = facturables(regs, t, { cotizaciones: X.S.d.cotizaciones || [], tarifas: tarifasDe(t), ...ctxCC(), productos: X.S.d.productos || [] });
+  const res = facturables(regs, t, { cotizaciones: X.S.d.cotizaciones || [], tarifas: tarifasDe(t), ...ctxCC(), productos: X.S.d.productos || [], fijoPendiente });
   const grupos = res.grupos.filter(g => !f.cot || g.cotizacion?.id === f.cot).sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id)));
   const periodo = perTxt(f);
   // Facturas ya hechas desde Operación (para ver su estado y liberar las que se anularon o eliminaron).
@@ -463,7 +483,7 @@ export function vOpFacturar(m, id, q) {
     <div><label for="fcC">Cotización</label><select id="fcC"><option value="">Todas</option>${cotsT.map(c => `<option value="${c.id}" ${c.id === f.cot ? 'selected' : ''}>N.º ${c.numero} · ${esc(nomT(c.tercero_id))}${cotizacionVigente(c) ? '' : ' (' + c.estado + ')'}</option>`).join('')}</select></div></section>
   ${grupos.map((g, gi) => `<section class="panel stack op-fac"><header class="vhead"><div><h3>${esc(nomT(g.tercero_id))}</h3><p class="hint">${g.cotizacion ? `<a href="#/cotizacion/${g.cotizacion.id}">Cotización N.º ${g.cotizacion.numero}</a>` : 'Tarifa de cobro'} · ${g.registros.length} registro${g.registros.length === 1 ? '' : 's'} del ${X.fFecha(g.desde)} al ${X.fFecha(g.hasta)}</p></div><button class="primary" data-g="${gi}" ${cfg.salidas.cobro === 'fv' && g.total > 0 ? '' : 'disabled'}>Crear factura en borrador</button></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Descripción</th><th class="r">Cantidad</th><th class="r">Precio</th><th class="r">IVA</th><th class="r">Valor</th></tr></thead><tbody>
-    ${g.lineas.map(l => `<tr><td>${esc(l.descripcion)}${l.registros ? ` <span class="muted">· ${l.registros} reg.</span>` : ''}</td><td class="r mono">${cant(l.cantidad, l.modo === 'unidad' ? cfg.unidad : '')}</td><td class="r mono">${money(l.precio)}</td><td class="r">${l.iva_pct} %</td><td class="r mono">${money(l.valor)}</td></tr>`).join('')}
+    ${g.lineas.map(l => `<tr><td>${esc(l.descripcion)}${l.registros ? ` <span class="muted">· ${l.registros} reg.</span>` : l.fijo_i != null ? ' <span class="tag">Una vez</span>' : ''}</td><td class="r mono">${cant(l.cantidad, l.modo === 'unidad' ? cfg.unidad : '')}</td><td class="r mono">${money(l.precio)}</td><td class="r">${l.iva_pct} %</td><td class="r mono">${money(l.valor)}</td></tr>`).join('')}
     <tr class="strong"><td colspan="4">Subtotal (antes de IVA)</td><td class="r mono">${money(g.total)}</td></tr></tbody></table></div></section>`).join('') || `<section class="panel muted">${regs.length ? 'Ningún registro de estas fechas tiene precio de cobro.' : 'No hay registros sin facturar en estas fechas.'}</section>`}
   ${res.sinPrecio.length && !f.cot ? `<section class="panel stack"><h3>Sin precio de cobro (${res.sinPrecio.length})</h3><p class="hint">Crea una <a href="#/cotizacion/nueva">cotización</a> para esa obra o equipo, o una tarifa de cobro en <a href="#/opcfg/${t.id}">Configurar › Tarifas</a>. Mientras tanto quedan sin facturar.</p>
     <div class="tbl-wrap"><table class="tbl"><tbody>${res.sinPrecio.map(x => `<tr><td>${X.fFecha(x.registro.fecha)}</td><td>${esc(nomT(x.registro.tercero_id))}</td><td>${cfg.campos.filter(c => c.tipo === 'elemento').map(c => esc(elem(x.registro.datos?.[c.k])?.nombre || '')).filter(Boolean).join(' · ')}</td><td class="r mono">${cant(x.cantidad, cfg.unidad)}</td><td class="muted">${esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
@@ -490,6 +510,9 @@ async function crearFactura(g, t, periodo) {
   try {
     const d = await X.store.saveDoc(doc, items, []);
     await guardarVarios('op_registros', g.registros.map(r => ({ id: r.id, cierre_cobro: d.id })));
+    const fijos = g.lineas.filter(l => l.fijo_i != null);
+    // La factura queda anotada en la línea de la cotización (lineas es jsonb: no hace falta SQL nuevo).
+    if (fijos.length && g.cotizacion) await X.store.save('cotizaciones', { id: g.cotizacion.id, lineas: g.cotizacion.lineas.map((l, i) => fijos.some(x => x.fijo_i === i) ? { ...l, facturado: d.id } : l) });
     await X.cargarEmpresa(); X.toast('Factura en borrador creada. Revísala y emítela.'); location.hash = '#/editar/' + d.id;
   } catch (e) { await X.cargarEmpresa(); X.fail(e); X.route(); }
 }
@@ -534,8 +557,8 @@ function hojaVolante(v, c, t) {
   return `<article class="desprendible op-vol">${X.cabInforme('Desprendible de pago', `${esc(cfg.salidas.titulo || 'Horas adicionales')}<br><small>Corte ${perTxt(c)}</small>`)}
     <div class="grid2"><div><b>${esc(cfg.persona.toUpperCase())}</b><br>${esc(tr?.nombre || '')}<br><span class="muted">${esc(X.docId(tr))}</span></div><div>${els.map(([k, val]) => `<b>${esc(k)}:</b> ${esc(val)}`).join('<br>')}</div></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Día</th>${cols.map(f => `<th>${esc(f.nombre)}</th>`).join('')}<th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
-    ${v.registros.map(r => `<tr${r.dia === 'domingo' || r.dia === 'festivo' ? ' class="op-fest"' : ''}><td class="nowrap">${r.fecha.slice(8)}/${r.fecha.slice(5, 7)}</td><td>${NOMBRE_DIA[r.dia] || ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][new Date(r.fecha + 'T12:00:00').getDay()]}</td>${cols.map(f => `<td>${celda(r, f)}</td>`).join('')}<td class="r mono">${cant(r.pagadas)}</td><td class="r mono">${r.fijo ? 'Pago fijo' : money(r.valor)}</td></tr>`).join('')}
-    ${v.lineas.map(l => `<tr class="strong"><td colspan="${cols.length + 2}">${esc(l.detalle)}</td><td class="r mono">${cant(l.cantidad)}</td><td class="r mono">${money(l.valor)}</td></tr>`).join('')}</tbody></table></div>
+    ${v.registros.filter(r => !r.cargo).map(r => `<tr${r.dia === 'domingo' || r.dia === 'festivo' ? ' class="op-fest"' : ''}><td class="nowrap">${r.fecha.slice(8)}/${r.fecha.slice(5, 7)}</td><td>${NOMBRE_DIA[r.dia] || ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][new Date(r.fecha + 'T12:00:00').getDay()]}</td>${cols.map(f => `<td>${celda(r, f)}</td>`).join('')}<td class="r mono">${cant(r.pagadas)}</td><td class="r mono">${r.fijo ? 'Pago fijo' : money(r.valor)}</td></tr>`).join('')}
+    ${v.lineas.map(l => `<tr class="strong"><td colspan="${cols.length + 2}">${esc(l.detalle)}</td><td class="r mono">${l.cargo ? '' : cant(l.cantidad)}</td><td class="r mono">${money(l.valor)}</td></tr>`).join('')}</tbody></table></div>
     <dl class="tot"><dt class="strong">Total a pagar</dt><dd class="mono big">${money(v.total)}</dd></dl><p class="hint letras">${enLetras(v.total)}</p>
     ${v.registros.filter(r => r.nota).map(r => `<p class="hint">• ${r.fecha.slice(8)}/${r.fecha.slice(5, 7)}: ${esc(r.nota)}</p>`).join('')}
     <div class="firmas"><span>${esc(X.emp().nombre)}</span><span>Recibí conforme · ${esc(tr?.nombre || '')}</span></div></article>`;

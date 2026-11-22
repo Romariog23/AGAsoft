@@ -1,6 +1,6 @@
 // Cotizaciones (Ventas): no mueven contabilidad. Fijan el precio de cobro y, si se amarran a un tipo de Operación
 // (obra, equipo…), las horas registradas se facturan desde Operación con ese precio. Tabla: supabase/038_cotizaciones.sql.
-import { cfgTipo, ESTADOS_COT, erroresCotizacion, totalLineaCot } from './operacion.js';
+import { cfgTipo, ESTADOS_COT, erroresCotizacion, totalLineaCot, COBRO_LINEA, cobroDeLinea } from './operacion.js';
 import { operacionActiva, tiposOp } from './operacion-ui.js';
 import { totales, enLetras } from './calc.js';
 
@@ -60,14 +60,14 @@ export function vCotizacion(m, id) {
     ${opOn ? `<section class="panel stack"><h3>Amarrar a Operación</h3><p class="hint">Las horas registradas en Operación con estos datos se facturan con los precios de esta cotización. Deja "Todas" para que aplique a cualquiera.</p>
       <div class="cq-grid"><div><label for="cqT">Tipo de operación</label><select id="cqT"><option value="">No se amarra</option>${tiposOp().map(x => `<option value="${x.id}" ${x.id === c.op_tipo_id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
       ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></div>`).join('')}</div></section>` : ''}
-    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Se cobra con las horas registradas en Operación">Con horas</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
+    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro desde Operación</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
       ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select></td>
         <td><input data-k="descripcion" value="${esc(l.descripcion)}" maxlength="300"></td>
         ${t ? libres.map(f => `<td><select data-lc="${f.k}"><option value="">${l.op === false ? '—' : 'Cualquiera'}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === l.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></td>`).join('') : ''}
         <td><input data-k="cantidad" type="number" step="any" min="0" class="r" value="${l.cantidad}"></td><td><input data-k="unidad" value="${esc(l.unidad)}" maxlength="10" size="5"></td>
         <td><input data-k="precio" type="number" step="any" min="0" class="r" value="${l.precio}"></td><td><input data-k="descuento_pct" type="number" step="any" min="0" max="100" class="r" value="${l.descuento_pct}"></td>
         <td><input data-k="iva_pct" type="number" step="any" min="0" class="r" value="${l.iva_pct}"></td>
-        ${t ? `<td class="c"><input type="checkbox" data-op ${l.op !== false ? 'checked' : ''}></td>` : ''}<td class="r mono" data-tot>${money(totalLineaCot(l))}</td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
+        ${t ? `<td><select data-op>${X.opts(COBRO_LINEA, cobroDeLinea(l))}</select>${l.op === 'fijo' && l.facturado ? '<br><small class="hint">Ya facturada</small>' : ''}</td>` : ''}<td class="r mono" data-tot>${money(totalLineaCot(l))}</td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
       </tbody></table></div><div class="row"><button type="button" class="ghost" id="cqAdd">+ Agregar línea</button></div><div id="cqTot"></div></section>
     <section class="panel"><div class="grid2"><div><label for="cqO">Observaciones</label><textarea id="cqO" rows="3" maxlength="2000">${esc(c.observaciones || '')}</textarea></div><div><label for="cqK">Condiciones (forma de pago, mínimos, movilización…)</label><textarea id="cqK" rows="3" maxlength="2000">${esc(c.condiciones || '')}</textarea></div></div></section>`;
     totalesTxt();
@@ -97,7 +97,7 @@ export function vCotizacion(m, id) {
         pintar();
       }
       if (ev.target.dataset.lc) { if (ev.target.value) l.criterios[ev.target.dataset.lc] = ev.target.value; else delete l.criterios[ev.target.dataset.lc]; }
-      if (ev.target.dataset.op !== undefined) { l.op = ev.target.checked; }
+      if (ev.target.dataset.op !== undefined) { l.op = ev.target.value === 'horas' ? true : ev.target.value === 'fijo' ? 'fijo' : false; if (l.op !== 'fijo') delete l.facturado; }
     });
     tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { c.lineas.splice(Number(b.dataset.del), 1); if (!c.lineas.length) c.lineas.push(nuevaLinea()); pintar(); });
     X.$('cqAdd').onclick = () => { c.lineas.push(nuevaLinea()); pintar(); m.querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
@@ -110,11 +110,11 @@ export function vCotizacion(m, id) {
   };
   const totalesTxt = () => {
     const tt = totales(c.lineas, {});
-    X.$('cqTot').innerHTML = `<dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(tt.bruto)}</dd>${tt.descuento ? `<dt>Descuentos</dt><dd class="mono">−${money(tt.descuento)}</dd>` : ''}${tt.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}%</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}<dt class="strong">Total</dt><dd class="mono strong">${money(tt.total)}</dd></dl>${c.op_tipo_id ? '<p class="hint">Las líneas "Con horas" se cobran por las horas reales registradas en Operación; la cantidad aquí es solo de referencia.</p>' : ''}`;
+    X.$('cqTot').innerHTML = `<dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(tt.bruto)}</dd>${tt.descuento ? `<dt>Descuentos</dt><dd class="mono">−${money(tt.descuento)}</dd>` : ''}${tt.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}%</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}<dt class="strong">Total</dt><dd class="mono strong">${money(tt.total)}</dd></dl>${c.op_tipo_id ? '<p class="hint">"Con horas" se cobra por las horas reales registradas en Operación (la cantidad aquí es de referencia). "Una vez" sale sola en la primera factura de esta cotización, por ejemplo la movilización.</p>' : ''}`;
   };
   const guardar = async () => {
     const err = X.$('cqErr'); err.hidden = true;
-    const lineas = c.lineas.filter(l => String(l.descripcion).trim() || X.num(l.precio)).map(l => ({ ...l, descripcion: String(l.descripcion).trim(), cantidad: X.num(l.cantidad), precio: X.num(l.precio), descuento_pct: X.num(l.descuento_pct), iva_pct: X.num(l.iva_pct), producto_id: l.producto_id || null, op: c.op_tipo_id ? l.op !== false : false, criterios: c.op_tipo_id ? l.criterios : {} }));
+    const lineas = c.lineas.filter(l => String(l.descripcion).trim() || X.num(l.precio)).map(l => ({ ...l, descripcion: String(l.descripcion).trim(), cantidad: X.num(l.cantidad), precio: X.num(l.precio), descuento_pct: X.num(l.descuento_pct), iva_pct: X.num(l.iva_pct), producto_id: l.producto_id || null, op: c.op_tipo_id ? (l.op === 'fijo' ? 'fijo' : l.op !== false) : false, criterios: c.op_tipo_id ? l.criterios : {} }));
     const row = { ...c, lineas, criterios: c.op_tipo_id ? c.criterios : {}, op_tipo_id: c.op_tipo_id || null, vence: c.vence || null };
     const errores = erroresCotizacion(row); if (errores.length) { err.textContent = errores[0]; err.hidden = false; return; }
     const tt = totales(lineas, {});
