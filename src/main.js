@@ -13,7 +13,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, avisoCupo, planDesde, incluye } from './planes.js';
+import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
@@ -52,9 +52,9 @@ $('lpEntrar').onclick = () => irForm(false);
 $('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
 // Planes públicos (si la base los deja ver sin sesión: supabase/022_planes_publicos.sql).
 (async () => { try { const ps = await store.planesActivos(); if (!ps?.length) return;
-  $('lpPlanesList').innerHTML = ps.map((p, i) => `<article class="lp-plan${ps.length > 2 && i === 1 ? ' dest' : ''}">${ps.length > 2 && i === 1 ? '<span class="tag el">El más escogido</span>' : ''}<h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b><span class="muted">al mes${p.por_empresa ? ' por empresa' : ''}</span>
-    <ul class="lp-inc">${incluye(p).map(t => `<li>${esc(t)}</li>`).join('')}</ul><p class="hint">${esc(p.descripcion || '')}</p><button type="button" class="${ps.length > 2 && i === 1 ? 'primary' : ''}" data-prueba>Empezar 15 días gratis</button></article>`).join('');
+  $('lpPlanesList').innerHTML = ps.map((p, i) => tarjetaPlan(p, ps.length > 2 && i === 1, true)).join('');
   $('lpPlanesList').querySelectorAll('[data-prueba]').forEach(b => b.onclick = () => irForm(true));
+  if (!$('lpProx')) $('lpPlanesList').insertAdjacentHTML('afterend', `<p class="hint" id="lpProx"><b>Próximamente:</b> ${PROXIMAMENTE.join(', ')}.</p>`);
   $('lpPlanes').hidden = false; $('lpNavPlanes').hidden = false; } catch (_) {} })();
 $('aToggle').onclick = () => {
   registro = !registro;
@@ -120,7 +120,7 @@ async function iniciar() {
 function diasPrueba(f) { return f ? Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5)) : null; }
 function opcionesPlan(planes, sel) {
   return `<div class="planes-op" role="radiogroup" aria-label="Planes">${planes.map(p => `<label class="plan-op"><input type="radio" name="plan" value="${p.id}" ${p.id === sel ? 'checked' : ''}>
-    <span><b>${esc(p.nombre)}</b> · <span class="mono">${money(p.precio_mensual)}</span> al mes<br><small class="muted">${esc(p.descripcion)}</small></span></label>`).join('') || '<p class="muted">No hay planes disponibles. Comunícate con AGAsoft.</p>'}</div>`;
+    <span><b>${esc(p.nombre)}</b> · <span class="mono">${money(p.precio_mensual)}</span> al mes + IVA${p.por_empresa ? ' por empresa' : ''}<br><small class="muted">${esc(p.descripcion)}</small></span></label>`).join('') || '<p class="muted">No hay planes disponibles. Comunícate con AGAsoft.</p>'}</div>`;
 }
 async function pedirPlan(cont) {
   const id = cont.querySelector('input[name=plan]:checked')?.value;
@@ -1291,7 +1291,9 @@ function vCartera(m) {
     descargar(`cartera-${emp().nit}-${hoy()}.csv`, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   };
 }
-function descargar(nombre, texto) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function descargar(nombre, texto, reporte = true) {
+  if (reporte && !tieneModulo(S.plan, 'avanzados')) return fail(new Error('Exportar informes a Excel está incluido en el plan Empresa. Mira Mi plan.'));
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
 /* ---------- Clientes ---------- */
 // Partes del nombre de un tercero viejo que solo tenía el nombre completo.
@@ -1519,7 +1521,8 @@ async function vUsuarios(m) {
     <table class="tbl"><tbody>${S.d.miembros.map(x => `<tr><td>${esc(x.correo)}</td><td>${x.rol === 'consulta' ? 'Consulta' : 'Responsable'}</td><td class="r"><button class="ghost" data-delm="${x.id}">Quitar</button></td></tr>`).join('') || '<tr><td class="muted">Solo tú tienes acceso.</td></tr>'}</tbody></table></section>` : '<section class="panel"><p class="muted">En el modo de demostración no hay usuarios. Al entrar con tu cuenta puedes dar acceso a tu equipo.</p></section>'}
   ${adm ? '<section class="panel stack"><header class="vhead"><h3>Todas las cuentas de AGAsoft</h3><a class="btn primary" href="/admin">Abrir panel de planes y uso</a></header><p class="hint">Solo lo ve el administrador. Los planes, los límites y el uso se manejan en /admin.</p><div id="lst"><p class="muted">Cargando…</p></div></section>' : ''}`;
   if ($('addM')) $('addM').onclick = () => dialogo(`<h2>Dar acceso</h2>${campo('correo', 'Correo de la persona', '', 'type="email" required')}
-    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ['consulta', 'Consulta: solo ve']], 'responsable')}
+    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ...(tieneModulo(S.plan, 'consulta') ? [['consulta', 'Consulta: solo ve']] : [])], 'responsable')}
+    ${tieneModulo(S.plan, 'consulta') ? '' : '<p class="hint">Los usuarios de solo consulta están desde el plan Pyme.</p>'}
     <p class="hint">La persona debe tener cuenta aprobada en AGAsoft con ese mismo correo.</p>${pie('Dar acceso')}`, async fd => {
     await store.save('miembros', { empresa_id: e.id, correo: fd.get('correo').trim().toLowerCase(), rol: fd.get('rol') }); await cargarEmpresa(); route();
   });
@@ -2529,6 +2532,7 @@ function vBalance(m) {
   $('niv').onchange = () => { balOpc.nivel = $('niv').value; pintar(); };
   $('bter').onchange = () => { balOpc.tercero = $('bter').value; pintar(); };
   // Para ver los terceros hay que llegar al nivel auxiliar.
+  sinModulo('bdet', 'informes', () => { balOpc.detalle = ''; });
   $('bdet').onchange = () => { balOpc.detalle = $('bdet').value; if (balOpc.detalle) { balOpc.nivel = '8'; $('niv').value = '8'; } pintar(); };
   $('csv').onclick = () => {
     const n = Number(balOpc.nivel), filas = [['Código', 'Cuenta', 'Tercero', 'Identificación', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']];
@@ -2596,6 +2600,7 @@ function filtrosInf(pintar) {
   $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
   $('iter').onchange = () => { infOpc.tercero = $('iter').value; pintar(); };
   // Los terceros van en el último nivel: en rubros NIIF se ven al abrir el rubro; en niveles del PUC se pasa a auxiliar.
+  sinModulo('idet', 'informes', () => { infOpc.detalle = ''; });
   $('idet').onchange = () => { infOpc.detalle = $('idet').value; if (infOpc.detalle && infOpc.nivel !== '0') { infOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
 }
 const movsInf = (desde, hasta) => { const ms = movs().filter(x => !infOpc.tercero || x.tercero_id === infOpc.tercero); infCtx = { ms, desde, hasta }; return ms; };
@@ -2717,6 +2722,7 @@ function vErComp(m) {
   $('caA').onchange = () => { ercOpc.anio = $('caA').value; ercOpc.meses = null; pintarMeses(); pintar(); };
   $('ninf').onchange = () => { ercOpc.nivel = $('ninf').value; pintar(); };
   $('iter').onchange = () => { ercOpc.tercero = $('iter').value; pintar(); };
+  sinModulo('idet', 'informes', () => { ercOpc.detalle = ''; });
   $('idet').onchange = () => { ercOpc.detalle = $('idet').value; if (ercOpc.detalle && ercOpc.nivel !== '0') { ercOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
   $('csv').onclick = () => {
     const cols = [...ercOpc.meses].sort().map(k => MESES_C[Number(k) - 1]), v = x => String(r2(x)).replace('.', ',');
@@ -3213,7 +3219,7 @@ function vImportar(m, solo) {
     ${Object.entries(PLANTILLAS).filter(([k]) => !solo || k === solo).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
       <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
       <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
-  m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt)));
+  m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt), false));
   m.querySelectorAll('[data-sub]').forEach(inp => inp.onchange = async () => {
     const cual = inp.dataset.sub, file = inp.files[0]; inp.value = ''; if (!file) return;
     let txt = await file.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
@@ -3279,7 +3285,7 @@ function tuPlan(x, planes = []) {
   if (dp !== null) return `<h3>Tu plan</h3><dl class="kv"><dt>Plan</dt><dd><b>Prueba gratis</b> hasta el ${fFecha(x.prueba_hasta)} <span class="tag ${dp <= 3 ? 'bad' : 'el'}">${dp ? `Quedan ${dp} día${dp === 1 ? '' : 's'}` : 'Último día'}</span></dd>${uso}</dl>
     <p class="sub">${pedido ? `Pediste el plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo aprueba y sigues sin interrupciones.` : 'Escoge el plan que quieres para cuando termine la prueba. AGAsoft lo aprueba y sigues sin interrupciones.'}</p>
     ${opcionesPlan(planes, pedido?.id)}<div class="row"><button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button></div>`;
-  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(precioCuenta(p, x.empresas))} al mes${p.por_empresa ? ` <span class="hint">(${money(p.precio_mensual)} × ${Math.max(1, x.empresas)} empresa${x.empresas === 1 ? '' : 's'})</span>` : ''}</dd>
+  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(precioCuenta(p, x.empresas))} al mes + IVA${p.por_empresa ? ` <span class="hint">(${money(p.precio_mensual)} × ${Math.max(1, x.empresas)} empresa${x.empresas === 1 ? '' : 's'})</span>` : ''}</dd>
     <dt>Pagado hasta</dt><dd>${x.plan_vence ? fFecha(x.plan_vence) + (x.plan_vence < hoy() ? ' <span class="tag bad">Vencido</span>' : '') : 'Sin vencimiento'}</dd>
     ${uso}</dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
     <p class="sub">${pedido ? `Pediste cambiar al plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo revisa y lo aprueba.` : 'Para cambiar de plan, escógelo y pídelo. AGAsoft lo aprueba.'}</p>
@@ -3307,7 +3313,7 @@ async function vMiPlan(m) {
   m.innerHTML = `<header class="vhead"><div><h2>Mi plan</h2><p class="sub">Lo que incluye tu plan, lo que llevas usado este mes y cómo cambiarlo.</p></div></header>
     ${avisoFe()}
     <section class="panel stack"><h3>Esta empresa: ${esc(e?.nombre || '')}</h3>
-      <dl class="kv">${cupo(u.fe, u.maxFe, `Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}`)}${tieneModulo(p, 'nomina') ? cupo(u.emps, u.maxEmps, 'Empleados activos') : '<dt>Nómina</dt><dd><span class="muted">No incluida en tu plan</span></dd>'}</dl>
+      <dl class="kv">${u.maxFe === null && p ? `<dt>Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}</dt><dd><span class="mono">${u.fe}</span> <span class="hint">el tope lo da tu paquete de Factus</span></dd>` : cupo(u.fe, u.maxFe, `Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}`)}${tieneModulo(p, 'nomina') ? cupo(u.emps, u.maxEmps, 'Empleados activos') : '<dt>Nómina</dt><dd><span class="muted">No incluida en tu plan</span></dd>'}</dl>
       <p class="hint">Cuentan las facturas, notas crédito y notas débito electrónicas guardadas en el mes (también las anuladas, porque ya se enviaron). Los recibos, comprobantes y compras no gastan cupo. El contador vuelve a cero el 1.° de cada mes.</p></section>
     ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>'
       : `<section class="panel stack"><h3>Tu plan</h3><p class="muted">${store.mode === 'local' ? 'En la demostración no hay plan ni límites. Estos son los planes de AGAsoft:' : 'Eres administrador: tu cuenta no tiene límites.'}</p><div class="lp-planes" id="planesDemo"></div></section>`}
@@ -3315,9 +3321,21 @@ async function vMiPlan(m) {
       <div class="row"><button class="primary" disabled>Pagar en línea</button><span class="tag">Pronto: PSE, tarjeta y Nequi</span></div>
       <p class="hint">Mientras activamos el pago en línea, AGAsoft te envía el cobro y activa o renueva el plan al recibir el pago.</p></section>`;
   if ($('miPlan')) cargarMiPlan();
-  if ($('planesDemo')) { const ps = await store.planesActivos().catch(() => []); if ($('planesDemo')) $('planesDemo').innerHTML = ps.map(x => `<article class="lp-plan"><h3>${esc(x.nombre)}</h3><b class="p">${money(x.precio_mensual)}</b><span class="muted">al mes${x.por_empresa ? ' por empresa' : ''}</span><ul class="lp-inc">${incluye(x).map(t => `<li>${esc(t)}</li>`).join('')}</ul></article>`).join(''); }
+  if ($('planesDemo')) { const ps = await store.planesActivos().catch(() => []); if ($('planesDemo')) $('planesDemo').innerHTML = ps.map(x => tarjetaPlan(x)).join(''); }
 }
 
+// Tarjeta de un plan (portada y Mi plan): precio sin IVA, pago anual y lo que incluye.
+function tarjetaPlan(p, dest = false, boton = false) {
+  return `<article class="lp-plan${dest ? ' dest' : ''}">${dest ? '<span class="tag el">El más escogido</span>' : ''}<h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b>
+    <span class="muted">al mes + IVA${p.por_empresa ? ', por empresa' : ''}</span><span class="hint">o ${money(precioAnual(p))} al año (2 meses gratis)</span>
+    <ul class="lp-inc">${incluye(p).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${boton ? `<button type="button" class="${dest ? 'primary' : ''}" data-prueba>Empezar 15 días gratis</button>` : ''}</article>`;
+}
+// Opción de un informe que el plan no incluye: queda deshabilitada con la etiqueta "Plan superior".
+function sinModulo(id, mod, limpiar) {
+  const el = $(id); if (!el || tieneModulo(S.plan, mod)) return;
+  limpiar?.(); el.value = ''; el.disabled = true; el.title = 'No incluido en tu plan';
+  el.insertAdjacentHTML('afterend', '<small class="hint">Desde el plan Pyme · <a href="#/miplan">Mi plan</a></small>');
+}
 // Módulo apagado por el plan.
 async function vBloqueado(m, mod) {
   m.innerHTML = `<section class="panel stack bloq"><h2>${esc(MODULOS[mod].nombre)}</h2>
