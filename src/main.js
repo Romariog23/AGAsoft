@@ -1925,7 +1925,7 @@ function vInventarioCfg(m) {
   // La bodega principal que aún no existe (se crea al primer uso) también se edita: al guardar se crea con la cuenta escogida.
   const formB = (b = {}, principal = false) => dialogo(`<h2>${b.id || principal ? 'Editar bodega' : 'Nueva bodega'}</h2>
     <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
-    <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><input id="f_cuenta" name="cuenta" list="ctas14" class="mono" value="${esc(b.cuenta || param().inventario)}" autocomplete="off" required><datalist id="ctas14">${optsLista(cuentasAux().filter(c => /^14/.test(c.codigo)))}</datalist>
+    <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><select id="f_cuenta" name="cuenta" class="mono" required>${(() => { const sel = b.cuenta || param().inventario, l = cuentasAux().filter(c => /^14/.test(c.codigo)); return (l.some(c => c.codigo === sel) ? '' : `<option value="${esc(sel)}" selected>${esc(sel)}</option>`) + l.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join(''); })()}</select>
       <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
     ${b.id ? check('activa', 'Activa', b.activa !== false) : ''}${pie()}`, async fd => {
     const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true };
