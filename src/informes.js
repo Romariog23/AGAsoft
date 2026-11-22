@@ -115,3 +115,39 @@ export function certificado(compras, tercero, desde, hasta) {
 
 // Terceros con retenciones en el período (para escoger a quién certificar).
 export const tercerosConRetencion = (compras, desde, hasta) => [...new Set(retencionesDeCompras(compras, desde, hasta).map(f => f.tercero_id))];
+
+// Anexo del informe de IVA: una fila por documento y tarifa (lo que soporta cada cifra del informe).
+// seccion: 'ventas' | 'compras' | 'reteiva'. Las notas crédito van en negativo.
+export function anexoIva({ documentos = [], items = [], compras = [] }, desde, hasta) {
+  const itemsDe = {};
+  for (const it of items) (itemsDe[it.documento_id] = itemsDe[it.documento_id] || []).push(it);
+  const filas = [];
+  for (const d of documentos) {
+    if (d.estado !== 'emitido' || !['FV', 'NC', 'ND'].includes(d.tipo) || !enRango(d.fecha, desde, hasta)) continue;
+    const s = d.tipo === 'NC' ? -1 : 1, t = totales(itemsDe[d.id] || []);
+    for (const x of Object.values(t.porTarifa)) if (x.base || x.iva) filas.push({ seccion: 'ventas', fecha: d.fecha, doc: d, tercero_id: d.tercero_id, base: r2(s * x.base), tarifa: x.tarifa, valor: r2(s * x.iva) });
+    if (num(d.reteiva)) filas.push({ seccion: 'reteiva', fecha: d.fecha, doc: d, tercero_id: d.tercero_id, base: r2(s * num(t.iva)), tarifa: num(d.reteiva_pct), valor: r2(s * num(d.reteiva)) });
+  }
+  for (const c of compras) {
+    if (!['FC', 'DS'].includes(c.tipo) || c.estado === 'anulado' || !enRango(c.fecha, desde, hasta)) continue;
+    const por = {};
+    for (const l of c.lineas || []) { const base = r2(num(l.base)); sumarTarifa(por, l.iva_pct, base, r2(base * num(l.iva_pct) / 100)); }
+    for (const x of Object.values(por)) if (x.base || x.iva) filas.push({ seccion: 'compras', fecha: c.fecha, compra: c, tercero_id: c.tercero_id, base: x.base, tarifa: x.tarifa, valor: x.iva });
+  }
+  const orden = { ventas: 0, compras: 1, reteiva: 2 };
+  return filas.sort((a, b) => orden[a.seccion] - orden[b.seccion] || a.fecha.localeCompare(b.fecha));
+}
+
+// Anexo de retenciones practicadas: una fila por documento y tipo de retención, más los movimientos de nómina y
+// comprobantes en las cuentas de retención por pagar.
+export function anexoRetenciones(compras, movs, desde, hasta, cuentas = { retefuente: '2365', reteiva: '2367', reteica: '2368' }) {
+  const filas = retencionesDeCompras(compras, desde, hasta).map(f => ({ ...f, origen: 'compra' }));
+  for (const m of movs || []) {
+    if (m.origen === 'compra' || !enRango(m.fecha, desde, hasta)) continue;
+    const tipo = Object.keys(cuentas).find(t => String(m.cuenta).startsWith(cuentas[t])); if (!tipo) continue;
+    const valor = r2(num(m.credito) - num(m.debito)); if (!valor) continue;
+    filas.push({ origen: 'mov', mov: m, tipo, concepto: m.detalle || (m.origen === 'nomina' ? 'Nómina' : 'Comprobante contable'), tarifa: null, base: null, valor, tercero_id: m.tercero_id, fecha: m.fecha });
+  }
+  const orden = Object.fromEntries(TIPOS_RETENCION.map(([k], i) => [k, i]));
+  return filas.sort((a, b) => orden[a.tipo] - orden[b.tipo] || a.fecha.localeCompare(b.fecha));
+}
