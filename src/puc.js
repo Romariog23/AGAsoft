@@ -348,6 +348,8 @@ const PARAMETROS = {
   reteiva_pagar: ['23670501', 'ReteIVA que la empresa practica (por pagar)'],
   reteica_pagar: ['23680501', 'ReteICA que la empresa practica (por pagar)'],
   anticipos_prov: ['13300501', 'Anticipos a proveedores'],
+  inventario: ['14350501', 'Inventario de mercancías (bodega principal y productos sin bodega)'],
+  costo_ventas: ['61350501', 'Costo de ventas (si el producto no tiene cuenta propia)'],
 };
 const parametrosPorDefecto = () => Object.fromEntries(Object.entries(PARAMETROS).map(([k, [c]]) => [k, c]));
 // Parámetros guardados por la empresa, llevados a cuentas auxiliares de 8 dígitos.

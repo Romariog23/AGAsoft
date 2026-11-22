@@ -3,6 +3,7 @@
 import { r2, num } from './calc.js';
 import { a8, esAuxiliar, parametrosDe } from './puc.js';
 import { cuentaIva } from './impuestos.js';
+import { esLineaProducto, erroresLineaProducto } from './inventario.js';
 
 const TIPOS_COMPRA = {
   FC: { nombre: 'Factura de proveedor', corto: 'Fact. prov.', plural: 'Facturas de proveedor', nuevo: 'Nueva factura de proveedor' },
@@ -65,7 +66,7 @@ function cuentasPorPagar(compras, hoy) {
   });
 }
 
-function erroresCompra(c, cuentas) {
+function erroresCompra(c, cuentas, productos) {
   const idx = Object.fromEntries((cuentas || []).map(x => [x.codigo, x])), out = [];
   if (!c.tercero_id) out.push('Escoge el proveedor.');
   if (!c.fecha) out.push('Escribe la fecha.');
@@ -79,7 +80,10 @@ function erroresCompra(c, cuentas) {
   if (c.tipo === 'FC' && !String(c.num_proveedor || '').trim()) out.push('Escribe el número de la factura del proveedor.');
   const ls = c.lineas || [];
   if (!ls.length) out.push('Agrega al menos una línea.');
-  ls.forEach((l, i) => { cta(l.cuenta, `Línea ${i + 1}`); if (num(l.base) <= 0) out.push(`Línea ${i + 1}: el valor debe ser mayor que cero.`); });
+  ls.forEach((l, i) => {
+    if (esLineaProducto(l)) { out.push(...erroresLineaProducto(l, i, productos)); cta(l.cuenta, `Línea ${i + 1} (cuenta de la bodega)`); return; }
+    cta(l.cuenta, `Línea ${i + 1}`); if (num(l.base) <= 0) out.push(`Línea ${i + 1}: el valor debe ser mayor que cero.`);
+  });
   if (num(c.retefuente_pct) && c.cuenta_retefuente) cta(c.cuenta_retefuente, 'Cuenta de retención');
   return out;
 }
