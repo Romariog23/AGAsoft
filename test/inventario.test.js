@@ -126,3 +126,12 @@ test('costo de ventas por producto: ventas menos devoluciones, costo y margen', 
   const r = costoPorProducto(costear(movimientosInv(S)), S.items, '2026-01-01', '2026-01-31')[0];
   assert.equal(r.cantidad, 3); assert.equal(r.costo, 300); assert.equal(r.venta, 600); assert.equal(r.margen, 50);
 });
+
+test('bodega de venta: la del producto si vende; si no, la primera que vende', async () => {
+  const { bodegaVentaDe, bodegaVende } = await import('../src/inventario.js');
+  const bs = [{ id: 'b1', vende: false }, { id: 'b2' }, { id: 'b3' }];
+  assert.equal(bodegaVentaDe({ bodega_id: 'b3' }, bs), 'b3');
+  assert.equal(bodegaVentaDe({ bodega_id: 'b1' }, bs), 'b2');
+  assert.equal(bodegaVende(bs[0]), false);
+  assert.equal(bodegaVentaDe({}, [{ id: 'b1', vende: false }]), null);
+});

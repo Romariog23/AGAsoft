@@ -17,6 +17,13 @@ export function bodegasDe(bodegas, contab) {
   const l = (bodegas || []).filter(b => b.activa !== false).sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)));
   return l.length ? l : [{ id: '', codigo: '01', nombre: 'Bodega principal', cuenta: parametrosDe(contab?.parametros).inventario, activa: true }];
 }
+// Bodegas que venden: las que solo almacenan (vende false) no se escogen en facturas; su mercancía se traslada a una que vende.
+export const bodegaVende = b => !!b && b.vende !== false;
+// Bodega de donde sale un producto en la factura: la del producto si vende; si no, la primera que vende.
+export function bodegaVentaDe(p, bodegas) {
+  const l = (bodegas || []).filter(bodegaVende), propia = l.find(b => b.id === (p?.bodega_id || ''));
+  return (propia || l[0] || null)?.id ?? null;
+}
 export function erroresBodega(b, bodegas, cuentas) {
   const out = [], codigo = String(b.codigo || '').trim(), cuenta = String(b.cuenta || '').trim();
   if (!codigo) out.push('Escribe el código de la bodega.');
