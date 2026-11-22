@@ -209,6 +209,7 @@ main:focus{outline:none}
 .items td:nth-child(2){min-width:200px}
 .w-num{width:80px!important}
 .w-cta{width:110px!important}
+.w-bod{width:150px}
 .w-val{width:130px!important}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}
 .kv dt{color:var(--muted);font-size:.88rem}

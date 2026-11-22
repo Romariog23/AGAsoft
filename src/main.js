@@ -20,7 +20,7 @@ import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnua
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
-import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
+import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -882,7 +882,7 @@ function vLista(m, tipo) {
 
 /* ---------- Editor de documentos ---------- */
 function facturasCliente(tid) { return S.d.documentos.filter(d => d.tipo === 'FV' && d.estado === 'emitido' && (!tid || d.tercero_id === tid)); }
-function nuevoItem(p) { return { producto_id: p?.id || '', codigo: p?.codigo || '', descripcion: p?.nombre || '', unidad: p?.unidad || 'UND', cantidad: 1, precio: num(p?.precio), descuento_pct: 0, iva_pct: emp().responsable_iva ? num(p?.iva_pct ?? 19) : 0 }; }
+function nuevoItem(p) { return { producto_id: p?.id || '', bodega_id: p && esInventariable(p) && conInv() ? bodegaVentaDe(p, bodegas()) ?? '' : '', codigo: p?.codigo || '', descripcion: p?.nombre || '', unidad: p?.unidad || 'UND', cantidad: 1, precio: num(p?.precio), descuento_pct: 0, iva_pct: emp().responsable_iva ? num(p?.iva_pct ?? 19) : 0 }; }
 // Retenciones con concepto (Impuestos › Conceptos de retención): cada tipo tiene un selector de concepto y su porcentaje.
 const RET_PCT = { retefuente: 'retefuente_pct', reteiva: 'reteiva_pct', reteica: 'reteica_milaje' };
 const conceptos = (uso, tipo) => conceptosRet(emp()?.contabilidad, param(), uso, tipo);
@@ -936,6 +936,18 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
   }
   const T = TIPOS[tipo], esNota = tipo === 'NC' || tipo === 'ND', esRC = tipo === 'RC';
+  // Bodega por línea (factura y nota crédito) cuando hay control de inventario y más de una bodega.
+  // La factura solo deja escoger bodegas que venden; la nota crédito puede devolver a cualquiera.
+  const conBod = conInv() && (tipo === 'FV' || tipo === 'NC') && bodegas().length > 1;
+  const prodDe = pid => S.d.productos.find(x => x.id === pid);
+  const bodEf = it => it.bodega_id || prodDe(it.producto_id)?.bodega_id || bodegas()[0].id;
+  const selBodIt = it => {
+    const p = prodDe(it.producto_id); if (!p || !esInventariable(p)) return '<span class="muted">—</span>';
+    const l = bodegas().filter(b => tipo !== 'FV' || bodegaVende(b)), sel = it.bodega_id || (tipo === 'FV' ? bodegaVentaDe(p, bodegas()) : bodEf(it)) || '';
+    if (!it.bodega_id && sel) it.bodega_id = sel;
+    const fuera = !l.some(b => b.id === sel) ? `<option value="${esc(sel)}" selected>${esc(bodegaDe(sel)?.nombre || '?')} (no vende)</option>` : '';
+    return `<select data-k="bodega_id" class="w-bod" aria-label="Bodega">${fuera}${l.map(b => `<option value="${esc(b.id)}" ${b.id === sel ? 'selected' : ''}>${esc(b.codigo)} · ${esc(b.nombre)}</option>`).join('')}</select>`;
+  };
   const RET_V = { retefuente: ['rfC', 'rf'], reteiva: ['riC', 'ri'], reteica: ['ricaC', 'rica'] };
   // Documento ya guardado (con número) que el dueño está editando: conserva su número.
   const editando = !!id && doc.estado === 'emitido';
@@ -964,7 +976,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     `<section class="panel stack"><div class="vhead"><h3>Productos o servicios</h3>${esNota && doc.concepto === '2' ? '' : '<button type="button" id="addIt">+ Agregar línea</button>'}</div>
       <datalist id="prods">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.codigo)}">${esc(p.nombre)} · ${money(p.precio)}</option>`).join('')}</datalist>
       <datalist id="prodsN">${S.d.productos.filter(p => p.activo !== false).map(p => `<option value="${esc(p.nombre)}">${esc(p.codigo)} · ${money(p.precio)}</option>`).join('')}</datalist>
-      <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th><th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Código</th><th>Descripción</th><th>Cuenta</th>${conBod ? '<th>Bodega</th>' : ''}<th class="r">Cant.</th><th class="r">Precio unit.</th><th class="r">Desc. %</th><th class="r">IVA %</th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody id="its"></tbody></table></div>
       <datalist id="ctasIt">${optsLista(cuentasAux())}</datalist>
       ${!emp().responsable_iva ? '<p class="hint">La empresa no es responsable de IVA, por eso el IVA va en 0.</p>' : ''}</section>`}
     <section class="panel grid-doc">
@@ -1043,13 +1055,14 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       <td data-l="Código"><input data-k="codigo" list="prods" value="${esc(it.codigo)}" class="mono w-cod" aria-label="Código" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" list="prodsN" autocomplete="off" value="${esc(it.descripcion)}" aria-label="Descripción" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasIt" autocomplete="off" value="${esc(it.cuenta || '')}" placeholder="${esc(ctaDefecto(it))}" class="mono w-cta" aria-label="Cuenta contable" title="${esc(it.cuenta ? nomCta(it.cuenta) : 'Cuenta por defecto: ' + ctaDefecto(it) + ' ' + nomCta(ctaDefecto(it)))}"></td>
+      ${conBod ? `<td data-l="Bodega">${selBodIt(it)}</td>` : ''}
       <td data-l="Cantidad"><input data-k="cantidad" type="number" step="any" min="0" value="${it.cantidad}" class="r mono w-num" aria-label="Cantidad" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Precio unit."><input data-k="precio" type="number" step="0.01" min="0" value="${it.precio}" class="r mono w-val" aria-label="Precio unitario" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="Desc. %"><input data-k="descuento_pct" type="number" step="0.01" min="0" max="100" value="${num(it.descuento_pct) || ''}" class="r mono w-num" aria-label="Descuento %" ${bloqueado ? 'readonly' : ''}></td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %" ${bloqueado || !emp().responsable_iva ? 'disabled' : ''}>${optsIva(it.iva_pct)}</select></td>
       ${ccCfg().activo ? `<td data-l="Centro de costo" class="c-cc">${btnCC(it.cc, i, doc.cc)}</td>` : ''}
       <td class="r mono c-tot" data-l="Total" data-lt="${i}">${money(linea(it).total)}</td>
-      <td class="c-del">${bloqueado ? '' : `<button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button>`}</td></tr>`).join('') || `<tr><td colspan="${ccCfg().activo ? 10 : 9}" class="muted">Sin líneas.</td></tr>`;
+      <td class="c-del">${bloqueado ? '' : `<button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button>`}</td></tr>`).join('') || `<tr><td colspan="${9 + (ccCfg().activo ? 1 : 0) + (conBod ? 1 : 0)}" class="muted">Sin líneas.</td></tr>`;
     if ($('addIt')) $('addIt').hidden = bloqueado;
   };
   const pintarApl = () => {
@@ -1156,6 +1169,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
         if (!idxCuentas()[it.cuenta]) throw new Error(`La cuenta ${it.cuenta} de "${it.descripcion}" no existe en el plan de cuentas.`);
       }
     }
+    if (conBod && (S.d.bodegas || []).length && !('vende' in S.d.bodegas[0]) && store.mode === 'supabase' && its.some(i => i.bodega_id)) throw new Error('Falta correr en Supabase el archivo supabase/036_bodega_ventas.sql para guardar la bodega de cada línea.');
     const { id: _id, ...campos } = doc;
     // Fechas y referencias vacías van como null: la base de datos no acepta texto vacío en esos campos.
     const g = await store.saveDoc({ ...campos, vence: campos.vence || null, ref_id: campos.ref_id || null, id: doc.id || id || undefined, empresa_id: S.eid, tipo }, its, esRC ? apl.map(a => ({ factura_id: a.factura_id, valor: num(a.valor) })) : []);
@@ -1182,6 +1196,17 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       if (doc.total <= 0) return 'Escribe el valor que paga en al menos una factura, o un anticipo.';
       const c = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones.filter(a => a.recibo_id !== doc.id)).map(x => [x.factura.id, x]));
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
+    }
+    // Inventario: la factura sale de una bodega que vende y, si la empresa no deja vender sin existencias, con cantidad suficiente en esa bodega.
+    if (conInv() && tipo === 'FV') {
+      const lis = items.filter(it => esInventariable(prodDe(it.producto_id)) && num(it.cantidad) > 0);
+      for (const it of lis) { const b = bodegaDe(bodEf(it)); if (!bodegaVende(b)) return `"${it.descripcion}": la bodega ${b.nombre} solo almacena. Escoge una bodega que venda o traslada la mercancía.`; }
+      if (lis.length && cfgInventario(emp()?.contabilidad).negativo === 'bloquear') {
+        const ms = costear(movimientosInv({ ...S.d, documentos: S.d.documentos.filter(d => d.id !== doc.id), inventario_docs: invDocs() }), cfgInventario(emp()?.contabilidad).metodo);
+        const ex = existencias(ms, doc.fecha, bodegas()[0].id), ped = {};
+        for (const it of lis) { const k = `${it.producto_id}|${bodEf(it)}`; ped[k] = (ped[k] || 0) + num(it.cantidad); }
+        for (const [k, q] of Object.entries(ped)) { const [pid, bid] = k.split('|'), d = ex.find(x => x.producto_id === pid)?.bodegas?.[bid] || 0; if (q > d + 1e-9) return `${prodDe(pid)?.nombre}: solo hay ${cantTxt(d, fmtEmp())} en ${bodegaDe(bid)?.nombre}.`; }
+      }
     }
     // Centros de costo: el general, el de cada línea y que ninguna cuenta del alcance quede sin centro.
     if (ccCfg().activo) {
@@ -1916,7 +1941,7 @@ function vInventarioCfg(m) {
   </section>
   <section class="panel stack"><header class="vhead"><h3>Bodegas</h3><button class="primary" id="nuevaB">Nueva bodega</button></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Cuenta de inventario</th><th></th></tr></thead><tbody>
-    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r"><button class="sm ghost" data-eb="${b.id || '__principal'}">Editar</button></td></tr>`).join('')}
+    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.vende === false ? ' <span class="tag">Solo almacena</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r"><button class="sm ghost" data-eb="${b.id || '__principal'}">Editar</button></td></tr>`).join('')}
     </tbody></table></div>
     <p class="hint">Cada bodega lleva una cuenta auxiliar de la clase 14. Las bodegas solo trasladan cantidades: un traslado entre bodegas con cuentas distintas se contabiliza entre esas cuentas 14; si comparten la cuenta, no hay asiento.</p>
   </section>`;
@@ -1927,11 +1952,14 @@ function vInventarioCfg(m) {
     <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
     <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><select id="f_cuenta" name="cuenta" class="mono" required>${(() => { const sel = b.cuenta || param().inventario, l = cuentasAux().filter(c => /^14/.test(c.codigo)); return (l.some(c => c.codigo === sel) ? '' : `<option value="${esc(sel)}" selected>${esc(sel)}</option>`) + l.map(c => `<option value="${c.codigo}" ${c.codigo === sel ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join(''); })()}</select>
       <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
+    ${check('vende', 'Se vende desde esta bodega (aparece en las facturas)', b.vende !== false)}
+    <p class="hint">Desmárcala si la bodega solo almacena: para vender esa mercancía primero se traslada a una bodega que vende.</p>
     ${b.id ? check('activa', 'Activa', b.activa !== false) : ''}${pie()}`, async fd => {
-    const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true };
+    const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true, vende: fd.get('vende') === 'on' };
+    if ((!row.vende || !row.activa) && !bodegas().some(x => x.id !== (b.id || '') && x.activa !== false && bodegaVende(x))) throw new Error('Debe quedar al menos una bodega activa que venda. Crea otra bodega que venda antes de desmarcar esta.');
     const errs = erroresBodega({ ...row, id: b.id }, reales, S.d.cuentas); if (errs.length) throw new Error(errs.join(' '));
     if (b.id && b.cuenta !== row.cuenta && usada(b.id) && !await confirmar('Cambiar la cuenta de la bodega', 'Las compras ya registradas conservan la cuenta con que se contabilizaron. Solo las nuevas usarán la cuenta nueva.', 'Cambiar')) return false;
-    try { await store.save('bodegas', b.id ? { ...row, id: b.id } : row); } catch (er) { throw /bodegas/.test(er.message) && /exist|schema|relation/i.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : er; }
+    try { await store.save('bodegas', b.id ? { ...row, id: b.id } : row); } catch (er) { throw /vende/.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/036_bodega_ventas.sql.') : /bodegas/.test(er.message) && /exist|schema|relation/i.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : er; }
     await cargarEmpresa(); toast('Bodega guardada.'); route();
   });
   $('nuevaB').onclick = async () => { try { if (!reales.length) await asegurarBodega(); formB(); } catch (er) { fail(er); } };
