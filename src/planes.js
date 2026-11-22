@@ -8,10 +8,12 @@ export const MODULOS = {
   informes: { nombre: 'Informes de ventas, compras, cartera y retenciones', rutas: ['auxiliar', 'retpracticadas', 'certificados', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor'] },
   avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp', 'ercc', 'flujocaja'] },
   consulta: { nombre: 'Usuarios de solo consulta', rutas: [] },
+  // Productos y servicios (catálogo) y unidades de medida no son del módulo: todos los planes los tienen.
+  inventario: { nombre: 'Control de inventario', rutas: ['existencias', 'kardex', 'ajustesinv', 'ajusteinvnuevo', 'ajusteinveditar', 'ajusteinv', 'traslados', 'trasladonuevo', 'trasladoeditar', 'traslado', 'costoproducto', 'inventariocfg'] },
 };
 
 // Lo que todavía no existe y se anuncia aparte (no como incluido).
-export const PROXIMAMENTE = ['documento soporte y nota de ajuste electrónicos', 'cotizaciones', 'inventario', 'sedes o sucursales', 'integración por API'];
+export const PROXIMAMENTE = ['documento soporte y nota de ajuste electrónicos', 'cotizaciones', 'sedes o sucursales', 'integración por API'];
 
 export const moduloDeRuta = v => Object.keys(MODULOS).find(k => MODULOS[k].rutas.includes(v)) || null;
 export const tieneModulo = (plan, mod) => !plan || !mod || plan.modulos?.[mod] !== false;
@@ -45,6 +47,7 @@ export function incluye(p) {
   l.push(u == null ? 'Usuarios ilimitados' : `${u} usuario${u === 1 ? '' : 's'}`);
   l.push(m('avanzados') ? 'Informes avanzados, flujo de caja y exportar a Excel' : m('informes') ? 'Informes de ventas, compras, retenciones (350) y certificados' : 'Informes básicos e IVA del período (300)');
   if (m('nomina') && p.max_empleados !== 0) l.push(p.max_empleados == null ? 'Nómina sin límite de empleados' : `Nómina hasta ${p.max_empleados} empleados`);
+  if (m('inventario')) l.push('Control de inventario: existencias, kardex, bodegas y costo de ventas');
   if (m('exogena')) l.push('Medios magnéticos');
   if (m('importar')) l.push('Importar plantillas de Excel');
   if (m('consulta')) l.push('Usuarios de solo consulta');
@@ -54,7 +57,7 @@ export function incluye(p) {
 
 // Planes de la demostración (los mismos que crea 029).
 export const PLANES_DEMO = [
-  { id: 'demo-emp', nombre: 'Emprendedor', precio_mensual: 31000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 0, max_empleados: 0, modulos: { nomina: false, exogena: false, importar: false, informes: false, avanzados: false, consulta: false }, descripcion: 'Para facturar electrónicamente y llevar la contabilidad básica. 1 usuario.', activo: true, orden: 10 },
-  { id: 'demo-pyme', nombre: 'Pyme', precio_mensual: 69000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 2, max_empleados: 5, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: false, consulta: true }, descripcion: 'Suma nómina hasta 5 empleados, medios magnéticos, importar de Excel e informes de ventas y cartera. 3 usuarios.', activo: true, orden: 11 },
-  { id: 'demo-empresa', nombre: 'Empresa', precio_mensual: 119000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: null, max_empleados: null, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: true, consulta: true }, descripcion: 'Todo AGAsoft: informes avanzados, exportar a Excel, nómina y usuarios sin límite.', activo: true, orden: 12 },
+  { id: 'demo-emp', nombre: 'Emprendedor', precio_mensual: 31000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 0, max_empleados: 0, modulos: { nomina: false, exogena: false, importar: false, informes: false, avanzados: false, consulta: false, inventario: false }, descripcion: 'Para facturar electrónicamente y llevar la contabilidad básica. 1 usuario.', activo: true, orden: 10 },
+  { id: 'demo-pyme', nombre: 'Pyme', precio_mensual: 69000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 2, max_empleados: 5, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: false, consulta: true, inventario: true }, descripcion: 'Suma nómina hasta 5 empleados, medios magnéticos, importar de Excel e informes de ventas y cartera. 3 usuarios.', activo: true, orden: 11 },
+  { id: 'demo-empresa', nombre: 'Empresa', precio_mensual: 119000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: null, max_empleados: null, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: true, consulta: true, inventario: true }, descripcion: 'Todo AGAsoft: informes avanzados, exportar a Excel, nómina y usuarios sin límite.', activo: true, orden: 12 },
 ];

@@ -84,3 +84,11 @@ test('estado de resultados por centro: centros + sin centro = total', () => {
   assert.equal(Math.round(partes.reduce((a, v) => a + v, 0) * 100) / 100, total);
   assert.ok(total !== 0);
 });
+
+test('sin el módulo de inventario no hay costo de ventas automático', () => {
+  const fc = { id: 'c1', tipo: 'FC', estado: 'contabilizado', numero: 1, fecha: '2026-11-01', tercero_id: 't2', lineas: [{ producto_id: 'p1', bodega_id: '', cantidad: 5, costo: 100000, base: 500000, cuenta: '14350101', iva_pct: 0 }] };
+  const S2 = { ...S, compras: [fc], cc: cfgCC({}) };
+  assert.ok(movimientos(S2).some(m => m.origen === 'inventario'));
+  const sin = movimientos({ ...S2, inventario: false });
+  assert.ok(!sin.some(m => m.origen === 'inventario')); assert.ok(cuadra(sin));
+});

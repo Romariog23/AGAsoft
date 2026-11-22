@@ -180,7 +180,8 @@ function movimientos(S) {
   const ccEmp = Object.fromEntries((S.empleados || []).map(e => [e.tercero_id, e.cc]));
   const todos = S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param, S.tarifas, ctxC))).concat((S.nominas || []).flatMap(n => asientoNomina(n, ccEmp)))
     // Costo de ventas, devoluciones y ajustes de inventario, costeados con el método de la empresa.
-    .concat(asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param }));
+    // Sin el módulo de inventario (S.inventario === false) no hay costo automático: los productos se venden como cualquier ítem.
+    .concat(S.inventario === false ? [] : asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param }));
   // Centros de costo: cada movimiento de una cuenta del alcance se reparte según la distribución de su línea o documento.
   return aplicarCC(todos, S.cc || cfgCC(S.contabilidad)).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }
