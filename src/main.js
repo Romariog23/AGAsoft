@@ -207,20 +207,25 @@ const MENU = [
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
-  ['-', 'Informes'], ['informes', 'Todos los informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
-  ['#', 'Impuestos'], ['iva', 'IVA del período'], ['retpracticadas', 'Retenciones practicadas'], ['certificados', 'Certificados de retención'], ['exogena', 'Medios magnéticos'],
+  ['!informes', 'Informes'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogenacfg', 'Configurar medios magnéticos'],
-  ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'], ['miplan', 'Mi plan'],
+  ['!config', 'Configuración'],
 ];
+// Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
+const HUB = {
+  informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg'],
+};
 function renderNav(actual) {
   const items = [...MENU];
   // Grupos desplegables: queda abierto el del módulo actual y los que la persona dejó abiertos.
   let abiertos = []; try { abiertos = JSON.parse(localStorage.getItem('agasoft-menu') || '[]'); } catch (_) {}
+  actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const grupos = []; let g = null;
-  for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
+  for (const [k, t] of items) { if (k[0] === '!') { grupos.push({ top: k.slice(1), t }); g = null; } else if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
   $('nav').innerHTML = grupos.map(x => {
+    if (x.top) return `<a class="nav-top" href="#/${x.top}" ${x.top === actual ? 'aria-current="page"' : ''}>${x.t}</a>`;
     const links = x.l.map(([k, t]) => k === '#' ? `<span class="nav-sub" style="display:block;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 14px 2px">${t}</span>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
     if (!x.t) return links;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
