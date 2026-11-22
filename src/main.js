@@ -204,40 +204,62 @@ $('empSel').onchange = async () => {
 $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-open'); $('menuBtn').setAttribute('aria-expanded', o); };
 
 /* ---------- Navegación ---------- */
+// Menú lateral: cada módulo con su ícono; los grupos se abren con animación y muestran avisos (vencidas).
 const MENU = [
-  ['inicio', 'Inicio'],
-  ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
-  ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
-  ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
-  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
-  ['!informes', 'Informes'],
-  ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
-  ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['!config', 'Configuración'],
+  { k: 'inicio', t: 'Inicio', i: 'inicio' },
+  { t: 'Ventas', i: 'ventas', l: [['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
+  { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
+  { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
+  { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
+  { k: 'informes', t: 'Informes', i: 'informes' },
+  { t: 'Datos', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios']] },
+  { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
+  { k: 'config', t: 'Configuración', i: 'config' },
 ];
+const NAV_ICO = {
+  inicio: 'M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  ventas: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5',
+  compras: 'M6 2l-3 4v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0',
+  nomina: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  conta: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
+  informes: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  datos: 'M12 8c5 0 9-1.3 9-3s-4-3-9-3-9 1.3-9 3 4 3 9 3M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3',
+  importar: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+  config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+  car: 'M9 18l6-6-6-6',
+};
+const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg'],
 };
+// Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
+function avisosNav() {
+  if (!S.d) return {};
+  const out = {};
+  try { const n = cartera(S.d.documentos, S.d.aplicaciones).filter(x => x.saldo > 0.5 && x.diasVencida > 0).length; if (n) out.cartera = [n, `${n} factura${n === 1 ? '' : 's'} de venta vencida${n === 1 ? '' : 's'}`]; } catch (_) {}
+  try { const n = cuentasPorPagar(S.d.compras || [], hoy()).filter(x => x.saldo > 0.5 && x.diasVencida > 0).length; if (n) out.cxp = [n, `${n} cuenta${n === 1 ? '' : 's'} por pagar vencida${n === 1 ? '' : 's'}`]; } catch (_) {}
+  return out;
+}
 function renderNav(actual) {
-  const items = [...MENU];
-  // Grupos desplegables: queda abierto el del módulo actual y los que la persona dejó abiertos.
+  // Grupos: queda abierto el del módulo actual y los que la persona dejó abiertos.
   let abiertos = []; try { abiertos = JSON.parse(localStorage.getItem('agasoft-menu') || '[]'); } catch (_) {}
   actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
-  const grupos = []; let g = null;
-  for (const [k, t] of items) { if (k[0] === '!') { grupos.push({ top: k.slice(1), t }); g = null; } else if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
-  $('nav').innerHTML = grupos.map(x => {
-    if (x.top) return `<a class="nav-top" href="#/${x.top}" ${x.top === actual ? 'aria-current="page"' : ''}>${x.t}</a>`;
-    const links = x.l.map(([k, t]) => k === '#' ? `<span class="nav-sub" style="display:block;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 14px 2px">${t}</span>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
-    if (!x.t) return links;
-    const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
-    return `<details class="nav-g" data-g="${x.t}" ${open ? 'open' : ''}><summary>${x.t}</summary>${links}</details>`;
+  const av = avisosNav();
+  $('nav').innerHTML = MENU.map(x => {
+    if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
+    const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
+    const n = x.l.reduce((s, [k]) => s + (av[k]?.[0] || 0), 0);
+    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}><span>${t}</span>${av[k] ? `<span class="nav-badge" title="${av[k][1]}">${av[k][0]}</span>` : ''}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : '<span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
+    return `<div class="nav-g${activo ? ' activo' : ''}" data-g="${x.t}" ${open ? 'data-open' : ''}><button type="button" class="nav-it" aria-expanded="${open}">${navIco(x.i)}<span>${x.t}</span>${n ? `<span class="nav-badge" title="Vencidas" ${open ? 'hidden' : ''}>${n}</span>` : ''}${navIco('car', 'nav-car')}</button><div class="nav-sub"><div>${links}</div></div></div>`;
   }).join('');
-  $('nav').querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => {
-    const l = [...$('nav').querySelectorAll('details[open]')].map(x => x.dataset.g);
+  $('nav').querySelectorAll('.nav-g>button').forEach(b => b.onclick = () => {
+    const g = b.parentElement, o = g.toggleAttribute('data-open'); b.setAttribute('aria-expanded', o);
+    const badge = b.querySelector('.nav-badge'); if (badge) badge.hidden = o;
+    const l = [...$('nav').querySelectorAll('.nav-g[data-open]')].map(x => x.dataset.g);
     try { localStorage.setItem('agasoft-menu', JSON.stringify(l)); } catch (_) {}
-  }));
+  });
 }
 window.addEventListener('hashchange', route);
 function route() {
