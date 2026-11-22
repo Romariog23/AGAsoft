@@ -1,8 +1,8 @@
 // Pantallas de Operación (módulo opcional por empresa). La lógica está en operacion.js; aquí solo se pinta y se guarda.
 // main.js entrega sus utilidades con iniciarOperacion(ctx) para no duplicarlas.
-import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante } from './operacion.js';
+import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante, facturables, itemsDeGrupo, cotizacionVigente } from './operacion.js';
 import { totalesCompra, erroresCompra } from './compras.js';
-import { enLetras } from './calc.js';
+import { enLetras, totales } from './calc.js';
 
 let X = null; // { S, store, $, esc, money, num, fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail, cargarEmpresa, route, guardarContab, emp }
 export const iniciarOperacion = ctx => { X = ctx; };
@@ -249,9 +249,10 @@ function tabSalidas(box, t, c) {
     <div class="grid2">${X.campoSel('pago', 'Pago a la persona', SALIDAS_PAGO, c.salidas.pago)}${X.campoSel('cobro', 'Cobro al cliente', SALIDAS_COBRO, c.salidas.cobro)}</div>
     <div class="grid2"><div><label for="f_cta">Cuenta del documento soporte cuando el ítem de servicio no tiene una</label><select id="f_cta" name="cuenta"><option value="">Escoge una cuenta de costo o gasto</option>${ctas.map(x => `<option value="${x.codigo}" ${x.codigo === c.salidas.cuenta ? 'selected' : ''}>${x.codigo} ${esc(x.nombre)}</option>`).join('')}</select></div>
       ${X.campo('titulo', 'Título del volante', c.salidas.titulo || 'Horas adicionales', 'maxlength="60"')}</div>
-    <p class="hint">El pago se genera desde el corte (Registrar › Cortes): un documento soporte por persona con el ítem de servicio de cada tarifa. La factura desde cotización llega en la siguiente entrega.</p>
+    <div class="grid2">${X.campoSel('cobrar', 'Al cliente se le cobra', [['cantidad', 'La cantidad registrada (horómetro, km…)'], ['pagadas', 'La cantidad pagada a la persona']], c.salidas.cobrar || 'cantidad')}<div></div></div>
+    <p class="hint">El pago se genera desde el corte (Registrar › Cortes de pago): un documento soporte por persona con el ítem de servicio de cada tarifa. El cobro, desde Registrar › Facturar: una factura en borrador por cotización (Ventas › Cotizaciones) o, sin cotización, con la tarifa de cobro.</p>
     <div class="row end"><button class="primary">Guardar</button></div></form>`;
-  X.$('opS').onsubmit = async ev => { ev.preventDefault(); const fd = new FormData(ev.target); try { await guardarCfg(t, { config: { salidas: { ...c.salidas, pago: fd.get('pago'), cobro: fd.get('cobro'), cuenta: fd.get('cuenta') || '', titulo: String(fd.get('titulo') || '').trim() } } }, 'Salidas guardadas.'); } catch (e) { X.fail(e); } };
+  X.$('opS').onsubmit = async ev => { ev.preventDefault(); const fd = new FormData(ev.target); try { await guardarCfg(t, { config: { salidas: { ...c.salidas, pago: fd.get('pago'), cobro: fd.get('cobro'), cuenta: fd.get('cuenta') || '', titulo: String(fd.get('titulo') || '').trim(), cobrar: fd.get('cobrar') || 'cantidad' } } }, 'Salidas guardadas.'); } catch (e) { X.fail(e); } };
 }
 
 /* ---------- Registrar ---------- */
@@ -268,7 +269,7 @@ export function vOpRegistros(m, id, q) {
   const avDe = new Map(); for (const a of av) avDe.set(a.registro_id, [...(avDe.get(a.registro_id) || []), a.texto]);
   const linea = l => l.regla ? `${esc(l.regla)} · ${cant(l.cantidad, c.unidad)}` : !l.tarifa ? `Sin tarifa · ${cant(l.cantidad, c.unidad)}` : l.modo === 'fijo' ? `Pago fijo${l.tarifa.nota ? ' · ' + esc(l.tarifa.nota) : ''} · ${cant(l.cantidad, c.unidad)}` : l.modo === 'registro' ? `${l.registros} × ${money(l.tarifa.valor)}` : `${cant(l.cantidad, c.unidad)} × ${money(l.tarifa.valor)}`;
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/operacion">← Operación</a><h2>${esc(t.nombre)}</h2><p class="sub">Estos registros no generan movimientos contables.</p></div>
-    <div class="row"><a class="btn ghost" href="#/opcfg/${t.id}">Configurar</a><a class="btn" href="#/opcortes/${t.id}">Cortes de pago</a><button class="primary" id="opNuevo">+ Registro</button></div></header>
+    <div class="row"><a class="btn ghost" href="#/opcfg/${t.id}">Configurar</a>${c.salidas.pago !== 'ninguno' ? `<a class="btn" href="#/opcortes/${t.id}">Cortes de pago</a>` : ''}${c.salidas.cobro === 'fv' ? `<a class="btn" href="#/opfacturar/${t.id}">Facturar</a>` : ''}<button class="primary" id="opNuevo">+ Registro</button></div></header>
   <section class="panel row op-fil"><div><label for="opD">Desde</label><input type="date" id="opD" value="${f.desde}"></div><div><label for="opH">Hasta</label><input type="date" id="opH" value="${f.hasta}"></div>
     <div><label for="opP">${esc(c.persona)}</label><select id="opP"><option value="">Todos</option>${X.opts([...new Set(todos.map(r => r.tercero_id))].map(i => [i, nomT(i)]).sort((a, b) => a[1].localeCompare(b[1])), f.p)}</select></div></section>
   <div class="kpis"><div class="kpi"><span>Registros</span><b>${regs.length}</b></div><div class="kpi"><span>Cantidad pagada</span><b>${cant(q2, c.unidad)}</b></div><div class="kpi"><span>Por pagar</span><b>${money(total)}</b></div><div class="kpi ${av.length ? 'op-warn' : ''}"><span>Avisos</span><b>${av.length}</b></div></div>
@@ -277,7 +278,7 @@ export function vOpRegistros(m, id, q) {
     ${regs.map(r => { const k = calc.get(r.id), dia = NOMBRE_DIA[k.dia]; return `<tr class="${k.dia === 'domingo' || k.dia === 'festivo' ? 'op-fest' : ''}"><td class="nowrap">${X.fFecha(r.fecha)}</td><td>${dia ? `<span class="tag ${k.dia === 'sabado' ? '' : 'demo'}">${dia}</span>` : ''}</td><td>${esc(nomT(r.tercero_id))}${avDe.has(r.id) ? ` <span class="tag demo" title="${esc(avDe.get(r.id).join(' '))}">Revisar</span>` : ''}${r.nota ? `<br><small class="hint">${esc(r.nota)}</small>` : ''}</td>
       ${cols.map(fc => `<td>${celda(r, fc)}</td>`).join('')}<td class="r mono">${cant(k.cantidad)}</td>${c.editar_pagadas ? `<td class="r mono">${k.pagadas !== k.cantidad ? '<b>' + cant(k.pagadas) + '</b>' : cant(k.pagadas)}</td>` : ''}
       <td class="r mono">${k.fijo ? '<span class="hint">Pago fijo</span>' : money(k.valor)}${k.recargos.length ? `<br><small class="hint">incluye ${k.recargos.map(x => esc(x.nombre.toLowerCase())).join(', ')}</small>` : ''}</td>
-      <td class="r nowrap">${r.cierre_pago || r.cierre_cobro ? '<span class="tag ok">Pagado</span>' : corteDe(r)?.estado === 'cerrado' ? '<span class="tag">En corte cerrado</span>' : `<button class="sm" data-er="${r.id}">Editar</button><button class="sm ghost" data-cr="${r.id}" title="Copiar para el día siguiente">Copiar</button><button class="sm ghost" data-br="${r.id}">Borrar</button>`}</td></tr>`; }).join('') || `<tr><td colspan="${6 + cols.length}" class="muted">No hay registros en estas fechas.</td></tr>`}</tbody></table></div></section>
+      <td class="r nowrap">${r.cierre_pago || r.cierre_cobro ? `${r.cierre_pago ? '<span class="tag ok">Pagado</span>' : ''}${r.cierre_cobro ? ' <span class="tag ok">Facturado</span>' : ''}` : corteDe(r)?.estado === 'cerrado' ? '<span class="tag">En corte cerrado</span>' : `<button class="sm" data-er="${r.id}">Editar</button><button class="sm ghost" data-cr="${r.id}" title="Copiar para el día siguiente">Copiar</button><button class="sm ghost" data-br="${r.id}">Borrar</button>`}</td></tr>`; }).join('') || `<tr><td colspan="${6 + cols.length}" class="muted">No hay registros en estas fechas.</td></tr>`}</tbody></table></div></section>
   ${res.length ? `<section class="panel stack"><header class="vhead"><div><h3>Resumen por ${esc(c.persona.toLowerCase())}</h3><p class="hint">Lo que será el volante de cada persona en el corte.</p></div><b class="mono">${money(total)}</b></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(c.persona)}</th><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
     ${res.sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id))).map(p => p.lineas.map((l, i) => `<tr${i ? '' : ' class="op-p"'}><td>${i ? '' : `<b>${esc(nomT(p.tercero_id))}</b>`}</td><td>${linea(l)}</td><td class="r mono">${money(l.valor)}</td></tr>`).join('') + `<tr class="grp"><td></td><td>Total ${esc(nomT(p.tercero_id))}</td><td class="r mono"><b>${money(p.total)}</b></td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
@@ -435,6 +436,62 @@ async function generarDS(c, t, lista) {
     }
     await X.cargarEmpresa(); X.toast(arm.length === 1 ? "Documento soporte generado y contabilizado." : `${arm.length} documentos soporte generados y contabilizados.`); X.route();
   } catch (e) { await X.cargarEmpresa(); X.fail(faltaSql(e)); X.route(); }
+}
+
+/* ---------- Facturar (cobro al cliente) ---------- */
+// Junta las horas sin facturar de un rango de fechas: una factura en borrador por cotización (o por cliente con tarifa de cobro).
+// El rango es libre: no depende de los cortes de pago (se puede pagar cada semana y facturar cada quince días).
+const filtrosFac = {};
+const docVenta = id => (X.S.d.documentos || []).find(d => d.id === id);
+export function vOpFacturar(m, id, q) {
+  const t = tipoById(id); if (!t) { location.hash = '#/operacion'; return; }
+  const { esc, money } = X, cfg = cfgTipo(t), todos = registrosDe(t);
+  const sinFac = todos.filter(r => !r.cierre_cobro).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const f = filtrosFac[id] = { desde: q?.get('desde') || filtrosFac[id]?.desde || sinFac[0]?.fecha || mesActual(), hasta: q?.get('hasta') || filtrosFac[id]?.hasta || X.hoy(), cot: q?.has('cot') ? q.get('cot') : filtrosFac[id]?.cot || '' };
+  const cotsT = (X.S.d.cotizaciones || []).filter(c => c.op_tipo_id === t.id);
+  const regs = sinFac.filter(r => r.fecha >= f.desde && r.fecha <= f.hasta);
+  const res = facturables(regs, t, { cotizaciones: X.S.d.cotizaciones || [], tarifas: tarifasDe(t), ...ctxCC(), productos: X.S.d.productos || [] });
+  const grupos = res.grupos.filter(g => !f.cot || g.cotizacion?.id === f.cot).sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id)));
+  const periodo = perTxt(f);
+  // Facturas ya hechas desde Operación (para ver su estado y liberar las que se anularon o eliminaron).
+  const porDoc = new Map(); for (const r of todos.filter(r => r.cierre_cobro)) porDoc.set(r.cierre_cobro, [...(porDoc.get(r.cierre_cobro) || []), r]);
+  const hechas = [...porDoc.entries()].map(([did, rs]) => ({ id: did, doc: docVenta(did), regs: rs })).sort((a, b) => String(b.doc?.fecha || '').localeCompare(String(a.doc?.fecha || '')));
+  const nomDoc = d => d ? (d.estado === 'borrador' ? 'Factura en borrador' : `Factura ${d.prefijo || ''}${d.numero || ''}`) : 'Factura eliminada';
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/opregistros/${t.id}">← ${esc(t.nombre)}</a><h2>Facturar</h2><p class="sub">Junta lo registrado y aún no facturado en las fechas que escojas. Cada cotización arma su factura en borrador; la revisas y la envías a la DIAN desde Ventas.</p></div><a class="btn ghost" href="#/cotizaciones">Cotizaciones</a></header>
+  ${cfg.salidas.cobro !== 'fv' ? `<section class="panel callout">Este tipo no está configurado para facturar. Actívalo en <a href="#/opcfg/${t.id}">Configurar › Salidas</a> (Cobro al cliente: Factura de venta).</section>` : ''}
+  <section class="panel row op-filtros"><div><label for="fcD">Desde</label><input type="date" id="fcD" value="${f.desde}"></div><div><label for="fcH">Hasta</label><input type="date" id="fcH" value="${f.hasta}"></div>
+    <div><label for="fcC">Cotización</label><select id="fcC"><option value="">Todas</option>${cotsT.map(c => `<option value="${c.id}" ${c.id === f.cot ? 'selected' : ''}>N.º ${c.numero} · ${esc(nomT(c.tercero_id))}${cotizacionVigente(c) ? '' : ' (' + c.estado + ')'}</option>`).join('')}</select></div></section>
+  ${grupos.map((g, gi) => `<section class="panel stack op-fac"><header class="vhead"><div><h3>${esc(nomT(g.tercero_id))}</h3><p class="hint">${g.cotizacion ? `<a href="#/cotizacion/${g.cotizacion.id}">Cotización N.º ${g.cotizacion.numero}</a>` : 'Tarifa de cobro'} · ${g.registros.length} registro${g.registros.length === 1 ? '' : 's'} del ${X.fFecha(g.desde)} al ${X.fFecha(g.hasta)}</p></div><button class="primary" data-g="${gi}" ${cfg.salidas.cobro === 'fv' && g.total > 0 ? '' : 'disabled'}>Crear factura en borrador</button></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Descripción</th><th class="r">Cantidad</th><th class="r">Precio</th><th class="r">IVA</th><th class="r">Valor</th></tr></thead><tbody>
+    ${g.lineas.map(l => `<tr><td>${esc(l.descripcion)}${l.registros ? ` <span class="muted">· ${l.registros} reg.</span>` : ''}</td><td class="r mono">${cant(l.cantidad, l.modo === 'unidad' ? cfg.unidad : '')}</td><td class="r mono">${money(l.precio)}</td><td class="r">${l.iva_pct} %</td><td class="r mono">${money(l.valor)}</td></tr>`).join('')}
+    <tr class="strong"><td colspan="4">Subtotal (antes de IVA)</td><td class="r mono">${money(g.total)}</td></tr></tbody></table></div></section>`).join('') || `<section class="panel muted">${regs.length ? 'Ningún registro de estas fechas tiene precio de cobro.' : 'No hay registros sin facturar en estas fechas.'}</section>`}
+  ${res.sinPrecio.length && !f.cot ? `<section class="panel stack"><h3>Sin precio de cobro (${res.sinPrecio.length})</h3><p class="hint">Crea una <a href="#/cotizacion/nueva">cotización</a> para esa obra o equipo, o una tarifa de cobro en <a href="#/opcfg/${t.id}">Configurar › Tarifas</a>. Mientras tanto quedan sin facturar.</p>
+    <div class="tbl-wrap"><table class="tbl"><tbody>${res.sinPrecio.map(x => `<tr><td>${X.fFecha(x.registro.fecha)}</td><td>${esc(nomT(x.registro.tercero_id))}</td><td>${cfg.campos.filter(c => c.tipo === 'elemento').map(c => esc(elem(x.registro.datos?.[c.k])?.nombre || '')).filter(Boolean).join(' · ')}</td><td class="r mono">${cant(x.cantidad, cfg.unidad)}</td><td class="muted">${esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
+  ${hechas.length ? `<details class="panel"><summary>Facturas hechas desde aquí (${hechas.length})</summary><div class="tbl-wrap"><table class="tbl"><tbody>${hechas.map(h => `<tr><td>${h.doc ? `<a href="#/${h.doc.estado === 'borrador' ? 'editar' : 'doc'}/${h.id}">${esc(nomDoc(h.doc))}</a>` : esc(nomDoc(h.doc))}${h.doc?.estado === 'anulado' ? ' <span class="tag bad">Anulada</span>' : ''}</td><td>${esc(h.doc ? nomT(h.doc.tercero_id) : '')}</td><td>${h.regs.length} registros</td><td class="r mono">${h.doc ? money(h.doc.total) : ''}</td><td class="r">${!h.doc || h.doc.estado === 'anulado' ? `<button class="sm" data-lib="${h.id}">Liberar registros</button>` : ''}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+  const ir = () => { location.hash = `#/opfacturar/${t.id}?desde=${X.$('fcD').value}&hasta=${X.$('fcH').value}&cot=${X.$('fcC').value}`; };
+  ['fcD', 'fcH', 'fcC'].forEach(k => X.$(k).onchange = ir);
+  m.querySelectorAll('[data-g]').forEach(b => b.onclick = () => crearFactura(grupos[Number(b.dataset.g)], t, periodo));
+  m.querySelectorAll('[data-lib]').forEach(b => b.onclick = async () => {
+    try { await guardarVarios('op_registros', porDoc.get(b.dataset.lib).map(r => ({ id: r.id, cierre_cobro: null }))); await X.cargarEmpresa(); X.toast('Registros liberados: se pueden volver a facturar.'); X.route(); } catch (e) { X.fail(e); }
+  });
+}
+async function crearFactura(g, t, periodo) {
+  const { esc, money } = X, tr = terc(g.tercero_id); if (!tr) return X.toast('El cliente no existe.', true);
+  const conCC = X.emp()?.contabilidad?.cc?.activo === true, contab = X.emp()?.contabilidad || {};
+  const items = itemsDeGrupo(g, { periodo, conCC, bodega: X.bodegaVenta });
+  const ret = { retefuente_pct: X.num(tr.retefuente_pct), reteiva_pct: X.num(tr.reteiva_pct), reteica_milaje: X.num(tr.reteica_milaje) };
+  const { porTarifa: _p, ...tt } = totales(items, ret);
+  const numFV = el => (X.S.d.numeraciones || []).some(x => x.tipo === 'FV' && x.activa && !!x.electronica === el);
+  const electronica = contab.factura_normal !== true || (!numFV(false) && numFV(true));
+  const plazo = Number(tr.plazo_dias) || 0;
+  const doc = { empresa_id: X.S.eid, tipo: 'FV', fecha: X.hoy(), tercero_id: tr.id, forma_pago: plazo > 0 ? 'credito' : 'contado', vence: plazo > 0 ? X.sumarDias(X.hoy(), plazo) : null, medio_pago: 'transferencia', ref_id: null, concepto: '',
+    observaciones: `${g.cotizacion ? `Cotización N.º ${g.cotizacion.numero} · ` : ''}${t.nombre} · ${periodo}`, anticipo: 0, electronica, ...ret, ...tt };
+  if (!await X.confirmar('Crear factura en borrador', `Factura ${electronica ? 'electrónica' : 'normal'} para <b>${esc(tr.nombre)}</b> por ${money(tt.total)} (${items.length} línea${items.length === 1 ? '' : 's'}). Los ${g.registros.length} registros quedan facturados con ella. La revisas y la emites desde Ventas; si la eliminas, aquí puedes liberarlos.`, 'Crear borrador')) return;
+  try {
+    const d = await X.store.saveDoc(doc, items, []);
+    await guardarVarios('op_registros', g.registros.map(r => ({ id: r.id, cierre_cobro: d.id })));
+    await X.cargarEmpresa(); X.toast('Factura en borrador creada. Revísala y emítela.'); location.hash = '#/editar/' + d.id;
+  } catch (e) { await X.cargarEmpresa(); X.fail(e); X.route(); }
 }
 
 /* ---------- Impresión ---------- */

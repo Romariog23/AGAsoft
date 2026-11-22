@@ -106,3 +106,29 @@ test('corte: elegibles, volantes con centro de costo y documento soporte', () =>
   assert.equal(ok.compra.lineas[1].cc[0].cc1, 'm1');
   assert.equal(compra.tipo, 'DS');
 });
+
+import { facturables, cotizacionPara, itemsDeGrupo, erroresCotizacion } from '../src/operacion.js';
+test('cobro: la cotización fija el precio por obra y equipo; sin cotización, la tarifa de cobro', () => {
+  const cot = { id: 'q1', estado: 'aceptada', op_tipo_id: 'maq', tercero_id: 'strabag', criterios: { obra: 'guac' }, fecha: '2026-11-01',
+    lineas: [{ descripcion: 'Hora bulldozer', criterios: { equipo: 'bull' }, precio: 150000, iva_pct: 19, producto_id: 'ph' }, { descripcion: 'Movilización', op: false, precio: 500000 }] };
+  const regs = [reg('a', '2026-11-14', 'waldy', 'bull', 'guac', 125.3, 131.3), reg('b', '2026-11-15', 'waldy', 'bull', 'guac', 131.3, 135.9), reg('c', '2026-11-16', 'waldy', 'bull', 'guac', 135.9, 140.3),
+    reg('x', '2026-11-16', 'jose', 'exc', 'guac', 1, 3), reg('j', '2026-11-13', 'jose', 'exc', 'fugon', 8301.8, 8312.5), reg('y', '2026-11-13', 'eliecer', 'vibro', 'otra', 1, 2), { ...reg('z', '2026-11-12', 'waldy', 'bull', 'guac', 117.5, 125.3), cierre_cobro: 'fv1' }];
+  assert.equal(cotizacionPara(regs[0], [cot]).id, 'q1');
+  assert.equal(cotizacionPara(regs[4], [cot]), null);
+  const tarCobro = [...tarifas, { id: 'cj', tipo_id: 'maq', uso: 'cobro', criterios: { equipo: 'exc' }, modo: 'unidad', valor: 120000, producto_id: 'pe' }];
+  const elementos = [{ id: 'fugon', tercero_id: 'cli2', centro_id: 'o2' }, { id: 'bull', centro_id: 'm1' }], centros = [{ id: 'm1', nivel: 1 }, { id: 'o2', nivel: 2 }];
+  const { grupos, sinPrecio } = facturables(regs, tipo, { cotizaciones: [cot], tarifas: tarCobro, elementos, centros, productos: [{ id: 'pe', nombre: 'Hora excavadora', iva_pct: 19, codigo: 'HE' }] });
+  const g = grupos.find(x => x.cotizacion?.id === 'q1');
+  assert.equal(g.tercero_id, 'strabag'); assert.equal(g.lineas[0].cantidad, 15); assert.equal(g.lineas[0].valor, 2250000);
+  assert.deepEqual(g.registros.map(r => r.id).sort(), ['a', 'b', 'c', 'x']); // el ya facturado no vuelve
+  assert.deepEqual(g.lineas[0].cc, [{ cc1: 'm1', pct: 100 }]);
+  // En la obra de la cotización, la excavadora no tiene línea pero sí tarifa de cobro: entra a la misma factura.
+  assert.equal(g.lineas.length, 2); assert.equal(g.total, 2250000 + 240000);
+  const t = grupos.find(x => x.tercero_id === 'cli2');
+  assert.equal(t.cotizacion, null); assert.equal(t.lineas[0].cantidad, 10.7); assert.equal(t.lineas[0].descripcion, 'Hora excavadora'); assert.equal(t.total, 1284000);
+  assert.equal(sinPrecio.length, 1); assert.equal(sinPrecio[0].registro.id, 'y'); assert.match(sinPrecio[0].motivo, /Sin cotización/);
+  const items = itemsDeGrupo(t, { periodo: '1 al 15 nov', conCC: true });
+  assert.equal(items[0].descripcion, 'Hora excavadora · 1 al 15 nov'); assert.equal(items[0].iva_pct, 19); assert.equal(items[0].cc[0].cc2, 'o2');
+  assert.ok(erroresCotizacion({ lineas: [] }).length >= 3);
+  assert.deepEqual(erroresCotizacion(cot), []);
+});
