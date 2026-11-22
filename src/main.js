@@ -13,7 +13,8 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, avisoCupo, planDesde, incluye } from './planes.js';
+import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION } from './informes.js';
+import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
@@ -52,9 +53,9 @@ $('lpEntrar').onclick = () => irForm(false);
 $('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
 // Planes públicos (si la base los deja ver sin sesión: supabase/022_planes_publicos.sql).
 (async () => { try { const ps = await store.planesActivos(); if (!ps?.length) return;
-  $('lpPlanesList').innerHTML = ps.map((p, i) => `<article class="lp-plan${ps.length > 2 && i === 1 ? ' dest' : ''}">${ps.length > 2 && i === 1 ? '<span class="tag el">El más escogido</span>' : ''}<h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b><span class="muted">al mes${p.por_empresa ? ' por empresa' : ''}</span>
-    <ul class="lp-inc">${incluye(p).map(t => `<li>${esc(t)}</li>`).join('')}</ul><p class="hint">${esc(p.descripcion || '')}</p><button type="button" class="${ps.length > 2 && i === 1 ? 'primary' : ''}" data-prueba>Empezar 15 días gratis</button></article>`).join('');
+  $('lpPlanesList').innerHTML = ps.map((p, i) => tarjetaPlan(p, ps.length > 2 && i === 1, true)).join('');
   $('lpPlanesList').querySelectorAll('[data-prueba]').forEach(b => b.onclick = () => irForm(true));
+  if (!$('lpProx')) $('lpPlanesList').insertAdjacentHTML('afterend', `<p class="hint" id="lpProx"><b>Próximamente:</b> ${PROXIMAMENTE.join(', ')}.</p>`);
   $('lpPlanes').hidden = false; $('lpNavPlanes').hidden = false; } catch (_) {} })();
 $('aToggle').onclick = () => {
   registro = !registro;
@@ -120,7 +121,7 @@ async function iniciar() {
 function diasPrueba(f) { return f ? Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5)) : null; }
 function opcionesPlan(planes, sel) {
   return `<div class="planes-op" role="radiogroup" aria-label="Planes">${planes.map(p => `<label class="plan-op"><input type="radio" name="plan" value="${p.id}" ${p.id === sel ? 'checked' : ''}>
-    <span><b>${esc(p.nombre)}</b> · <span class="mono">${money(p.precio_mensual)}</span> al mes<br><small class="muted">${esc(p.descripcion)}</small></span></label>`).join('') || '<p class="muted">No hay planes disponibles. Comunícate con AGAsoft.</p>'}</div>`;
+    <span><b>${esc(p.nombre)}</b> · <span class="mono">${money(p.precio_mensual)}</span> al mes + IVA${p.por_empresa ? ' por empresa' : ''}<br><small class="muted">${esc(p.descripcion)}</small></span></label>`).join('') || '<p class="muted">No hay planes disponibles. Comunícate con AGAsoft.</p>'}</div>`;
 }
 async function pedirPlan(cont) {
   const id = cont.querySelector('input[name=plan]:checked')?.value;
@@ -205,10 +206,12 @@ const MENU = [
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
-  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
+  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
+  ['-', 'Informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['#', 'Impuestos'], ['iva', 'IVA del período'], ['retpracticadas', 'Retenciones practicadas'], ['certificados', 'Certificados de retención'], ['exogena', 'Medios magnéticos'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
+  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogenacfg', 'Configurar medios magnéticos'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'], ['miplan', 'Mi plan'],
 ];
 function renderNav(actual) {
@@ -218,7 +221,7 @@ function renderNav(actual) {
   const grupos = []; let g = null;
   for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
   $('nav').innerHTML = grupos.map(x => {
-    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
+    const links = x.l.map(([k, t]) => k === '#' ? `<span class="nav-sub" style="display:block;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 14px 2px">${t}</span>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
     if (!x.t) return links;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
     return `<details class="nav-g" data-g="${x.t}" ${open ? 'open' : ''}><summary>${x.t}</summary>${links}</details>`;
@@ -287,6 +290,9 @@ function route() {
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
+    if (v === 'iva') return vIva(m);
+    if (v === 'retpracticadas') return vRetPracticadas(m);
+    if (v === 'certificados') return vCertificados(m, q.get('t'));
     vInicio(m);
   } catch (e) { fail(e); }
 }
@@ -1107,13 +1113,11 @@ function vHabilitacion(m) {
   <section class="panel stack"><h3>1. Activa tu cuenta en Factus</h3><ol class="steps-list">
     <li>Pide la activación a Factus con los documentos de la empresa: <b>Cámara de Comercio</b> de menos de 30 días, <b>cédula del representante legal</b>, <b>RUT</b> y la <b>resolución de numeración</b> autorizada por la DIAN.</li>
     <li>Factus hace la habilitación ante la DIAN con tu NIT y el certificado de firma. Las pruebas van en el ambiente de habilitación y <b>no tocan tu contabilidad</b>.</li>
-    <li>Factus te entrega el <b>correo y la contraseña</b> de tu cuenta (y, si aplica, el <b>client_id</b> y el <b>client_secret</b>). Escríbelos en el paso 2.</li></ol></section>
+    <li>Factus te entrega el <b>correo y la contraseña</b> de tu cuenta. Escríbelos en el paso 2. Lo demás de la conexión ya lo tiene AGAsoft.</li></ol></section>
   <section class="panel stack"><h3>2. Conecta AGAsoft con tu cuenta de Factus</h3>
     <div class="grid2"><div><label for="hAmb">Ambiente</label><select id="hAmb"><option value="pruebas">Pruebas (sandbox de Factus)</option><option value="produccion">Producción (facturas reales)</option></select></div>
       <div><label for="hUs">Correo de la cuenta</label><input id="hUs" type="email" value="${esc(h.usuario || '')}" autocomplete="off"></div></div>
-    <div class="grid3"><div><label for="hPw">Contraseña</label><input id="hPw" type="password" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : ''}"></div>
-      <div><label for="hCi">Client ID</label><input id="hCi" class="mono" autocomplete="off" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div>
-      <div><label for="hCs">Client secret</label><input id="hCs" type="password" class="mono" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : 'Lo da Factus'}"></div></div>
+    <div class="grid2"><div><label for="hPw">Contraseña</label><input id="hPw" type="password" autocomplete="new-password" placeholder="${h.usuario ? '(sin cambios)' : ''}"></div></div>
     <div class="row"><button class="primary" id="hGuardar">Guardar y probar</button>${h.usuario ? '<button id="hProbar">Volver a probar</button>' : ''}</div>
     <p class="hint">Las credenciales se guardan en el servidor y no se vuelven a mostrar. Deja en blanco lo que no cambias.</p></section>
   <section class="panel stack"><h3>3. Estado</h3>
@@ -1129,7 +1133,7 @@ function vHabilitacion(m) {
     try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡Listo! Tu empresa ya factura electrónicamente.'); else if (r.hab?.estado === 'error') toast(r.hab.mensaje, true); vHabilitacion(m); }
     catch (err) { fail(err); b.disabled = false; b.textContent = t; }
   };
-  $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value, client_id: $('hCi').value.trim(), client_secret: $('hCs').value });
+  $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value });
   if ($('hProbar')) $('hProbar').onclick = () => accion('hProbar', 'probar');
 }
 
@@ -1293,7 +1297,9 @@ function vCartera(m) {
     descargar(`cartera-${emp().nit}-${hoy()}.csv`, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   };
 }
-function descargar(nombre, texto) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function descargar(nombre, texto, reporte = true) {
+  if (reporte && !tieneModulo(S.plan, 'avanzados')) return fail(new Error('Exportar informes a Excel está incluido en el plan Empresa. Mira Mi plan.'));
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 
 /* ---------- Clientes ---------- */
 // Partes del nombre de un tercero viejo que solo tenía el nombre completo.
@@ -1521,7 +1527,8 @@ async function vUsuarios(m) {
     <table class="tbl"><tbody>${S.d.miembros.map(x => `<tr><td>${esc(x.correo)}</td><td>${x.rol === 'consulta' ? 'Consulta' : 'Responsable'}</td><td class="r"><button class="ghost" data-delm="${x.id}">Quitar</button></td></tr>`).join('') || '<tr><td class="muted">Solo tú tienes acceso.</td></tr>'}</tbody></table></section>` : '<section class="panel"><p class="muted">En el modo de demostración no hay usuarios. Al entrar con tu cuenta puedes dar acceso a tu equipo.</p></section>'}
   ${adm ? '<section class="panel stack"><header class="vhead"><h3>Todas las cuentas de AGAsoft</h3><a class="btn primary" href="/admin">Abrir panel de planes y uso</a></header><p class="hint">Solo lo ve el administrador. Los planes, los límites y el uso se manejan en /admin.</p><div id="lst"><p class="muted">Cargando…</p></div></section>' : ''}`;
   if ($('addM')) $('addM').onclick = () => dialogo(`<h2>Dar acceso</h2>${campo('correo', 'Correo de la persona', '', 'type="email" required')}
-    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ['consulta', 'Consulta: solo ve']], 'responsable')}
+    ${campoSel('rol', 'Permiso', [['responsable', 'Responsable: crea y emite documentos'], ...(tieneModulo(S.plan, 'consulta') ? [['consulta', 'Consulta: solo ve']] : [])], 'responsable')}
+    ${tieneModulo(S.plan, 'consulta') ? '' : '<p class="hint">Los usuarios de solo consulta están desde el plan Pyme.</p>'}
     <p class="hint">La persona debe tener cuenta aprobada en AGAsoft con ese mismo correo.</p>${pie('Dar acceso')}`, async fd => {
     await store.save('miembros', { empresa_id: e.id, correo: fd.get('correo').trim().toLowerCase(), rol: fd.get('rol') }); await cargarEmpresa(); route();
   });
@@ -2531,6 +2538,7 @@ function vBalance(m) {
   $('niv').onchange = () => { balOpc.nivel = $('niv').value; pintar(); };
   $('bter').onchange = () => { balOpc.tercero = $('bter').value; pintar(); };
   // Para ver los terceros hay que llegar al nivel auxiliar.
+  sinModulo('bdet', 'informes', () => { balOpc.detalle = ''; });
   $('bdet').onchange = () => { balOpc.detalle = $('bdet').value; if (balOpc.detalle) { balOpc.nivel = '8'; $('niv').value = '8'; } pintar(); };
   $('csv').onclick = () => {
     const n = Number(balOpc.nivel), filas = [['Código', 'Cuenta', 'Tercero', 'Identificación', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']];
@@ -2598,6 +2606,7 @@ function filtrosInf(pintar) {
   $('ninf').onchange = () => { infOpc.nivel = $('ninf').value; pintar(); };
   $('iter').onchange = () => { infOpc.tercero = $('iter').value; pintar(); };
   // Los terceros van en el último nivel: en rubros NIIF se ven al abrir el rubro; en niveles del PUC se pasa a auxiliar.
+  sinModulo('idet', 'informes', () => { infOpc.detalle = ''; });
   $('idet').onchange = () => { infOpc.detalle = $('idet').value; if (infOpc.detalle && infOpc.nivel !== '0') { infOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
 }
 const movsInf = (desde, hasta) => { const ms = movs().filter(x => !infOpc.tercero || x.tercero_id === infOpc.tercero); infCtx = { ms, desde, hasta }; return ms; };
@@ -2649,6 +2658,113 @@ function vEr(m) {
   };
   filtrosInf(pintar);
   pintar();
+}
+
+/* ---------- Informes de impuestos ---------- */
+// Período escogido (año, tipo y número). Se recuerda en el navegador.
+const PER = (() => { const h = hoy(); let tipo = 'bimestral'; try { tipo = localStorage.getItem('agasoft-periodo-iva') || tipo; } catch (_) {} if (!PERIODOS_IVA[tipo]) tipo = 'bimestral'; return { anio: +h.slice(0, 4), tipo, n: periodoDe(h, tipo), mes: +h.slice(5, 7) }; })();
+const NOM_PER = { bimestral: ['Ene-Feb', 'Mar-Abr', 'May-Jun', 'Jul-Ago', 'Sep-Oct', 'Nov-Dic'], cuatrimestral: ['Ene-Abr', 'May-Ago', 'Sep-Dic'] };
+function selPeriodo(id, tipos, onChange) {
+  const anios = [...new Set([PER.anio, +hoy().slice(0, 4), +hoy().slice(0, 4) - 1, +hoy().slice(0, 4) - 2])].sort((a, b) => b - a);
+  const mensual = tipos.length === 1 && tipos[0] === 'mensual';
+  setTimeout(() => {
+    const box = $(id); if (!box) return;
+    box.querySelectorAll('select').forEach(sl => sl.onchange = () => {
+      const k = sl.name; PER[k] = +sl.value || sl.value;
+      if (k === 'tipo') { PER.n = 1; try { localStorage.setItem('agasoft-periodo-iva', PER.tipo); } catch (_) {} box.outerHTML = selPeriodo(id, tipos, onChange); }
+      onChange();
+    });
+  });
+  return `<div class="row filters noprint" id="${id}"><div><label for="${id}a">Año</label><select id="${id}a" name="anio">${anios.map(a => `<option ${a === PER.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+    ${mensual ? `<div><label for="${id}m">Mes</label><select id="${id}m" name="mes">${MESES_C.map((x, i) => `<option value="${i + 1}" ${i + 1 === PER.mes ? 'selected' : ''}>${x}</option>`).join('')}</select></div>`
+    : `<div><label for="${id}t">Periodicidad</label><select id="${id}t" name="tipo">${opts([['bimestral', 'Bimestral'], ['cuatrimestral', 'Cuatrimestral']], PER.tipo)}</select></div>
+      <div><label for="${id}n">Período</label><select id="${id}n" name="n">${NOM_PER[PER.tipo].map((x, i) => `<option value="${i + 1}" ${i + 1 === PER.n ? 'selected' : ''}>${i + 1} · ${x}</option>`).join('')}</select></div>`}</div>`;
+}
+const rangoPer = mensual => mensual ? periodo(PER.anio, 'mensual', PER.mes) : periodo(PER.anio, PER.tipo, PER.n);
+const pct = v => `${String(v).replace('.', ',')} %`;
+const botonImprimir = (titulo, html) => { $('print').innerHTML = html(); const t = document.title; document.title = `${titulo} - ${emp().nombre}`; window.print(); document.title = t; };
+
+function vIva(m) {
+  m.innerHTML = `<header class="vhead noprint"><div><h2>IVA del período</h2><p class="sub">Lo que va en el formulario 300: IVA generado en ventas, IVA descontable en compras y el saldo a pagar o a favor.</p></div><button id="imp">Imprimir</button></header>
+    ${selPeriodo('pIva', ['bimestral', 'cuatrimestral'], () => pintar())}<section class="panel" id="out"></section>`;
+  const tabla = (filas, titulo) => `<h4>${titulo}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tarifa</th><th class="r">Base</th><th class="r">IVA</th></tr></thead><tbody>
+    ${filas.map(x => `<tr><td>${x.tarifa ? pct(x.tarifa) : 'Excluidos, exentos o 0 %'}</td><td class="r mono">${money(x.base)}</td><td class="r mono">${money(x.iva)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Sin movimientos en el período.</td></tr>'}
+    ${filas.length ? `<tr class="strong"><td>Total</td><td class="r mono">${money(filas.reduce((s, x) => s + x.base, 0))}</td><td class="r mono">${money(filas.reduce((s, x) => s + x.iva, 0))}</td></tr>` : ''}</tbody></table></div>`;
+  const html = () => {
+    const { desde, hasta } = rangoPer(false), r = informeIva(S.d, desde, hasta);
+    // Cruce con la contabilidad: movimiento neto de las cuentas 2408 en el período.
+    const cont = r2(movs().filter(x => x.cuenta.startsWith('2408') && x.fecha >= desde && x.fecha <= hasta && x.tipo !== 'CI').reduce((s, x) => s + x.credito - x.debito, 0));
+    const neto = r2(r.generado - r.descontable);
+    return cabInforme('IVA del período', `${PER.tipo === 'bimestral' ? 'Bimestre' : 'Cuatrimestre'} ${PER.n} de ${PER.anio}<br>Del ${fFecha(desde)} al ${fFecha(hasta)}`) + `
+      ${tabla(r.ventas, `Ventas (${r.nVentas} facturas y notas)`)}
+      <p class="rep-small">Las notas crédito restan. Solo cuentan facturas y notas guardadas (no borradores ni anuladas).</p>
+      ${tabla(r.compras, `Compras (${r.nCompras} facturas de proveedor y documentos soporte)`)}
+      <div class="inf">
+        <div class="inf-l plain"><span>IVA generado</span><span class="mono">${money(r.generado)}</span></div>
+        <div class="inf-l plain"><span>(menos) IVA descontable</span><span class="mono">${money(r.descontable)}</span></div>
+        <div class="inf-l plain"><span>(menos) Retenciones de IVA que le practicaron</span><span class="mono">${money(r.reteivaQueLePracticaron)}</span></div>
+        <div class="inf-l tot big"><span>${r.aFavor ? 'Saldo a favor' : 'Saldo a pagar'}</span><span class="mono">${money(r.aFavor || r.aPagar)}</span></div>
+      </div>
+      ${Math.abs(cont - neto) < 1 ? '<p class="okmsg">Cuadra con la contabilidad (cuentas 2408).</p>' : `<p class="hint">En la contabilidad, las cuentas 2408 suman ${money(cont)} en el período y aquí el IVA generado menos el descontable da ${money(neto)}. La diferencia suele venir de comprobantes contables o ajustes hechos a mano en esas cuentas: revísalos en el <a href="#/auxiliar">libro auxiliar</a>.</p>`}
+      <p class="rep-small">Informe de apoyo para diligenciar el formulario 300. Verifica las cifras antes de presentarlo.</p>`;
+  };
+  const pintar = () => { $('out').innerHTML = html(); };
+  $('imp').onclick = () => botonImprimir('IVA del período', html);
+  pintar();
+}
+
+function vRetPracticadas(m) {
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Retenciones practicadas</h2><p class="sub">Lo que va en el formulario 350: las retenciones que la empresa practicó en el mes, por concepto.</p></div><button id="imp">Imprimir</button></header>
+    ${selPeriodo('pRet', ['mensual'], () => pintar())}<section class="panel" id="out"></section>`;
+  const P = param(), cts = { retefuente: P.retefuente_pagar.slice(0, 4), reteiva: P.reteiva_pagar.slice(0, 4), reteica: P.reteica_pagar.slice(0, 4) };
+  const html = () => {
+    const { desde, hasta } = rangoPer(true), r = informeRetenciones(S.d.compras, movs(), desde, hasta, cts);
+    const bloque = ([k, nombre]) => { const gs = r.grupos.filter(g => g.tipo === k); if (!gs.length) return '';
+      return `<h4>${nombre}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base</th><th class="r">Retenido</th></tr></thead><tbody>
+        ${gs.map(g => `<tr><td>${esc(g.concepto)}${g.n > 1 ? ` <span class="hint">(${g.n})</span>` : ''}</td><td class="r mono">${g.tarifa == null ? '' : k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${g.base == null ? '' : money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}
+        <tr class="strong"><td colspan="3">Total ${nombre[0].toLowerCase() + nombre.slice(1)}</td><td class="r mono">${money(r[k])}</td></tr></tbody></table></div>`; };
+    return cabInforme('Retenciones practicadas', `${MESES_C[PER.mes - 1]} de ${PER.anio}`) + (r.grupos.length ? TIPOS_RETENCION.map(bloque).join('') + `
+      <div class="inf"><div class="inf-l tot big"><span>Total retenciones del mes</span><span class="mono">${money(r.total)}</span></div></div>
+      <p class="rep-small">La retención de ICA se declara en el municipio, no en el formulario 350. Las filas sin tarifa vienen de la nómina o de comprobantes contables registrados en las cuentas ${cts.retefuente}, ${cts.reteiva} y ${cts.reteica}.</p>`
+      : '<p class="muted">No hubo retenciones practicadas en este mes.</p>') + '<p class="rep-small">Informe de apoyo para diligenciar el formulario 350. Verifica las cifras antes de presentarlo.</p>';
+  };
+  const pintar = () => { $('out').innerHTML = html(); };
+  $('imp').onclick = () => botonImprimir('Retenciones practicadas', html);
+  pintar();
+}
+
+let certAnio = null;
+function vCertificados(m, tid) {
+  certAnio = certAnio || (+hoy().slice(0, 4) - (+hoy().slice(5, 7) <= 3 ? 1 : 0));
+  const anios = [0, 1, 2].map(i => +hoy().slice(0, 4) - i);
+  const desde = `${certAnio}-01-01`, hasta = `${certAnio}-12-31`;
+  const ids = tercerosConRetencion(S.d.compras, desde, hasta), lista = ids.map(terc).filter(Boolean).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Certificados de retención</h2><p class="sub">El certificado de las retenciones que la empresa le practicó a cada proveedor en el año. Se imprime o se guarda en PDF para enviarlo.</p></div></header>
+    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+    <section class="panel stack noprint">${lista.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th><th>Documento</th><th class="r">Retefuente</th><th class="r">ReteIVA</th><th class="r">ReteICA</th><th></th></tr></thead><tbody>
+      ${lista.map(t => { const c = certificado(S.d.compras, t.id, desde, hasta), tot = k => r2(c.porTipo[k].reduce((s, g) => s + g.valor, 0));
+        return `<tr><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
+          <td class="r nowrap"><button class="sm" data-ver="${t.id}">Ver</button> <button class="sm" data-pdf="${t.id}">Imprimir / PDF</button></td></tr>`; }).join('')}</tbody></table></div>`
+      : '<p class="muted">No hay retenciones practicadas en ese año.</p>'}</section>
+    <section class="panel" id="cert" ${tid ? '' : 'hidden'}></section>`;
+  $('cA').onchange = () => { certAnio = +$('cA').value; vCertificados(m, ''); };
+  const hoja = id => {
+    const t = terc(id), c = certificado(S.d.compras, id, desde, hasta), e = emp();
+    const tabla = ([k, nombre]) => { const gs = c.porTipo[k]; if (!gs.length) return '';
+      return `<h4>${nombre}</h4><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base sometida</th><th class="r">Valor retenido</th></tr></thead><tbody>
+        ${gs.map(g => `<tr><td>${esc(g.concepto)}</td><td class="r mono">${k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}</tbody></table>`; };
+    const cuales = TIPOS_RETENCION.filter(([k]) => c.porTipo[k].length).map(([, n]) => n[0].toLowerCase() + n.slice(1));
+    return `<header class="rep-head inf-head"><div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv}</p>${e.direccion ? `<p>${esc(e.direccion)}${e.ciudad ? ' · ' + esc(e.ciudad) : ''}</p>` : ''}</div><div class="rep-num"><span>CERTIFICADO DE RETENCIONES</span><b class="inf-per">Año gravable ${certAnio}</b></div></header>
+      <p>${esc(e.nombre)}, NIT ${fmtNit(e.nit)}-${e.dv}, certifica que durante el año gravable ${certAnio} practicó ${cuales.join(', ').replace(/, ([^,]*)$/, ' y $1')} a:</p>
+      <dl class="kv"><dt>Nombre o razón social</dt><dd><b>${esc(t?.nombre || '')}</b></dd><dt>Documento</dt><dd class="mono">${esc(docId(t))}</dd><dt>Período</dt><dd>Del ${fFecha(desde)} al ${fFecha(hasta)}</dd></dl>
+      ${TIPOS_RETENCION.map(tabla).join('')}
+      <div class="inf"><div class="inf-l tot big"><span>Total retenido</span><span class="mono">${money(c.total)}</span></div></div>
+      <p class="rep-small">Los valores retenidos fueron consignados oportunamente a favor de la DIAN${c.porTipo.reteica.length ? ' y del municipio correspondiente' : ''}. Expedido el ${fFecha(hoy())}. Este certificado no requiere firma autógrafa (artículo 10 del Decreto 836 de 1991).</p>`;
+  };
+  const ver = id => { $('cert').hidden = false; $('cert').innerHTML = hoja(id); $('cert').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  m.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => ver(b.dataset.ver));
+  m.querySelectorAll('[data-pdf]').forEach(b => b.onclick = () => botonImprimir(`Certificado de retenciones ${certAnio} - ${terc(b.dataset.pdf)?.nombre || ''}`, () => hoja(b.dataset.pdf)));
+  if (tid && ids.includes(tid)) ver(tid);
 }
 
 /* ---------- Estado de resultados comparativo (columnas por mes) ---------- */
@@ -2719,6 +2835,7 @@ function vErComp(m) {
   $('caA').onchange = () => { ercOpc.anio = $('caA').value; ercOpc.meses = null; pintarMeses(); pintar(); };
   $('ninf').onchange = () => { ercOpc.nivel = $('ninf').value; pintar(); };
   $('iter').onchange = () => { ercOpc.tercero = $('iter').value; pintar(); };
+  sinModulo('idet', 'informes', () => { ercOpc.detalle = ''; });
   $('idet').onchange = () => { ercOpc.detalle = $('idet').value; if (ercOpc.detalle && ercOpc.nivel !== '0') { ercOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
   $('csv').onclick = () => {
     const cols = [...ercOpc.meses].sort().map(k => MESES_C[Number(k) - 1]), v = x => String(r2(x)).replace('.', ',');
@@ -3215,7 +3332,7 @@ function vImportar(m, solo) {
     ${Object.entries(PLANTILLAS).filter(([k]) => !solo || k === solo).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
       <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
       <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
-  m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt)));
+  m.querySelectorAll('[data-plt]').forEach(b => b.onclick = () => descargar(PLANTILLAS[b.dataset.plt].archivo, csvPlantilla(b.dataset.plt), false));
   m.querySelectorAll('[data-sub]').forEach(inp => inp.onchange = async () => {
     const cual = inp.dataset.sub, file = inp.files[0]; inp.value = ''; if (!file) return;
     let txt = await file.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await file.arrayBuffer());
@@ -3281,7 +3398,7 @@ function tuPlan(x, planes = []) {
   if (dp !== null) return `<h3>Tu plan</h3><dl class="kv"><dt>Plan</dt><dd><b>Prueba gratis</b> hasta el ${fFecha(x.prueba_hasta)} <span class="tag ${dp <= 3 ? 'bad' : 'el'}">${dp ? `Quedan ${dp} día${dp === 1 ? '' : 's'}` : 'Último día'}</span></dd>${uso}</dl>
     <p class="sub">${pedido ? `Pediste el plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo aprueba y sigues sin interrupciones.` : 'Escoge el plan que quieres para cuando termine la prueba. AGAsoft lo aprueba y sigues sin interrupciones.'}</p>
     ${opcionesPlan(planes, pedido?.id)}<div class="row"><button class="primary" id="pedirP">${pedido ? 'Cambiar el plan pedido' : 'Pedir este plan'}</button></div>`;
-  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(precioCuenta(p, x.empresas))} al mes${p.por_empresa ? ` <span class="hint">(${money(p.precio_mensual)} × ${Math.max(1, x.empresas)} empresa${x.empresas === 1 ? '' : 's'})</span>` : ''}</dd>
+  return `<h3>Tu plan</h3>${p ? `<dl class="kv"><dt>Plan</dt><dd><b>${esc(p.nombre)}</b> · ${money(precioCuenta(p, x.empresas))} al mes + IVA${p.por_empresa ? ` <span class="hint">(${money(p.precio_mensual)} × ${Math.max(1, x.empresas)} empresa${x.empresas === 1 ? '' : 's'})</span>` : ''}</dd>
     <dt>Pagado hasta</dt><dd>${x.plan_vence ? fFecha(x.plan_vence) + (x.plan_vence < hoy() ? ' <span class="tag bad">Vencido</span>' : '') : 'Sin vencimiento'}</dd>
     ${uso}</dl>` : '<p class="muted">Tu cuenta no tiene un plan asignado.</p>'}
     <p class="sub">${pedido ? `Pediste cambiar al plan <b>${esc(pedido.nombre)}</b>. AGAsoft lo revisa y lo aprueba.` : 'Para cambiar de plan, escógelo y pídelo. AGAsoft lo aprueba.'}</p>
@@ -3309,7 +3426,7 @@ async function vMiPlan(m) {
   m.innerHTML = `<header class="vhead"><div><h2>Mi plan</h2><p class="sub">Lo que incluye tu plan, lo que llevas usado este mes y cómo cambiarlo.</p></div></header>
     ${avisoFe()}
     <section class="panel stack"><h3>Esta empresa: ${esc(e?.nombre || '')}</h3>
-      <dl class="kv">${cupo(u.fe, u.maxFe, `Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}`)}${tieneModulo(p, 'nomina') ? cupo(u.emps, u.maxEmps, 'Empleados activos') : '<dt>Nómina</dt><dd><span class="muted">No incluida en tu plan</span></dd>'}</dl>
+      <dl class="kv">${u.maxFe === null && p ? `<dt>Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}</dt><dd><span class="mono">${u.fe}</span> <span class="hint">el tope lo da tu paquete de Factus</span></dd>` : cupo(u.fe, u.maxFe, `Documentos electrónicos de ${MESES_NOM[+hoy().slice(5, 7) - 1]}`)}${tieneModulo(p, 'nomina') ? cupo(u.emps, u.maxEmps, 'Empleados activos') : '<dt>Nómina</dt><dd><span class="muted">No incluida en tu plan</span></dd>'}</dl>
       <p class="hint">Cuentan las facturas, notas crédito y notas débito electrónicas guardadas en el mes (también las anuladas, porque ya se enviaron). Los recibos, comprobantes y compras no gastan cupo. El contador vuelve a cero el 1.° de cada mes.</p></section>
     ${store.mode === 'supabase' && !S.perfil?.es_admin ? '<section class="panel stack" id="miPlan"><h3>Tu plan</h3><p class="muted">Cargando…</p></section>'
       : `<section class="panel stack"><h3>Tu plan</h3><p class="muted">${store.mode === 'local' ? 'En la demostración no hay plan ni límites. Estos son los planes de AGAsoft:' : 'Eres administrador: tu cuenta no tiene límites.'}</p><div class="lp-planes" id="planesDemo"></div></section>`}
@@ -3317,9 +3434,21 @@ async function vMiPlan(m) {
       <div class="row"><button class="primary" disabled>Pagar en línea</button><span class="tag">Pronto: PSE, tarjeta y Nequi</span></div>
       <p class="hint">Mientras activamos el pago en línea, AGAsoft te envía el cobro y activa o renueva el plan al recibir el pago.</p></section>`;
   if ($('miPlan')) cargarMiPlan();
-  if ($('planesDemo')) { const ps = await store.planesActivos().catch(() => []); if ($('planesDemo')) $('planesDemo').innerHTML = ps.map(x => `<article class="lp-plan"><h3>${esc(x.nombre)}</h3><b class="p">${money(x.precio_mensual)}</b><span class="muted">al mes${x.por_empresa ? ' por empresa' : ''}</span><ul class="lp-inc">${incluye(x).map(t => `<li>${esc(t)}</li>`).join('')}</ul></article>`).join(''); }
+  if ($('planesDemo')) { const ps = await store.planesActivos().catch(() => []); if ($('planesDemo')) $('planesDemo').innerHTML = ps.map(x => tarjetaPlan(x)).join(''); }
 }
 
+// Tarjeta de un plan (portada y Mi plan): precio sin IVA, pago anual y lo que incluye.
+function tarjetaPlan(p, dest = false, boton = false) {
+  return `<article class="lp-plan${dest ? ' dest' : ''}">${dest ? '<span class="tag el">El más escogido</span>' : ''}<h3>${esc(p.nombre)}</h3><b class="p">${money(p.precio_mensual)}</b>
+    <span class="muted">al mes + IVA${p.por_empresa ? ', por empresa' : ''}</span><span class="hint">o ${money(precioAnual(p))} al año (2 meses gratis)</span>
+    <ul class="lp-inc">${incluye(p).map(t => `<li>${esc(t)}</li>`).join('')}</ul>${boton ? `<button type="button" class="${dest ? 'primary' : ''}" data-prueba>Empezar 15 días gratis</button>` : ''}</article>`;
+}
+// Opción de un informe que el plan no incluye: queda deshabilitada con la etiqueta "Plan superior".
+function sinModulo(id, mod, limpiar) {
+  const el = $(id); if (!el || tieneModulo(S.plan, mod)) return;
+  limpiar?.(); el.value = ''; el.disabled = true; el.title = 'No incluido en tu plan';
+  el.insertAdjacentHTML('afterend', '<small class="hint">Desde el plan Pyme · <a href="#/miplan">Mi plan</a></small>');
+}
 // Módulo apagado por el plan.
 async function vBloqueado(m, mod) {
   m.innerHTML = `<section class="panel stack bloq"><h2>${esc(MODULOS[mod].nombre)}</h2>
