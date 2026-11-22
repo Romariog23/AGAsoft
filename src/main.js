@@ -3587,10 +3587,11 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     </section>
     ${esCE ? `<section class="panel stack"><h3>Lo que paga</h3><div id="aplK"></div>
       <div class="grid2"><div><label for="kant">Anticipo o pago sin factura</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"></div></div></section>` :
-    `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><div class="row">${prodsInv.length ? '<button type="button" id="addP">+ Producto</button>' : ''}<button type="button" id="addK">+ Cuenta</button></div></div>
+    `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><button type="button" id="addK">+ Agregar línea</button></div>
+      <datalist id="prodsK">${prodsInv.map(p => `<option value="${esc(p.codigo)} · ${esc(p.nombre)}">`).join('')}</datalist>
       <datalist id="ctasK">${optsLista(cuentasAux().filter(x => CLASES_COMPRA.some(p => x.codigo.startsWith(p))))}</datalist>
-      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Producto o cuenta</th><th>Descripción</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
-      ${prodsInv.length ? '<p class="hint">Con <b>+ Producto</b> la compra entra al inventario de la bodega escogida y se contabiliza en su cuenta 14. Con <b>+ Cuenta</b> va a un gasto, costo o activo, como antes.</p>' : ''}
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr>${prodsInv.length ? '<th>Producto</th>' : ''}<th>Cuenta</th><th>Descripción</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
+      ${prodsInv.length ? '<p class="hint">Cada línea lleva <b>producto o cuenta</b>, no los dos. Con producto, la compra entra al inventario de la bodega escogida y va a su cuenta 14; con cuenta, va a un gasto, costo o activo.</p>' : ''}
       ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
@@ -3627,23 +3628,20 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     $('kas').innerHTML = tablaAsiento(asientoCompra({ ...c, id: c.id || 'nuevo', numero: c.numero || siguienteCompra(tipo), estado: 'contabilizado', aplicaciones: (c.aplicaciones || []).filter(a => num(a.valor)).map(refAplicacion) }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)));
   };
   const pintarLineas = () => {
-    $('kl').innerHTML = c.lineas.map((l, i) => esLineaProducto(l) ? `<tr data-i="${i}" class="lin-prod">
-      <td data-l="Producto"><select data-k="producto_id" class="w-cod" aria-label="Producto">${prodsInv.concat(prodsInv.some(p => p.id === l.producto_id) ? [] : [prodPorId(l.producto_id)].filter(Boolean)).map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select>
-        <select data-k="bodega_id" class="sm-sel" aria-label="Bodega">${optsBod(l.bodega_id)}</select><small class="hint">${esc(l.cuenta)} · ${esc(nomCta(l.cuenta))}</small></td>
+    const cols = prodsInv.length ? 9 : 8;
+    $('kl').innerHTML = c.lineas.map((l, i) => {
+      const pr = esLineaProducto(l), p = pr && prodPorId(l.producto_id), conCta = !pr && String(l.cuenta || '').trim();
+      return `<tr data-i="${i}" class="${pr ? 'lin-prod' : ''}">
+      ${prodsInv.length ? `<td data-l="Producto"><input data-k="producto" list="prodsK" class="w-cod" autocomplete="off" value="${p ? `${esc(p.codigo)} · ${esc(p.nombre)}` : ''}" placeholder="Código o nombre" aria-label="Producto" ${conCta ? 'disabled title="La línea ya tiene cuenta: bórrala para escoger un producto"' : ''}>
+        ${pr ? `<select data-k="bodega_id" class="sm-sel" aria-label="Bodega">${optsBod(l.bodega_id)}</select>` : ''}</td>` : ''}
+      <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="${pr ? '' : 'Código o nombre'}" aria-label="Cuenta" ${pr ? 'disabled title="La da la bodega del producto"' : ''}><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
-      <td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${num(l.cantidad) || ''}" aria-label="Cantidad"><small class="hint">${esc(prodPorId(l.producto_id)?.unidad || '')}</small></td>
-      <td data-l="Costo unitario"><input data-k="costo" type="number" min="0" step="any" class="r mono w-val" value="${num(l.costo) || ''}" aria-label="Costo unitario"></td>
-      <td class="r mono" data-l="Valor" data-kb="${i}">${money(l.base)}</td>
+      <td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${pr ? num(l.cantidad) || '' : ''}" aria-label="Cantidad" ${pr ? '' : 'disabled'}>${p ? `<small class="hint">${esc(p.unidad || '')}</small>` : ''}</td>
+      <td data-l="Costo unitario"><input data-k="costo" type="number" min="0" step="any" class="r mono w-val" value="${pr ? num(l.costo) || '' : ''}" aria-label="Costo unitario" ${pr ? '' : 'disabled'}></td>
+      <td data-l="Valor">${pr ? `<span class="mono r blk" data-kb="${i}">${money(l.base)}</span>` : `<input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA">`}</td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
       <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
-      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>` : `<tr data-i="${i}">
-      <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="Código o nombre" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
-      <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
-      <td class="c-na"></td><td class="c-na"></td>
-      <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA"></td>
-      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
-      <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
-      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Sin líneas.</td></tr>';
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`; }).join('') || `<tr><td colspan="${cols}" class="muted">Sin líneas.</td></tr>`;
     resumen();
   };
   const pintarApl = () => {
@@ -3671,27 +3669,34 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   } else {
     $('kl').addEventListener('input', ev => {
       const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
-      if (el.tagName === 'SELECT') return;
+      if (el.tagName === 'SELECT' || el.dataset.k === 'producto') return;
       const i = Number(tr.dataset.i), l = c.lineas[i]; l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
-      if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = l.cuenta ? nomCta(l.cuenta) : '';
+      if (el.dataset.k === 'cuenta') {
+        m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = l.cuenta ? nomCta(l.cuenta) : '';
+        // Con cuenta no se escoge producto (y al revés).
+        const pi = tr.querySelector('[data-k=producto]'); if (pi) pi.disabled = !!l.cuenta;
+      }
       if (esLineaProducto(l)) c.lineas[i] = lineaProducto(l, bodegaDe(l.bodega_id));
       resumen();
     });
     $('kl').addEventListener('change', ev => {
-      const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return;
+      const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr) return;
       const i = Number(tr.dataset.i), l = c.lineas[i];
-      if (el.dataset.k === 'producto_id') { const p = prodPorId(el.value); Object.assign(l, { producto_id: el.value, descripcion: p?.nombre || '', iva_pct: String(num(p?.iva_pct)), bodega_id: p?.bodega_id || l.bodega_id || bodegas()[0].id }); c.lineas[i] = lineaProducto(l, bodegaDe(l.bodega_id)); return pintarLineas(); }
+      if (el.dataset.k === 'producto') {
+        const txt = el.value.trim(), cod = txt.split(' · ')[0].trim().toLowerCase();
+        const p = txt && (prodsInv.find(x => x.codigo.toLowerCase() === cod) || prodsInv.find(x => `${x.codigo} · ${x.nombre}`.toLowerCase() === txt.toLowerCase()) || prodsInv.find(x => x.nombre.toLowerCase().includes(txt.toLowerCase())));
+        if (!p) { const { producto_id, bodega_id, cantidad, costo, ...resto } = l; c.lineas[i] = { ...resto, cuenta: '', base: '' }; return pintarLineas(); }
+        const u = [...c.lineas].reverse().find(x => x !== l && esLineaProducto(x));
+        c.lineas[i] = lineaProducto({ ...l, producto_id: p.id, descripcion: l.producto_id === p.id ? l.descripcion : p.nombre, iva_pct: String(num(p.iva_pct)), bodega_id: p.bodega_id || l.bodega_id || u?.bodega_id || bodegas()[0].id }, bodegaDe(p.bodega_id || l.bodega_id || u?.bodega_id));
+        pintarLineas(); return tr.parentElement?.querySelector(`tr[data-i="${i}"] [data-k=cantidad]`)?.focus();
+      }
+      if (el.tagName !== 'SELECT') return;
       if (el.dataset.k === 'bodega_id') { c.lineas[i] = lineaProducto({ ...l, bodega_id: el.value }, bodegaDe(el.value)); return pintarLineas(); }
       l.iva_pct = el.value; resumen();
     });
     $('kl').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintarLineas(); });
-    if ($('addP')) $('addP').onclick = () => {
-      const p = prodsInv[0], u = [...c.lineas].reverse().find(esLineaProducto);
-      c.lineas = c.lineas.filter(l => esLineaProducto(l) || String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base));
-      c.lineas.push(lineaProducto({ producto_id: p.id, descripcion: p.nombre, iva_pct: String(num(p.iva_pct)), cantidad: '', costo: '', bodega_id: p.bodega_id || u?.bodega_id || bodegas()[0].id }, bodegaDe(p.bodega_id || u?.bodega_id)));
-      pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=producto_id]`)?.focus();
-    };
-    $('addK').onclick = () => { const u = [...c.lineas].reverse().find(l => !esLineaProducto(l)) || {}; c.lineas.push({ cuenta: u.cuenta || '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
+    // Línea nueva vacía: se escoge producto o cuenta.
+    $('addK').onclick = () => { const u = c.lineas.at(-1) || {}; c.lineas.push({ cuenta: '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=${prodsInv.length ? 'producto' : 'cuenta'}]`)?.focus(); };
     ligarRet('compra', RET_C, () => r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
     $('prv').onchange = () => {
       // Al escoger el proveedor se proponen sus retenciones y su plazo.
