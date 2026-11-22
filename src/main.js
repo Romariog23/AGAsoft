@@ -13,7 +13,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, CATEGORIAS_CAJA } from './reportes.js';
+import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA } from './reportes.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -3117,7 +3117,8 @@ function vFlujoCaja(m) {
   const anios = [...new Set([hoy().slice(0, 4), ...ms0.map(x => x.fecha.slice(0, 4))])].sort().reverse();
   if (!anios.includes(fcOpc.anio)) { fcOpc.anio = anios[0]; fcOpc.meses = null; }
   m.innerHTML = `<header class="vhead noprint"><div><h2>Flujo de caja</h2><p class="sub">Entradas y salidas de caja y bancos por mes, según de dónde vino o a dónde fue el dinero.</p></div><div class="row"><button id="csv">Descargar CSV</button><button id="imp">Imprimir</button></div></header>
-    <div class="row filters noprint"><div><label for="fcA">Año</label><select id="fcA">${anios.map(a => `<option ${a === fcOpc.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+    <div class="row filters noprint"><div><label for="fcA">Año</label><select id="fcA">${anios.map(a => `<option ${a === fcOpc.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div><label for="fcD">Detalle</label><select id="fcD">${opts([['si', 'Por concepto (cuenta)'], ['no', 'Solo totales por grupo']], fcOpc.detalle === false ? 'no' : 'si')}</select></div></div>
     <div class="row filters noprint" id="fcM" style="flex-wrap:wrap;gap:4px 14px"></div>
     <section class="panel" id="out"></section>`;
   let tabla = [], cols = [];
@@ -3134,30 +3135,35 @@ function vFlujoCaja(m) {
     const a = fcOpc.anio;
     cols = [...fcOpc.meses].sort().map(k => ({ nombre: MESES_C[Number(k) - 1], desde: `${a}-${k}-01`, hasta: `${a}-${k}-${String(new Date(Number(a), Number(k), 0).getDate()).padStart(2, '0')}` }));
     if (!cols.length) { tabla = []; return '<p class="muted">Escoge al menos un mes.</p>'; }
-    const r = flujoCaja(movs(), cols);
+    const r = flujoCaja(movs(), cols, enlacesPagos(S.d));
     tabla = [];
     const fila = (tipo, texto, vals, total) => tabla.push({ tipo, texto, vals, total: total ?? r2(vals.reduce((s, v) => s + v, 0)) });
     fila('saldo', 'Saldo inicial de caja y bancos', r.map(x => x.inicial), r[0].inicial);
-    for (const [lado, campo, tot] of [['Entradas', 'entradas', 'totalEntradas'], ['Salidas', 'salidas', 'totalSalidas']]) {
+    const nomConcepto = c => c === 'anticipo' ? 'Anticipos' : c ? `${c} ${nomCta(c)}` : 'Sin factura de origen';
+    for (const [lado, campo, tot, det] of [['Entradas', 'entradas', 'totalEntradas', 'detalleEntradas'], ['Salidas', 'salidas', 'totalSalidas', 'detalleSalidas']]) {
       fila('tit', lado, []);
       const cats = CATEGORIAS_CAJA.filter(([k]) => r.some(x => x[campo][k]));
-      for (const [k, n] of cats) fila('', n, r.map(x => x[campo][k] || 0));
+      for (const [k, n] of cats) {
+        fila('cat', n, r.map(x => x[campo][k] || 0));
+        if (fcOpc.detalle !== false) for (const c of [...new Set(r.flatMap(x => Object.keys(x[det][k] || {})))].sort()) fila('sub', nomConcepto(c), r.map(x => x[det][k]?.[c] || 0));
+      }
       if (!cats.length) fila('muted', 'Sin ' + lado.toLowerCase(), r.map(() => 0));
       fila('tot', 'Total ' + lado.toLowerCase(), r.map(x => x[tot]));
     }
     fila('tot', 'Flujo neto del mes', r.map(x => x.neto));
     fila('big', 'Saldo final de caja y bancos', r.map(x => x.final), r.at(-1).final);
-    const cls = { tot: 'strong', big: 'strong big', saldo: 'muted', muted: 'muted' };
+    const cls = { tot: 'strong', big: 'strong big', saldo: 'muted', muted: 'muted', cat: 'strong', sub: 'ter' };
     const contiguos = cols.every((c, i) => !i || +c.desde.slice(5, 7) === +cols[i - 1].desde.slice(5, 7) + 1);
     return cabInforme('Flujo de caja', `${cols.length === 1 ? cols[0].nombre : `${cols[0].nombre} a ${cols.at(-1).nombre}`} de ${a}${contiguos ? '' : ' (meses escogidos)'}`)
-      + `<p class="rep-small">Método directo: cada movimiento de caja o bancos se clasifica por su contrapartida. El IVA de una venta o compra de contado va con ella. Cifras en pesos colombianos.</p>
+      + `<p class="rep-small">Método directo. Cada entrada o salida de caja y bancos se muestra con su concepto real: si cancela una factura, con lo que se causó en ella; si no, con su contrapartida. El IVA va con la venta o la compra. Cifras en pesos colombianos.</p>
       <div class="tbl-wrap"><table class="tbl bal erc"><thead><tr><th>Concepto</th>${cols.map(c => `<th class="r">${c.nombre}</th>`).join('')}<th class="r">${contiguos ? 'Total' : 'Total meses'}</th></tr></thead><tbody>
       ${tabla.map(f => f.tipo === 'tit' ? `<tr class="erc-tit"><td colspan="${cols.length + 2}"><b>${f.texto}</b></td></tr>`
-        : `<tr class="${cls[f.tipo] || ''}"><td>${esc(f.texto)}</td>${f.vals.map(v => `<td class="r mono">${money(v)}</td>`).join('')}<td class="r mono"><b>${f.tipo === 'saldo' || f.tipo === 'big' ? (contiguos ? money(f.total) : '') : money(f.total)}</b></td></tr>`).join('')}
-      </tbody></table></div>${r.every(x => x.cuadra) ? '' : '<p class="err">Algún mes no cuadra con el saldo de caja y bancos: revisa comprobantes que muevan solo cuentas 11.</p>'}`;
+        : `<tr class="${cls[f.tipo] || ''}"><td>${f.tipo === 'sub' ? `<span style="padding-left:20px">${esc(f.texto)}</span>` : esc(f.texto)}</td>${f.vals.map(v => `<td class="r mono">${money(v)}</td>`).join('')}<td class="r mono">${f.tipo === 'sub' ? '' : '<b>'}${f.tipo === 'saldo' || f.tipo === 'big' ? (contiguos ? money(f.total) : '') : money(f.total)}${f.tipo === 'sub' ? '' : '</b>'}</td></tr>`).join('')}
+      </tbody></table></div><p class="rep-small">Los pagos y cobros de facturas se muestran con el concepto que se causó en la factura: por ejemplo, el egreso que paga una factura de arriendo sale en 5120 Arrendamientos, no en cuentas por pagar.</p>${r.every(x => x.cuadra) ? '' : '<p class="err">Algún mes no cuadra con el saldo de caja y bancos: revisa comprobantes que muevan solo cuentas 11.</p>'}`;
   };
   const pintar = () => { $('out').innerHTML = html(); };
   $('fcA').onchange = () => { fcOpc.anio = $('fcA').value; fcOpc.meses = null; pintarMeses(); pintar(); };
+  $('fcD').onchange = () => { fcOpc.detalle = $('fcD').value === 'si'; pintar(); };
   $('imp').onclick = () => botonImprimir('Flujo de caja', html);
   $('csv').onclick = () => descargar(`flujo-de-caja-${emp().nit}-${fcOpc.anio}.csv`, csvTxt([['Concepto', ...cols.map(c => c.nombre), 'Total'], ...tabla.map(f => [f.texto, ...(f.tipo === 'tit' ? cols.map(() => '') : f.vals.map(nCsv)), f.tipo === 'tit' ? '' : nCsv(f.total)])]));
   pintarMeses(); pintar();

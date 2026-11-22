@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja } from '../src/reportes.js';
+import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos } from '../src/reportes.js';
 
 const documentos = [
   { id: 'f1', tipo: 'FV', estado: 'emitido', fecha: '2026-11-03', tercero_id: 'a', numero: 1 },
@@ -70,4 +70,20 @@ test('flujo de caja por mes', () => {
   assert.deepEqual(r[0].entradas, { clientes: 119000 }); assert.equal(r[0].inicial, 1000000); assert.equal(r[0].final, 1119000);
   assert.deepEqual(r[1].entradas, { prestamos: 500000 }); assert.deepEqual(r[1].salidas, { activos: 300000 });
   assert.ok(r.every(x => x.cuadra));
+});
+
+test('el pago de una factura de proveedor sale como el gasto que se causó', () => {
+  const ms = [
+    mv('2026-01-01', 'SI1', '11100501', 5000000, 0, { origen: 'comp', tipo: 'SI' }), mv('2026-01-01', 'SI1', '31050501', 0, 5000000, { origen: 'comp', tipo: 'SI' }),
+    // Factura de proveedor: arriendo 1.000.000 + IVA 190.000, retención 35.000.
+    mv('2026-02-01', 'FC1', '51200501', 1000000, 0, { origen: 'compra', doc_id: 'fc1' }), mv('2026-02-01', 'FC1', '24080201', 190000, 0, { origen: 'compra', doc_id: 'fc1' }),
+    mv('2026-02-01', 'FC1', '23651501', 0, 35000, { origen: 'compra', doc_id: 'fc1' }), mv('2026-02-01', 'FC1', '22050501', 0, 1155000, { origen: 'compra', doc_id: 'fc1' }),
+    // Egreso que la paga.
+    mv('2026-02-15', 'CE1', '22050501', 1155000, 0, { origen: 'compra', doc_id: 'ce1' }), mv('2026-02-15', 'CE1', '11100501', 0, 1155000, { origen: 'compra', doc_id: 'ce1' }),
+  ];
+  const enlaces = enlacesPagos({ compras: [{ id: 'ce1', tipo: 'CE', aplicaciones: [{ compra_id: 'fc1', valor: 1155000 }] }] });
+  const [r] = flujoCaja(ms, [{ desde: '2026-02-01', hasta: '2026-02-28' }], enlaces);
+  assert.deepEqual(r.salidas, { gastos: 1155000 });
+  assert.deepEqual(r.detalleSalidas, { gastos: { 5120: 1155000 } });
+  assert.ok(r.cuadra);
 });

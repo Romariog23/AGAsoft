@@ -142,8 +142,8 @@ export function cambiosPatrimonio(movs, desde, hasta, nombre = c => c) {
 /* ---------- Flujo de caja (método directo, por mes) ---------- */
 // Categoría de la contrapartida de un movimiento de caja o bancos.
 export const CATEGORIAS_CAJA = [
-  ['clientes', 'Cobros a clientes y deudores'], ['ventas', 'Ventas e ingresos de contado'], ['proveedores', 'Pagos a proveedores y cuentas por pagar'],
-  ['gastos', 'Gastos y costos de contado'], ['nomina', 'Nómina y seguridad social'], ['impuestos', 'Impuestos'], ['inventario', 'Inventarios'],
+  ['clientes', 'Anticipos y otros cobros a deudores'], ['ventas', 'Ventas e ingresos cobrados'], ['proveedores', 'Anticipos y otros pagos a proveedores'],
+  ['gastos', 'Gastos y costos pagados'], ['nomina', 'Nómina y seguridad social'], ['impuestos', 'Impuestos'], ['inventario', 'Compras de inventario'],
   ['activos', 'Inversiones y activos fijos'], ['prestamos', 'Préstamos y obligaciones financieras'], ['socios', 'Socios: aportes y distribuciones'], ['otros', 'Otros'],
 ];
 function categoria(c) {
@@ -159,39 +159,78 @@ function categoria(c) {
   if (/^21/.test(c)) return 'prestamos';
   return 'otros';
 }
-// Reparte el efectivo de cada documento entre sus contrapartidas del mismo sentido. El IVA de una venta o compra
-// de contado va con la venta o la compra, no a impuestos.
-function flujosPorDocumento(movs) {
-  const grupos = {};
-  for (const m of movs) (grupos[`${m.origen || 'doc'}|${m.doc_id || m.ref}`] = grupos[`${m.origen || 'doc'}|${m.doc_id || m.ref}`] || []).push(m);
+const claveGrupo = m => `${m.origen || 'doc'}|${m.doc_id || m.ref}`;
+// Conceptos de un grupo de movimientos (sin caja) en el sentido del efectivo: [{ cat, cuenta, w }] con w > 0.
+// El IVA va con el concepto más grande del documento (una venta o compra de contado no se parte en "impuestos").
+function conceptos(ms, signo) {
+  const ls = ms.filter(m => !esCaja(m.cuenta)).map(m => ({ cat: categoria(m.cuenta), cuenta: m.cuenta.slice(0, 4), w: r2((m.credito - m.debito) * signo) })).filter(x => x.w > 0);
+  const por = {};
+  for (const x of ls) { const k = x.cat + '|' + x.cuenta; por[k] = por[k] || { cat: x.cat, cuenta: x.cuenta, w: 0 }; por[k].w += x.w; }
+  let l = Object.values(por);
+  const imp = l.filter(x => x.cat === 'impuestos'), resto = l.filter(x => x.cat !== 'impuestos');
+  if (imp.length && resto.length) { const mayor = resto.sort((x, y) => y.w - x.w)[0]; mayor.w += imp.reduce((t, x) => t + x.w, 0); l = resto; }
+  return l;
+}
+// Reparte un valor entre conceptos según su peso; el último toma el redondeo.
+function repartir(valor, l, fecha, out) {
+  const peso = l.reduce((t, x) => t + x.w, 0); let resto = valor;
+  l.forEach((x, i) => { const v = i === l.length - 1 ? r2(resto) : r2(valor * x.w / peso); resto = r2(resto - v); out.push({ fecha, cat: x.cat, cuenta: x.cuenta, valor: v }); });
+}
+// Efectivo de cada documento por concepto. Un recibo o un egreso que cancela facturas se sigue hasta esas facturas:
+// el pago de una factura de proveedor sale como el gasto, costo o activo que se causó en ella (no como "cuentas por
+// pagar"), y el cobro de una factura de venta como el ingreso que se facturó.
+// enlaces: { claveDelPago: [{ clave: claveDeLaFactura | null, valor }] } (null = anticipo).
+function flujosPorDocumento(movs, todos, enlaces = {}) {
+  const grupos = {}, causacion = {};
+  for (const m of movs) (grupos[claveGrupo(m)] = grupos[claveGrupo(m)] || []).push(m);
+  for (const m of todos) (causacion[claveGrupo(m)] = causacion[claveGrupo(m)] || []).push(m);
   const out = [];
-  for (const ms of Object.values(grupos)) {
-    const caja = r2(ms.filter(m => esCaja(m.cuenta)).reduce((s, m) => s + m.debito - m.credito, 0));
+  for (const [k, ms] of Object.entries(grupos)) {
+    const caja = r2(ms.filter(m => esCaja(m.cuenta)).reduce((t, m) => t + m.debito - m.credito, 0));
     if (!caja) continue;
-    const otras = ms.filter(m => !esCaja(m.cuenta)).map(m => ({ c: categoria(m.cuenta), w: r2(m.credito - m.debito) })).filter(x => Math.sign(x.w) === Math.sign(caja));
-    const peso = otras.reduce((s, x) => s + Math.abs(x.w), 0);
-    if (!peso) { out.push({ fecha: ms[0].fecha, cat: 'otros', valor: caja }); continue; }
-    const porCat = {};
-    for (const x of otras) porCat[x.c] = (porCat[x.c] || 0) + Math.abs(x.w);
-    if (porCat.impuestos && Object.keys(porCat).length > 1) {
-      const mayor = Object.entries(porCat).filter(([k]) => k !== 'impuestos').sort((a, b) => b[1] - a[1])[0][0];
-      porCat[mayor] += porCat.impuestos; delete porCat.impuestos;
+    const signo = Math.sign(caja), fecha = ms[0].fecha;
+    const en = (enlaces[k] || []).filter(e => e.valor > 0);
+    if (en.length) {
+      const tot = en.reduce((t, e) => t + e.valor, 0); let resto = caja;
+      en.forEach((e, i) => {
+        const parte = i === en.length - 1 ? r2(resto) : r2(caja * e.valor / tot); resto = r2(resto - parte);
+        const l = e.clave && causacion[e.clave] ? conceptos(causacion[e.clave], signo) : [];
+        if (l.length) repartir(parte, l, fecha, out); else out.push({ fecha, cat: signo > 0 ? 'clientes' : 'proveedores', cuenta: e.clave ? '' : 'anticipo', valor: parte });
+      });
+      continue;
     }
-    let resto = caja; const cats = Object.entries(porCat);
-    cats.forEach(([k, w], i) => { const v = i === cats.length - 1 ? r2(resto) : r2(caja * w / peso); resto = r2(resto - v); out.push({ fecha: ms[0].fecha, cat: k, valor: v }); });
+    const l = conceptos(ms, signo);
+    if (l.length) repartir(caja, l, fecha, out); else out.push({ fecha, cat: 'otros', cuenta: '', valor: caja });
   }
   return out;
 }
-// cols: [{ desde, hasta }]. Por columna: saldo inicial, entradas y salidas por categoría, flujo neto y saldo final.
-export function flujoCaja(movs, cols) {
+// cols: [{ desde, hasta }]. Por columna: saldo inicial, entradas y salidas por categoría (y por cuenta de 4 dígitos
+// en detalle), flujo neto y saldo final.
+export function flujoCaja(movs, cols, enlaces = {}) {
   const ms = (movs || []).filter(m => m.tipo !== 'CI');
-  const flujos = flujosPorDocumento(ms.filter(m => !esSI(m)));
+  const flujos = flujosPorDocumento(ms.filter(m => !esSI(m)), ms, enlaces);
   return cols.map(({ desde, hasta }) => {
-    const entradas = {}, salidas = {};
-    for (const f of flujos) if (enRango(f.fecha, desde, hasta)) { if (f.valor > 0) sumar(entradas, f.cat, f.valor); else sumar(salidas, f.cat, -f.valor); }
+    const entradas = {}, salidas = {}, detE = {}, detS = {};
+    for (const f of flujos) if (enRango(f.fecha, desde, hasta)) {
+      const [tot, det, v] = f.valor > 0 ? [entradas, detE, f.valor] : [salidas, detS, -f.valor];
+      sumar(tot, f.cat, v); sumar(det[f.cat] = det[f.cat] || {}, f.cuenta, v);
+    }
     const inicial = r2(saldoCaja(ms, m => m.fecha < desde) + saldoCaja(ms, m => enRango(m.fecha, desde, hasta) && esSI(m)));
-    const totE = r2(Object.values(entradas).reduce((s, v) => s + v, 0)), totS = r2(Object.values(salidas).reduce((s, v) => s + v, 0));
+    const totE = r2(Object.values(entradas).reduce((t, v) => t + v, 0)), totS = r2(Object.values(salidas).reduce((t, v) => t + v, 0));
     const final = saldoCaja(ms, m => m.fecha <= hasta);
-    return { desde, hasta, inicial, entradas, salidas, totalEntradas: totE, totalSalidas: totS, neto: r2(totE - totS), final, cuadra: Math.abs(r2(inicial + totE - totS - final)) < 0.01 };
+    return { desde, hasta, inicial, entradas, salidas, detalleEntradas: detE, detalleSalidas: detS, totalEntradas: totE, totalSalidas: totS, neto: r2(totE - totS), final, cuadra: Math.abs(r2(inicial + totE - totS - final)) < 0.01 };
   });
+}
+// Enlaces de pagos a facturas: recibos de caja (aplicaciones) y egresos (aplicaciones a facturas de proveedor y anticipo).
+export function enlacesPagos({ documentos = [], aplicaciones = [], compras = [] }) {
+  const out = {};
+  for (const a of aplicaciones) (out[`doc|${a.recibo_id}`] = out[`doc|${a.recibo_id}`] || []).push({ clave: `doc|${a.factura_id}`, valor: num(a.valor) });
+  for (const d of documentos) if (d.tipo === 'RC' && num(d.anticipo) > 0) (out[`doc|${d.id}`] = out[`doc|${d.id}`] || []).push({ clave: null, valor: num(d.anticipo) });
+  for (const c of compras) {
+    if (c.tipo !== 'CE' || c.estado === 'anulado') continue;
+    const l = (c.aplicaciones || []).map(a => ({ clave: `compra|${a.compra_id}`, valor: num(a.valor) }));
+    if (num(c.anticipo) > 0) l.push({ clave: null, valor: num(c.anticipo) });
+    if (l.length) out[`compra|${c.id}`] = l;
+  }
+  return out;
 }
