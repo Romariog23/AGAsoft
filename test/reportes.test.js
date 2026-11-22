@@ -87,3 +87,13 @@ test('el pago de una factura de proveedor sale como el gasto que se causó', () 
   assert.deepEqual(r.detalleSalidas, { gastos: { 5120: 1155000 } });
   assert.ok(r.cuadra);
 });
+
+test('flujo de caja filtrado por tercero', () => {
+  const ms = [
+    mv('2026-02-10', 'R1', '11100501', 300000, 0, { tercero_id: 'a' }), mv('2026-02-10', 'R1', '41350501', 0, 300000, { tercero_id: 'a' }),
+    mv('2026-02-12', 'G1', '51350501', 100000, 0, { origen: 'comp', tercero_id: 'b' }), mv('2026-02-12', 'G1', '11100501', 0, 100000, { origen: 'comp', tercero_id: 'b' }),
+  ];
+  const [r] = flujoCaja(ms, [{ desde: '2026-02-01', hasta: '2026-02-28' }], {}, 'b');
+  assert.deepEqual(r.entradas, {}); assert.deepEqual(r.salidas, { gastos: 100000 });
+  assert.deepEqual(r.tercerosSalidas, { 'gastos|5135': { b: 100000 } });
+});

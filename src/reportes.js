@@ -188,7 +188,9 @@ function flujosPorDocumento(movs, todos, enlaces = {}) {
   for (const [k, ms] of Object.entries(grupos)) {
     const caja = r2(ms.filter(m => esCaja(m.cuenta)).reduce((t, m) => t + m.debito - m.credito, 0));
     if (!caja) continue;
-    const signo = Math.sign(caja), fecha = ms[0].fecha;
+    const signo = Math.sign(caja), fecha = ms[0].fecha, desde0 = out.length;
+    const tercero = ms.find(m => esCaja(m.cuenta) && m.tercero_id)?.tercero_id || ms.find(m => m.tercero_id)?.tercero_id || '';
+    const marcar = () => { for (let i = desde0; i < out.length; i++) out[i].tercero_id = tercero; };
     const en = (enlaces[k] || []).filter(e => e.valor > 0);
     if (en.length) {
       const tot = en.reduce((t, e) => t + e.valor, 0); let resto = caja;
@@ -197,28 +199,31 @@ function flujosPorDocumento(movs, todos, enlaces = {}) {
         const l = e.clave && causacion[e.clave] ? conceptos(causacion[e.clave], signo) : [];
         if (l.length) repartir(parte, l, fecha, out); else out.push({ fecha, cat: signo > 0 ? 'clientes' : 'proveedores', cuenta: e.clave ? '' : 'anticipo', valor: parte });
       });
-      continue;
+      marcar(); continue;
     }
     const l = conceptos(ms, signo);
     if (l.length) repartir(caja, l, fecha, out); else out.push({ fecha, cat: 'otros', cuenta: '', valor: caja });
+    marcar();
   }
   return out;
 }
 // cols: [{ desde, hasta }]. Por columna: saldo inicial, entradas y salidas por categoría (y por cuenta de 4 dígitos
 // en detalle), flujo neto y saldo final.
-export function flujoCaja(movs, cols, enlaces = {}) {
+// tercero: solo los pagos y cobros de ese tercero (el saldo de caja no aplica).
+export function flujoCaja(movs, cols, enlaces = {}, tercero = '') {
   const ms = (movs || []).filter(m => m.tipo !== 'CI');
   const flujos = flujosPorDocumento(ms.filter(m => !esSI(m)), ms, enlaces);
   return cols.map(({ desde, hasta }) => {
-    const entradas = {}, salidas = {}, detE = {}, detS = {};
-    for (const f of flujos) if (enRango(f.fecha, desde, hasta)) {
-      const [tot, det, v] = f.valor > 0 ? [entradas, detE, f.valor] : [salidas, detS, -f.valor];
+    const entradas = {}, salidas = {}, detE = {}, detS = {}, terE = {}, terS = {};
+    for (const f of flujos) if (enRango(f.fecha, desde, hasta) && (!tercero || f.tercero_id === tercero)) {
+      const [tot, det, ter, v] = f.valor > 0 ? [entradas, detE, terE, f.valor] : [salidas, detS, terS, -f.valor];
       sumar(tot, f.cat, v); sumar(det[f.cat] = det[f.cat] || {}, f.cuenta, v);
+      const k = f.cat + '|' + f.cuenta; sumar(ter[k] = ter[k] || {}, f.tercero_id || '', v);
     }
     const inicial = r2(saldoCaja(ms, m => m.fecha < desde) + saldoCaja(ms, m => enRango(m.fecha, desde, hasta) && esSI(m)));
     const totE = r2(Object.values(entradas).reduce((t, v) => t + v, 0)), totS = r2(Object.values(salidas).reduce((t, v) => t + v, 0));
     const final = saldoCaja(ms, m => m.fecha <= hasta);
-    return { desde, hasta, inicial, entradas, salidas, detalleEntradas: detE, detalleSalidas: detS, totalEntradas: totE, totalSalidas: totS, neto: r2(totE - totS), final, cuadra: Math.abs(r2(inicial + totE - totS - final)) < 0.01 };
+    return { desde, hasta, inicial, entradas, salidas, detalleEntradas: detE, detalleSalidas: detS, tercerosEntradas: terE, tercerosSalidas: terS, totalEntradas: totE, totalSalidas: totS, neto: r2(totE - totS), final, cuadra: Math.abs(r2(inicial + totE - totS - final)) < 0.01 };
   });
 }
 // Enlaces de pagos a facturas: recibos de caja (aplicaciones) y egresos (aplicaciones a facturas de proveedor y anticipo).
