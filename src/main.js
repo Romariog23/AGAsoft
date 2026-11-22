@@ -135,7 +135,7 @@ async function finPrueba() {
   let x = null, planes = [];
   try { [x, planes] = await Promise.all([store.miPlan(), store.planesActivos()]); } catch (e) { fail(e); }
   const pedido = x?.plan_solicitado;
-  card.innerHTML = `<div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft</h1></div>
+  card.innerHTML = `<h1 class="brand"><span class="brand-logo" role="img" aria-label="AGA"></span><span class="brand-name">soft</span></h1>
     <h2>Tu prueba gratis terminó</h2>
     <p class="sub">Tus 15 días gratis terminaron el ${fFecha(S.perfil.prueba_hasta)}. Tus datos siguen guardados: escoge un plan y, cuando AGAsoft lo apruebe, sigues trabajando donde ibas.</p>
     ${pedido ? `<p class="okmsg">Pediste el plan <b>${esc(pedido.nombre)}</b>. Cuando esté aprobado, vuelve a entrar.</p>` : ''}

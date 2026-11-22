@@ -27,7 +27,7 @@ export function guardarLocal(t) { try { localStorage.setItem(KEY, JSON.stringify
 function css() {
   const oscuro = c => `--accent:${c.oscuro};--accent-fg:#0b1418;--accent-soft:color-mix(in srgb,${c.oscuro} 18%,#0f222c);`;
   return COLORES.filter(c => c.id !== 'aga').map(c =>
-    `:root[data-color="${c.id}"]{--accent:${c.claro};--accent-fg:#fff;--accent-soft:color-mix(in srgb,${c.claro} 12%,#fff);--brand:${c.claro};--mark-fg:#fff}
+    `:root[data-color="${c.id}"]{--accent:${c.claro};--accent-fg:#fff;--accent-soft:color-mix(in srgb,${c.claro} 12%,#fff)}
 @media (prefers-color-scheme: dark){:root[data-color="${c.id}"]:not([data-theme="light"]){${oscuro(c)}}}
 :root[data-color="${c.id}"][data-theme="dark"]{${oscuro(c)}}`).join('\n');
 }
