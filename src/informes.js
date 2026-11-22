@@ -23,32 +23,34 @@ function sumarTarifa(mapa, tarifa, base, iva, signo = 1) {
 }
 const ordenar = mapa => Object.values(mapa).filter(x => x.base || x.iva).sort((a, b) => b.tarifa - a.tarifa);
 
-// IVA del período. Ventas: facturas y notas débito suman, notas crédito restan (solo emitidas, sin anuladas).
+// IVA del período, separado como lo pide el formulario 300: ventas (facturas y notas débito), devoluciones en ventas
+// (notas crédito, cuyo IVA se descuenta aparte) y compras. Solo documentos emitidos, sin anulados.
 // Compras: facturas de proveedor y documentos soporte vigentes.
 export function informeIva({ documentos = [], items = [], compras = [] }, desde, hasta) {
   const itemsDe = {};
   for (const it of items) (itemsDe[it.documento_id] = itemsDe[it.documento_id] || []).push(it);
-  const ventas = {}, compr = {};
-  let reteivaQueLePracticaron = 0, nVentas = 0, nCompras = 0;
+  const ventas = {}, devol = {}, compr = {};
+  let reteivaQueLePracticaron = 0, nVentas = 0, nDevol = 0, nCompras = 0;
   for (const d of documentos) {
     if (d.estado !== 'emitido' || !['FV', 'NC', 'ND'].includes(d.tipo) || !enRango(d.fecha, desde, hasta)) continue;
-    const s = d.tipo === 'NC' ? -1 : 1, t = totales(itemsDe[d.id] || []);
-    for (const x of Object.values(t.porTarifa)) sumarTarifa(ventas, x.tarifa, x.base, x.iva, s);
-    reteivaQueLePracticaron = r2(reteivaQueLePracticaron + s * num(d.reteiva));
-    nVentas++;
+    const nc = d.tipo === 'NC', t = totales(itemsDe[d.id] || []);
+    for (const x of Object.values(t.porTarifa)) sumarTarifa(nc ? devol : ventas, x.tarifa, x.base, x.iva);
+    reteivaQueLePracticaron = r2(reteivaQueLePracticaron + (nc ? -1 : 1) * num(d.reteiva));
+    if (nc) nDevol++; else nVentas++;
   }
   for (const c of compras) {
     if (!['FC', 'DS'].includes(c.tipo) || c.estado === 'anulado' || !enRango(c.fecha, desde, hasta)) continue;
     for (const l of c.lineas || []) { const base = r2(num(l.base)); sumarTarifa(compr, l.iva_pct, base, r2(base * num(l.iva_pct) / 100)); }
     nCompras++;
   }
-  const v = ordenar(ventas), c = ordenar(compr);
-  const generado = r2(v.reduce((s, x) => s + x.iva, 0)), descontable = r2(c.reduce((s, x) => s + x.iva, 0));
-  const saldo = r2(generado - descontable - reteivaQueLePracticaron);
+  const v = ordenar(ventas), dv = ordenar(devol), c = ordenar(compr);
+  const suma = (l, k) => r2(l.reduce((s, x) => s + x[k], 0));
+  const generado = suma(v, 'iva'), devoluciones = suma(dv, 'iva'), descontable = suma(c, 'iva');
+  const saldo = r2(generado - descontable - devoluciones - reteivaQueLePracticaron);
   return {
-    ventas: v, compras: c, nVentas, nCompras,
-    baseVentas: r2(v.reduce((s, x) => s + x.base, 0)), baseCompras: r2(c.reduce((s, x) => s + x.base, 0)),
-    generado, descontable, reteivaQueLePracticaron, saldo,
+    ventas: v, devoluciones: dv, compras: c, nVentas, nDevol, nCompras,
+    baseVentas: suma(v, 'base'), baseDevoluciones: suma(dv, 'base'), baseCompras: suma(c, 'base'),
+    generado, ivaDevoluciones: devoluciones, descontable, reteivaQueLePracticaron, saldo,
     aPagar: saldo > 0 ? saldo : 0, aFavor: saldo < 0 ? -saldo : 0,
   };
 }
@@ -117,7 +119,7 @@ export function certificado(compras, tercero, desde, hasta) {
 export const tercerosConRetencion = (compras, desde, hasta) => [...new Set(retencionesDeCompras(compras, desde, hasta).map(f => f.tercero_id))];
 
 // Anexo del informe de IVA: una fila por documento y tarifa (lo que soporta cada cifra del informe).
-// seccion: 'ventas' | 'compras' | 'reteiva'. Las notas crédito van en negativo.
+// seccion: 'ventas' | 'devoluciones' (notas crédito) | 'compras' | 'reteiva' (la de notas crédito va en negativo).
 export function anexoIva({ documentos = [], items = [], compras = [] }, desde, hasta) {
   const itemsDe = {};
   for (const it of items) (itemsDe[it.documento_id] = itemsDe[it.documento_id] || []).push(it);
@@ -125,7 +127,7 @@ export function anexoIva({ documentos = [], items = [], compras = [] }, desde, h
   for (const d of documentos) {
     if (d.estado !== 'emitido' || !['FV', 'NC', 'ND'].includes(d.tipo) || !enRango(d.fecha, desde, hasta)) continue;
     const s = d.tipo === 'NC' ? -1 : 1, t = totales(itemsDe[d.id] || []);
-    for (const x of Object.values(t.porTarifa)) if (x.base || x.iva) filas.push({ seccion: 'ventas', fecha: d.fecha, doc: d, tercero_id: d.tercero_id, base: r2(s * x.base), tarifa: x.tarifa, valor: r2(s * x.iva) });
+    for (const x of Object.values(t.porTarifa)) if (x.base || x.iva) filas.push({ seccion: s < 0 ? 'devoluciones' : 'ventas', fecha: d.fecha, doc: d, tercero_id: d.tercero_id, base: x.base, tarifa: x.tarifa, valor: x.iva });
     if (num(d.reteiva)) filas.push({ seccion: 'reteiva', fecha: d.fecha, doc: d, tercero_id: d.tercero_id, base: r2(s * num(t.iva)), tarifa: num(d.reteiva_pct), valor: r2(s * num(d.reteiva)) });
   }
   for (const c of compras) {
@@ -134,7 +136,7 @@ export function anexoIva({ documentos = [], items = [], compras = [] }, desde, h
     for (const l of c.lineas || []) { const base = r2(num(l.base)); sumarTarifa(por, l.iva_pct, base, r2(base * num(l.iva_pct) / 100)); }
     for (const x of Object.values(por)) if (x.base || x.iva) filas.push({ seccion: 'compras', fecha: c.fecha, compra: c, tercero_id: c.tercero_id, base: x.base, tarifa: x.tarifa, valor: x.iva });
   }
-  const orden = { ventas: 0, compras: 1, reteiva: 2 };
+  const orden = { ventas: 0, devoluciones: 1, compras: 2, reteiva: 3 };
   return filas.sort((a, b) => orden[a.seccion] - orden[b.seccion] || a.fecha.localeCompare(b.fecha));
 }
 

@@ -2722,25 +2722,30 @@ function vIva(m) {
     const { desde, hasta } = rangoPer(false), r = informeIva(S.d, desde, hasta);
     // Cruce con la contabilidad: movimiento neto de las cuentas 2408 en el período.
     const cont = r2(movs().filter(x => x.cuenta.startsWith('2408') && x.fecha >= desde && x.fecha <= hasta && x.tipo !== 'CI').reduce((s, x) => s + x.credito - x.debito, 0));
-    const neto = r2(r.generado - r.descontable);
+    const neto = r2(r.generado - r.descontable - r.ivaDevoluciones);
     return cabInforme('IVA del período', `${PER.tipo === 'bimestral' ? 'Bimestre' : 'Cuatrimestre'} ${PER.n} de ${PER.anio}<br>Del ${fFecha(desde)} al ${fFecha(hasta)}`) + `
-      ${tabla(r.ventas, `Ventas (${r.nVentas} facturas y notas)`)}
-      <p class="rep-small">Las notas crédito restan. Solo cuentan facturas y notas guardadas (no borradores ni anuladas).</p>
-      ${tabla(r.compras, `Compras (${r.nCompras} facturas de proveedor y documentos soporte)`)}
+      ${tabla(r.ventas, `Ventas: IVA generado (${r.nVentas} facturas y notas débito)`)}
+      ${tabla(r.devoluciones, `Devoluciones en ventas: notas crédito (${r.nDevol})`)}
+      <p class="rep-small">Solo cuentan facturas y notas guardadas (no borradores ni anuladas). Las devoluciones van aparte, como en el formulario 300: restan de los ingresos y su IVA se descuenta.</p>
+      ${tabla(r.compras, `Compras: IVA descontable (${r.nCompras} facturas de proveedor y documentos soporte)`)}
       <div class="inf">
-        <div class="inf-l plain"><span>IVA generado</span><span class="mono">${money(r.generado)}</span></div>
-        <div class="inf-l plain"><span>(menos) IVA descontable</span><span class="mono">${money(r.descontable)}</span></div>
+        <div class="inf-l plain"><span>Ingresos netos (ventas ${money(r.baseVentas)} menos devoluciones ${money(r.baseDevoluciones)})</span><span class="mono">${money(r2(r.baseVentas - r.baseDevoluciones))}</span></div>
+        <div class="inf-l sub"><span>IVA generado en ventas</span><span class="mono">${money(r.generado)}</span></div>
+        <div class="inf-l plain"><span>IVA descontable en compras</span><span class="mono">${money(r.descontable)}</span></div>
+        <div class="inf-l plain"><span>IVA por devoluciones en ventas (notas crédito)</span><span class="mono">${money(r.ivaDevoluciones)}</span></div>
+        <div class="inf-l sub"><span>(menos) Total IVA descontable</span><span class="mono">${money(r2(r.descontable + r.ivaDevoluciones))}</span></div>
         <div class="inf-l plain"><span>(menos) Retenciones de IVA que le practicaron</span><span class="mono">${money(r.reteivaQueLePracticaron)}</span></div>
         <div class="inf-l tot big"><span>${r.aFavor ? 'Saldo a favor' : 'Saldo a pagar'}</span><span class="mono">${money(r.aFavor || r.aPagar)}</span></div>
       </div>
-      ${Math.abs(cont - neto) < 1 ? '<p class="okmsg">Cuadra con la contabilidad (cuentas 2408).</p>' : `<p class="hint">En la contabilidad, las cuentas 2408 suman ${money(cont)} en el período y aquí el IVA generado menos el descontable da ${money(neto)}. La diferencia suele venir de comprobantes contables o ajustes hechos a mano en esas cuentas: revísalos en el <a href="#/auxiliar">libro auxiliar</a>.</p>`}
+      ${Math.abs(cont - neto) < 1 ? '<p class="okmsg">Cuadra con la contabilidad (cuentas 2408).</p>' : `<p class="hint">En la contabilidad, las cuentas 2408 suman ${money(cont)} en el período y aquí el IVA generado menos el descontable y las devoluciones da ${money(neto)}. La diferencia suele venir de comprobantes contables o ajustes hechos a mano en esas cuentas: revísalos en el <a href="#/auxiliar">libro auxiliar</a>.</p>`}
       <p class="rep-small">Informe de apoyo para diligenciar el formulario 300. Verifica las cifras antes de presentarlo.</p>`;
   };
   const pintar = () => { $('out').innerHTML = html(); if (!$('anexo').hidden) { $('anexo').hidden = true; $('verAnexo').click(); } };
   $('imp').onclick = () => botonImprimir('IVA del período', html);
   botonesAnexo('IVA del período', () => { const { desde, hasta } = rangoPer(false), fs = anexoIva(S.d, desde, hasta);
     return { desde, sub: `Del ${fFecha(desde)} al ${fFecha(hasta)}`, grupos: [
-      { titulo: 'IVA generado en ventas (las notas crédito restan)', filas: fs.filter(f => f.seccion === 'ventas'), colValor: 'IVA' },
+      { titulo: 'IVA generado en ventas (facturas y notas débito)', filas: fs.filter(f => f.seccion === 'ventas'), colValor: 'IVA' },
+      { titulo: 'Devoluciones en ventas (notas crédito)', filas: fs.filter(f => f.seccion === 'devoluciones'), colValor: 'IVA' },
       { titulo: 'IVA descontable en compras', filas: fs.filter(f => f.seccion === 'compras'), colValor: 'IVA' },
       { titulo: 'Retenciones de IVA que le practicaron', filas: fs.filter(f => f.seccion === 'reteiva').map(f => ({ ...f, concepto: 'Base: IVA de la factura' })), colValor: 'Retenido' }] }; });
   pintar();

@@ -31,13 +31,16 @@ const compras = [
 
 test('informe de IVA del bimestre', () => {
   const r = informeIva({ documentos, items, compras }, '2026-11-01', '2026-12-31');
-  assert.deepEqual(r.ventas, [{ tarifa: 19, base: 80000, iva: 15200 }, { tarifa: 0, base: 20000, iva: 0 }]);
-  assert.equal(r.generado, 15200);
+  assert.deepEqual(r.ventas, [{ tarifa: 19, base: 100000, iva: 19000 }, { tarifa: 0, base: 20000, iva: 0 }]);
+  assert.deepEqual(r.devoluciones, [{ tarifa: 19, base: 20000, iva: 3800 }]);
+  assert.equal(r.generado, 19000);
+  assert.equal(r.ivaDevoluciones, 3800);
   assert.equal(r.descontable, 9500);
   assert.equal(r.reteivaQueLePracticaron, 2850);
   assert.equal(r.saldo, 2850);
   assert.equal(r.aPagar, 2850);
-  assert.equal(r.nVentas, 2);
+  assert.equal(r.nVentas, 1);
+  assert.equal(r.nDevol, 1);
   assert.equal(r.nCompras, 2);
 });
 
@@ -61,9 +64,10 @@ test('retenciones practicadas y certificados', () => {
 test('anexos de IVA y retenciones', async () => {
   const { anexoIva, anexoRetenciones } = await import('../src/informes.js');
   const a = anexoIva({ documentos, items, compras }, '2026-11-01', '2026-12-31');
-  assert.equal(a.filter(f => f.seccion === 'ventas').reduce((s, f) => s + f.valor, 0), 15200);
+  assert.equal(a.filter(f => f.seccion === 'ventas').reduce((s, f) => s + f.valor, 0), 19000);
   assert.equal(a.filter(f => f.seccion === 'compras').reduce((s, f) => s + f.valor, 0), 9500);
-  assert.equal(a.find(f => f.doc?.id === 'n1').valor, -3800);
+  assert.equal(a.find(f => f.doc?.id === 'n1').valor, 3800);
+  assert.equal(a.find(f => f.doc?.id === 'n1').seccion, 'devoluciones');
   const r = anexoRetenciones(compras, [{ origen: 'nomina', fecha: '2026-11-30', cuenta: '23650501', credito: 120000, debito: 0, ref: 'NE 1' }], '2026-11-01', '2026-11-30');
   assert.equal(r.filter(f => f.tipo === 'retefuente').length, 3);
   assert.equal(r.reduce((s, f) => s + f.valor, 0), 2000 + 1425 + 110000 + 9660 + 120000);
