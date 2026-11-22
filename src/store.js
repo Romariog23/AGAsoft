@@ -3,6 +3,7 @@
 //  - "local": datos solo en este navegador, para probar sin configurar nada (modo demostración).
 import { createClient } from '@supabase/supabase-js';
 import { PLANES_DEMO } from './planes.js';
+import { datosDemo, hoyLocal } from './demo.js';
 
 const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -45,16 +46,20 @@ function motivoNoEliminar(d, documentos, aplicaciones, envios = []) {
 function revisarEliminar(d, documentos, aplicaciones, envios) { const m = motivoNoEliminar(d, documentos, aplicaciones, envios); if (m) throw new Error(m); }
 
 /* ---------- Modo local ---------- */
-function localStore() {
-  const KEY = 'agasoft-demo-v1';
+// publico = enlace www.agasoft.co/demo: arranca con la empresa de demostración ya diligenciada y vuelve a ella cada día.
+function localStore({ publico = false } = {}) {
+  const KEY = publico ? 'agasoft-demo-publico' : 'agasoft-demo-v1';
   let db;
   try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (_) { db = null; }
+  if (publico && (!db || db._dia !== hoyLocal())) { db = datosDemo(hoyLocal()); db._dia = hoyLocal(); }
   if (!db) db = { empresas: [], ...Object.fromEntries(TABLAS.map(t => [t, []])) };
   for (const t of ['empresas', ...TABLAS]) db[t] = db[t] || [];
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) { /* sin almacenamiento: queda en memoria */ } };
   const user = { id: 'demo', email: 'demo@agasoft.local' };
+  if (publico) persist();
   const api = {
     mode: 'local',
+    publico,
     async session() { return user; },
     async perfil() { return { id: 'demo', nombre: 'Modo demostración', es_admin: true, aprobado: true }; },
     async fe() { throw new Error('El envío a la DIAN funciona con la cuenta en línea, no en el modo demostración.'); },
@@ -205,7 +210,7 @@ function crearStore() {
   const key = String(import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
   // www.agasoft.co/demo abre siempre la demostración (datos solo en el navegador), aunque haya Supabase.
   const demo = typeof location !== 'undefined' && /^\/demo\/?$/.test(location.pathname);
-  return url && key && !demo ? supabaseStore(url, key) : localStore();
+  return url && key && !demo ? supabaseStore(url, key) : localStore({ publico: demo });
 }
 
 export { crearStore, numeracionPara, motivoNoEliminar, envioValidado };
