@@ -203,7 +203,9 @@ function crearStore() {
   const raw = String(import.meta.env?.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const url = !raw ? '' : raw.includes('://') ? raw : raw.includes('.') ? 'https://' + raw : `https://${raw}.supabase.co`;
   const key = String(import.meta.env?.VITE_SUPABASE_ANON_KEY || '').trim();
-  return url && key ? supabaseStore(url, key) : localStore();
+  // www.agasoft.co/demo abre siempre la demostración (datos solo en el navegador), aunque haya Supabase.
+  const demo = typeof location !== 'undefined' && /^\/demo\/?$/.test(location.pathname);
+  return url && key && !demo ? supabaseStore(url, key) : localStore();
 }
 
 export { crearStore, numeracionPara, motivoNoEliminar, envioValidado };

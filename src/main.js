@@ -113,6 +113,8 @@ async function iniciar() {
   S.plan = null;
   if (store.mode === 'supabase' && !S.perfil?.es_admin) { try { S.plan = (await store.miPlan())?.plan || null; } catch (_) { /* falta 009: sin límites */ } }
   S.empresas = await store.listEmpresas();
+  // Enlace de demostración (/demo): la primera vez entra con la empresa de ejemplo ya creada.
+  if (store.mode === 'local' && /^\/demo\/?$/.test(location.pathname) && !S.empresas.length) return cargarEjemplo();
   let guardada = null; try { guardada = localStorage.getItem('agasoft-empresa'); } catch (_) {}
   S.eid = S.empresas.find(e => e.id === guardada)?.id || S.empresas[0]?.id || null;
   await cargarEmpresa();
