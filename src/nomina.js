@@ -121,12 +121,15 @@ export function liquidar(emp, nov, P) {
 export const totalesNomina = lineas => ['devengado', 'deducciones', 'neto', 'aportes', 'provisiones'].reduce((o, k) => ({ ...o, [k]: r2((lineas || []).reduce((s, l) => s + num(l[k]), 0)) }), {});
 
 // Movimientos contables de una nómina guardada (las cuentas quedan guardadas en cada línea).
-export function asientoNomina(n) {
+// ccEmp: { tercero_id: distribución por centros de costo del empleado } (la línea de la nómina puede traer la suya).
+export function asientoNomina(n, ccEmp = {}) {
   // Solo la nómina contabilizada suma (el borrador y la anulada no).
   if (!n || n.estado === 'anulado' || n.estado === 'borrador') return [];
   const ref = `NE ${n.numero}`, out = [];
-  const mov = (cuenta, debito, credito, tercero_id, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: n.fecha, doc_id: n.id, tipo: 'NE', ref, origen: 'nomina', cuenta, tercero_id: tercero_id || null, detalle, debito, credito }); };
+  let dist = null;
+  const mov = (cuenta, debito, credito, tercero_id, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: n.fecha, doc_id: n.id, tipo: 'NE', ref, origen: 'nomina', cuenta, tercero_id: tercero_id || null, detalle, debito, credito, ...(dist?.length ? { _dist: dist } : {}) }); };
   for (const l of n.lineas || []) {
+    dist = Array.isArray(l.cc) && l.cc.length ? l.cc : ccEmp[l.tercero_id] || null;
     for (const i of l.items || []) {
       if (i.tipo === 'dev') mov(i.cuenta, i.valor, 0, l.tercero_id, i.nombre);
       // Sin la entidad configurada, el pasivo queda a nombre del empleado (toda línea lleva tercero) y se paga escogiendo la entidad.

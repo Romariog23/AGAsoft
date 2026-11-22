@@ -5,6 +5,7 @@ import { r2, num, linea, excedenteDe } from './calc.js';
 import { asientoCompra } from './compras.js';
 import { asientoNomina } from './nomina.js';
 import { movimientosInv, costear, asientoInventario } from './inventario.js';
+import { cfgCC, aplicarCC, primeraDist, distPonderada, claveDist } from './centros.js';
 import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
 
 const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC: 'Recibo de caja' };
@@ -17,20 +18,26 @@ function asiento(d, ctx) {
   const ref = `${d.prefijo || ''}${d.prefijo ? ' ' : ''}${d.numero}`;
   const base = { fecha: d.fecha, doc_id: d.id, tipo: d.tipo, ref, tercero_id: d.tercero_id };
   const out = [];
-  const mov = (cuenta, debito, credito, detalle, conTercero = true) => {
+  // dist: distribución por centros de costo del movimiento (se aplica al final si la cuenta lleva centro).
+  let dist = [];
+  const mov = (cuenta, debito, credito, detalle, conTercero = true, dd = dist) => {
     debito = r2(debito); credito = r2(credito); cuenta = a8(cuenta);
     if (!debito && !credito) return;
-    out.push({ ...base, cuenta, debito, credito, detalle, tercero_id: conTercero ? d.tercero_id : null });
+    out.push({ ...base, cuenta, debito, credito, detalle, tercero_id: conTercero ? d.tercero_id : null, ...(dd?.length ? { _dist: dd } : {}) });
   };
   const prods = Object.fromEntries((ctx.productos || []).map(p => [p.id, p]));
 
   if (d.tipo === 'RC') {
     const caja = String(d.cuenta_pago || '').trim() || (d.medio_pago === 'efectivo' ? P.caja : P.bancos);
-    mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`);
     const docs = Object.fromEntries((ctx.docs || []).map(x => [x.id, x]));
-    for (const a of (ctx.aplicaciones || []).filter(a => a.recibo_id === d.id)) {
+    const apls = (ctx.aplicaciones || []).filter(a => a.recibo_id === d.id);
+    // Cada abono sigue el centro de su factura; caja o bancos, el del recibo o el de las facturas que paga.
+    const distF = a => primeraDist(d.cc, docs[a.factura_id] ? distDoc(docs[a.factura_id], ctx) : []);
+    dist = primeraDist(d.cc, distPonderada(apls.map(a => ({ dist: distF(a), valor: a.valor }))));
+    mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`);
+    for (const a of apls) {
       const f = docs[a.factura_id];
-      mov(P.clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`);
+      mov(P.clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`, true, distF(a));
     }
     mov(P.anticipos, 0, d.anticipo, 'Anticipo recibido');
     const ex = d.retenciones?.excedente;
@@ -40,8 +47,10 @@ function asiento(d, ctx) {
 
   // Factura, nota débito (suman) y nota crédito (resta).
   const its = (ctx.items || []).filter(i => i.documento_id === d.id);
-  const porCuenta = {};
+  const porCuenta = {}, distPor = {};
   const ivaPor = {};
+  dist = distDoc(d, ctx);
+  const dcc = ccPropio(d, ctx);
   for (const it of its) {
     const l = linea(it);
     // Cada producto puede tener su cuenta para factura y nota débito, y otra para nota crédito o devolución.
@@ -53,7 +62,10 @@ function asiento(d, ctx) {
     else if (d.tipo === 'NC') cta = pr.cuenta_devolucion || P.devoluciones;
     else if (pr.cuenta_ingreso) cta = pr.cuenta_ingreso;
     else cta = d.tipo === 'ND' && d.concepto === '1' ? P.intereses : P.ingresos;
-    porCuenta[cta] = r2((porCuenta[cta] || 0) + l.base);
+    // La línea lleva su centro de costo, o el del producto, o el general del documento.
+    const dl = primeraDist(it.cc, pr.cc, dcc), k = `${cta}#${claveDist(dl)}`;
+    distPor[k] = dl;
+    porCuenta[k] = r2((porCuenta[k] || 0) + l.base);
     // El IVA va a la cuenta de su tarifa (si la tarifa tiene cuenta propia) o a la de los parámetros.
     const ci = cuentaIva(ctx.tarifas, it.iva_pct, 'venta', P);
     ivaPor[ci] = r2((ivaPor[ci] || 0) + l.iva);
@@ -76,12 +88,22 @@ function asiento(d, ctx) {
     const r = d.retenciones?.[k] || (d.tipo !== 'FV' ? fac?.retenciones?.[k] : null);
     lado(String(r?.cuenta || '').trim() || P[k], d[k], r?.nombre ? `${nom} · ${r.nombre}` : nom, (r?.naturaleza || 'D') === 'D');
   }
-  for (const [cta, v] of Object.entries(porCuenta)) {
+  for (const [k, v] of Object.entries(porCuenta)) {
     // La nota crédito lleva la devolución al débito (4175 o la cuenta de devolución del producto).
-    if (d.tipo === 'NC') mov(cta, v, 0, det); else lado(cta, v, det, false);
+    const cta = k.split('#')[0], dd = distPor[k];
+    if (d.tipo === 'NC') mov(cta, v, 0, det, true, dd); else { const dr = -signo > 0; mov(cta, dr ? v : 0, dr ? 0 : v, det, true, dd); }
   }
   for (const [ci, v] of Object.entries(ivaPor)) lado(ci, v, 'IVA', false);
   return cuadrar(out, P);
+}
+// Centro de costo general de un documento de venta: el escogido en el documento o, si no, el de sus líneas según su valor.
+// Las notas sin centro propio siguen el de su factura.
+const ccPropio = (d, ctx) => primeraDist(d.cc, d.tipo === 'NC' || d.tipo === 'ND' ? (ctx.docs || []).find(x => x.id === d.ref_id)?.cc : []);
+function distDoc(d, ctx) {
+  const propio = ccPropio(d, ctx);
+  if (propio.length) return propio;
+  const prods = Object.fromEntries((ctx.productos || []).map(p => [p.id, p]));
+  return distPonderada((ctx.items || []).filter(i => i.documento_id === d.id).map(it => ({ dist: primeraDist(it.cc, prods[it.producto_id]?.cc), valor: linea(it).base })));
 }
 // Diferencias de centavos por redondeo se llevan a la cuenta de ingresos para que el asiento cuadre.
 function cuadrar(out, P) {
@@ -127,7 +149,8 @@ function asientoComprobante(c) {
   if (c.estado === 'anulado') return [];
   const ref = `${c.tipo} ${c.numero}`;
   return (c.lineas || []).map(l => ({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'comp', cuenta: a8(l.cuenta), tercero_id: l.tercero_id || null,
-    detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)) })).filter(m => m.debito || m.credito);
+    detalle: l.detalle || c.descripcion || TIPOS_COMP[c.tipo]?.nombre || '', debito: r2(num(l.debito)), credito: r2(num(l.credito)),
+    ...(l.cc1 ? { cc1: l.cc1 } : {}), ...(l.cc2 ? { cc2: l.cc2 } : {}), ...(l.cc3 ? { cc3: l.cc3 } : {}) })).filter(m => m.debito || m.credito);
 }
 // Errores del comprobante (lista vacía si está bien). Solo se contabiliza en cuentas auxiliares de 8 dígitos.
 function erroresComprobante(c, cuentas) {
@@ -153,10 +176,13 @@ function erroresComprobante(c, cuentas) {
 
 function movimientos(S) {
   const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos, tarifas: S.tarifas };
-  return S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param, S.tarifas))).concat((S.nominas || []).flatMap(asientoNomina))
+  const ctxC = { compras: S.compras, productos: S.productos };
+  const ccEmp = Object.fromEntries((S.empleados || []).map(e => [e.tercero_id, e.cc]));
+  const todos = S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param, S.tarifas, ctxC))).concat((S.nominas || []).flatMap(n => asientoNomina(n, ccEmp)))
     // Costo de ventas, devoluciones y ajustes de inventario, costeados con el método de la empresa.
-    .concat(asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param }))
-    .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
+    .concat(asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param }));
+  // Centros de costo: cada movimiento de una cuenta del alcance se reparte según la distribución de su línea o documento.
+  return aplicarCC(todos, S.cc || cfgCC(S.contabilidad)).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }
 
 /* ---------- Plan de cuentas ---------- */
@@ -319,4 +345,4 @@ function carteraEdades(filas) {
   return out.map(([k, v]) => [k, r2(v)]);
 }
 
-export { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };
+export { distDoc, ccPropio, resumenMensual, carteraEdades, cierreAnual, auxiliarRango, unLado, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe, ancestros };

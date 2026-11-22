@@ -565,3 +565,11 @@ button.cfg-main:hover{background:none}
 @media (max-width:720px){.tbl.comp td.c-na{display:none}}
 .tbl.comp .blk{display:block;text-align:right;padding-top:8px}
 .tbl.comp td[data-l=Producto]{min-width:190px}.tbl.comp td.c-desc{min-width:150px}
+.tbl.comp td.c-cc{min-width:170px}.tbl.comp td.c-cc select{display:block;margin-top:2px}
+/* Centros de costo: distribución y botón por línea */
+.ccd { gap: 6px; }
+.ccd-r { gap: 6px; flex-wrap: wrap; }
+.ccd-r .w-num { width: 80px; }
+.cc-b { max-width: 170px; white-space: normal; text-align: left; font-size: .85em; }
+.cc-b.muted { opacity: .75; }
+[data-sum].bad { color: var(--bad, #c0392b); }

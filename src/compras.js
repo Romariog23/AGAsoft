@@ -4,6 +4,7 @@ import { r2, num } from './calc.js';
 import { a8, esAuxiliar, parametrosDe } from './puc.js';
 import { cuentaIva } from './impuestos.js';
 import { esLineaProducto, erroresLineaProducto } from './inventario.js';
+import { primeraDist, distPonderada } from './centros.js';
 
 const TIPOS_COMPRA = {
   FC: { nombre: 'Factura de proveedor', corto: 'Fact. prov.', plural: 'Facturas de proveedor', nuevo: 'Nueva factura de proveedor' },
@@ -22,21 +23,36 @@ function totalesCompra(lineas, ret = {}) {
 const totalEgreso = c => r2((c.aplicaciones || []).reduce((s, a) => s + num(a.valor), 0) + num(c.anticipo));
 
 const numCompra = c => `${c.tipo} ${c.numero}`;
-function asientoCompra(c, param, tarifas) {
+// Centro de costo de cada línea de compra: el suyo, el del producto o el general del documento.
+const distLineaCompra = (l, c, prods) => primeraDist(l.cc, l.producto_id ? prods?.[l.producto_id]?.cc : null, c.cc);
+// Centro general de una compra: el escogido o el de sus líneas según su valor (para proveedores, IVA y retenciones).
+function distCompra(c, productos) {
+  if (primeraDist(c.cc).length) return primeraDist(c.cc);
+  const prods = Object.fromEntries((productos || []).map(p => [p.id, p]));
+  return distPonderada((c.lineas || []).map(l => ({ dist: distLineaCompra(l, c, prods), valor: num(l.base) })));
+}
+// ctx: { compras, productos } para los centros de costo.
+function asientoCompra(c, param, tarifas, ctx = {}) {
   if (!c || c.estado === 'anulado') return [];
   const P = parametrosDe(param), ref = numCompra(c), out = [];
-  const mov = (cuenta, debito, credito, detalle) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'compra', cuenta: a8(cuenta), tercero_id: c.tercero_id || null, detalle, debito, credito }); };
+  const prods = Object.fromEntries((ctx.productos || []).map(p => [p.id, p]));
+  let dist = c.tipo === 'CE' ? [] : distCompra(c, ctx.productos);
+  const mov = (cuenta, debito, credito, detalle, dd = dist) => { debito = r2(debito); credito = r2(credito); if (debito || credito) out.push({ fecha: c.fecha, doc_id: c.id, tipo: c.tipo, ref, origen: 'compra', cuenta: a8(cuenta), tercero_id: c.tercero_id || null, detalle, debito, credito, ...(dd?.length ? { _dist: dd } : {}) }); };
   const nom = TIPOS_COMPRA[c.tipo].nombre;
   if (c.tipo === 'CE') {
+    // Cada pago sigue el centro de la factura que paga (o el del egreso, si lo tiene).
+    const comps = Object.fromEntries((ctx.compras || []).map(x => [x.id, x]));
+    const distA = a => primeraDist(c.cc, comps[a.compra_id] ? distCompra(comps[a.compra_id], ctx.productos) : []);
+    dist = primeraDist(c.cc, distPonderada((c.aplicaciones || []).map(a => ({ dist: distA(a), valor: a.valor }))));
     // Cada aplicación paga una factura (a proveedores) o un saldo de nómina (a su cuenta: salarios, aportes, prestaciones).
-    for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || P.proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim());
+    for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || P.proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim(), distA(a));
     mov(P.anticipos_prov, num(c.anticipo), 0, 'Anticipo a proveedor');
     mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
     return out;
   }
   const t = totalesCompra(c.lineas, c);
   const det = `${nom} ${c.num_proveedor || c.numero}`;
-  for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || det);
+  for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || det, distLineaCompra(l, c, prods));
   // IVA de cada línea a la cuenta de su tarifa (o la de los parámetros).
   const ivaPor = {};
   for (const l of c.lineas || []) { const ci = cuentaIva(tarifas, l.iva_pct, 'compra', P); ivaPor[ci] = r2((ivaPor[ci] || 0) + r2(r2(num(l.base)) * num(l.iva_pct) / 100)); }
@@ -88,4 +104,4 @@ function erroresCompra(c, cuentas, productos) {
   return out;
 }
 
-export { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra, numCompra };
+export { distCompra, distLineaCompra, TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra, numCompra };

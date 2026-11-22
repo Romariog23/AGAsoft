@@ -1,5 +1,6 @@
 // Inventario: productos inventariables (los servicios no llevan existencias), bodegas con su cuenta 14 y
 // método de costeo de la empresa (promedio ponderado o PEPS; UEPS no lo permiten las NIIF).
+import { primeraDist, claveDist } from './centros.js';
 import { r2, num } from './calc.js';
 import { esAuxiliar, parametrosDe } from './puc.js';
 
@@ -66,12 +67,12 @@ export function movimientosInv(S) {
   const inv = id => esInventariable(prods[id]);
   for (const c of S.compras || []) {
     if (c.estado === 'anulado' || c.tipo === 'CE') continue;
-    (c.lineas || []).forEach((l, i) => { if (esLineaProducto(l) && inv(l.producto_id)) out.push({ fecha: c.fecha, orden: 0, origen: 'compra', doc_id: c.id, tipo: c.tipo, ref: `${c.tipo} ${c.numero}`, linea: i, tercero_id: c.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: num(l.cantidad), costo: num(l.costo) }); });
+    (c.lineas || []).forEach((l, i) => { if (esLineaProducto(l) && inv(l.producto_id)) out.push({ fecha: c.fecha, orden: 0, origen: 'compra', doc_id: c.id, tipo: c.tipo, ref: `${c.tipo} ${c.numero}`, linea: i, tercero_id: c.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: num(l.cantidad), costo: num(l.costo), dist: primeraDist(l.cc, prods[l.producto_id]?.cc, c.cc) }); });
   }
   for (const a of S.inventario_docs || []) {
     if (a.estado === 'anulado' || a.tipo !== 'AI') continue;
     (a.lineas || []).forEach((l, i) => { if (!inv(l.producto_id) || !num(l.cantidad)) return; const ent = l.sentido !== 'salida';
-      out.push({ fecha: a.fecha, orden: ent ? 1 : 3, origen: 'ajuste', doc_id: a.id, tipo: 'AI', ref: `AI ${a.numero}`, linea: i, tercero_id: a.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: (ent ? 1 : -1) * Math.abs(num(l.cantidad)), costo: ent ? num(l.costo) : null, contra: a.cuenta_contra }); });
+      out.push({ fecha: a.fecha, orden: ent ? 1 : 3, origen: 'ajuste', doc_id: a.id, tipo: 'AI', ref: `AI ${a.numero}`, linea: i, tercero_id: a.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: (ent ? 1 : -1) * Math.abs(num(l.cantidad)), costo: ent ? num(l.costo) : null, contra: a.cuenta_contra, dist: primeraDist(l.cc, a.cc) }); });
   }
   const docs = Object.fromEntries((S.documentos || []).map(d => [d.id, d])), itemsPor = {};
   for (const it of S.items || []) (itemsPor[it.documento_id] ||= []).push(it);
@@ -83,7 +84,8 @@ export function movimientosInv(S) {
       if (!it.producto_id || !inv(it.producto_id) || !num(it.cantidad)) return;
       const p = prods[it.producto_id], venta = d.tipo === 'FV';
       out.push({ fecha: d.fecha, orden: venta ? 3 : 2, origen: venta ? 'venta' : 'devolucion', doc_id: d.id, tipo: d.tipo, ref, linea: i, tercero_id: d.tercero_id, producto_id: it.producto_id, bodega_id: it.bodega_id || p.bodega_id || '',
-        cantidad: (venta ? -1 : 1) * num(it.cantidad), costo: null, factura_id: venta ? null : d.ref_id || null, factura: venta ? null : docs[d.ref_id] || null });
+        cantidad: (venta ? -1 : 1) * num(it.cantidad), costo: null, factura_id: venta ? null : d.ref_id || null, factura: venta ? null : docs[d.ref_id] || null,
+        dist: primeraDist(it.cc, p.cc, d.cc, venta ? null : docs[d.ref_id]?.cc) });
     });
   }
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.orden - b.orden || String(a.ref).localeCompare(String(b.ref)) || a.linea - b.linea);
@@ -149,8 +151,8 @@ export function asientoInventario(costeados, { productos, bodegas, param }) {
   const cta14 = id => bods[id]?.cuenta || P.inventario, out = {};
   const mov = (m, cuenta, debito, credito, detalle) => {
     debito = r2(debito); credito = r2(credito); if (!debito && !credito) return;
-    const k = `${m.doc_id}|${cuenta}|${debito ? 'D' : 'C'}`;
-    const x = out[k] ||= { fecha: m.fecha, doc_id: m.doc_id, tipo: m.tipo, ref: m.ref, origen: 'inventario', cuenta, tercero_id: m.tercero_id || null, detalle, debito: 0, credito: 0 };
+    const k = `${m.doc_id}|${cuenta}|${debito ? 'D' : 'C'}|${claveDist(m.dist)}`;
+    const x = out[k] ||= { fecha: m.fecha, doc_id: m.doc_id, tipo: m.tipo, ref: m.ref, origen: 'inventario', cuenta, tercero_id: m.tercero_id || null, detalle, debito: 0, credito: 0, ...(m.dist?.length ? { _dist: m.dist } : {}) };
     x.debito = r2(x.debito + debito); x.credito = r2(x.credito + credito);
   };
   for (const m of costeados) {
