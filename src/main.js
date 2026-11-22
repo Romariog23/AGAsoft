@@ -1,4 +1,5 @@
 import './style.css';
+import { UNIDADES_DEF, CODIGOS_DIAN, unidadesDe, erroresUnidad } from './unidades.js';
 import { jsonFE, erroresFE, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar, envioValidado } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
@@ -219,8 +220,8 @@ const MENU = [
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
-  { t: 'Datos', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios']] },
+  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
+  { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
   { k: 'config', t: 'Configuración', i: 'config' },
 ];
@@ -304,6 +305,7 @@ function route() {
     if (v === 'ajusteinveditar') return vAjusteInvEditor(m, { id: arg });
     if (v === 'ajusteinv') return vAjusteInv(m, arg);
     if (v === 'traslados') return vTraslados(m);
+    if (v === 'unidades') return vUnidades(m);
     if (v === 'trasladonuevo') return vTrasladoEditor(m, {});
     if (v === 'trasladoeditar') return vTrasladoEditor(m, { id: arg });
     if (v === 'traslado') return vTraslado(m, arg);
@@ -1453,7 +1455,7 @@ const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === do
 const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
 function datosFE(d) {
   const ref = d.ref_id ? docById(d.ref_id) : null;
-  return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id),
+  return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id), unidades: unidades(),
     numeracion: S.d.numeraciones.find(n => n.id === d.numeracion_id), ref, cufeRef: ref ? envioAceptado(ref.id)?.cufe || '' : '',
     numeroRef: ref ? envioAceptado(ref.id)?.respuesta?.data?.number || '' : '' };
 }
@@ -1629,7 +1631,7 @@ function vClientes(m) {
 const selCuenta = (name, etiqueta, patron, valor, defecto) => `<div><label for="f_${name}">${etiqueta}</label><select id="f_${name}" name="${name}"><option value="">La de la empresa (${esc(defecto)})</option>${cuentasAux().filter(c => patron.test(c.codigo)).map(c => `<option value="${c.codigo}" ${c.codigo === a8(valor) ? 'selected' : ''}>${c.codigo} ${esc(c.nombre)}</option>`).join('')}</select></div>`;
 function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
-    <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
+    <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}<div><label for="f_unidad">Unidad de medida <a class="hint" href="#/unidades">Crear</a></label><select id="f_unidad" name="unidad">${optsUnidad(p.unidad || 'UND')}</select></div></div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
     <div class="grid2">${campoSel('tipo', 'Tipo', TIPOS_ITEM, p.tipo || 'producto')}${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}</div>
     <div class="grid2">${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}<div data-inv>${campoSel('bodega_id', 'Bodega donde entra al comprar', bodegas().map(b => [b.id, `${b.codigo} · ${b.nombre}`]), p.bodega_id || '')}</div></div>
@@ -2093,6 +2095,34 @@ function vAjusteInv(m, id) {
     const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
     await store.save('inventario_docs', { id: a.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() }); await cargarEmpresa(); toast('Ajuste anulado.'); route();
   });
+}
+/* ---------- Unidades de medida ---------- */
+const unidades = () => unidadesDe(emp()?.contabilidad);
+// Opciones de unidad: las de la empresa (y la que ya tenga el producto, aunque no esté en la lista).
+const optsUnidad = sel => { const l = unidades(), s0 = String(sel || '').trim(); return (s0 && !l.some(u => u.codigo === s0) ? `<option value="${esc(s0)}" selected>${esc(s0)}</option>` : '') + l.map(u => `<option value="${esc(u.codigo)}" ${u.codigo === s0 ? 'selected' : ''}>${esc(u.codigo)} · ${esc(u.nombre)}</option>`).join(''); };
+function vUnidades(m) {
+  const l = unidades(), propias = Array.isArray(emp()?.contabilidad?.unidades) && emp().contabilidad.unidades.length;
+  const usos = c => S.d.productos.filter(p => String(p.unidad || '').toUpperCase() === String(c).toUpperCase()).length;
+  m.innerHTML = `<header class="vhead"><div><h2>Unidades de medida</h2><p class="sub">Las que escoges en cada producto o servicio. El código DIAN es el que se envía en la factura electrónica.</p></div><button class="primary" id="nuevaU">Nueva unidad</button></header>
+  <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Sigla</th><th>Nombre</th><th>Código DIAN</th><th class="r">Productos</th><th></th></tr></thead><tbody>
+    ${l.map((u, i) => `<tr><td class="mono">${esc(u.codigo)}</td><td>${esc(u.nombre)}</td><td class="mono">${esc(u.dian)}</td><td class="r">${usos(u.codigo) || ''}</td><td class="r nowrap"><button class="sm ghost" data-eu="${i}">Editar</button>${usos(u.codigo) ? '' : `<button class="sm ghost" data-du="${i}">Quitar</button>`}</td></tr>`).join('')}
+  </tbody></table></div>${propias ? '' : '<p class="hint">Esta es la lista inicial. Al crear, editar o quitar una unidad, la lista queda guardada para esta empresa.</p>'}</section>`;
+  const guardar = async lista => { await guardarContab('unidades', lista); toast('Unidades guardadas.'); route(); };
+  const formU = (u, idx) => dialogo(`<h2>${idx == null ? 'Nueva unidad de medida' : 'Editar unidad de medida'}</h2>
+    <div class="grid2">${campo('codigo', 'Sigla', u.codigo || '', 'required maxlength="10" class="mono" placeholder="KG"')}${campo('nombre', 'Nombre', u.nombre || '', 'required maxlength="60" placeholder="Kilogramo"')}</div>
+    ${campoSel('dian', 'Código DIAN (factura electrónica)', CODIGOS_DIAN.some(c => c[0] === u.dian) || !u.dian ? CODIGOS_DIAN : [[u.dian, u.dian], ...CODIGOS_DIAN], u.dian || '94')}
+    ${idx != null && usos(u.codigo) ? `<p class="hint">${usos(u.codigo)} producto(s) usan esta unidad. Si cambias la sigla, se actualizan.</p>` : ''}${pie()}`, async fd => {
+    const nu = { codigo: String(fd.get('codigo')).trim().toUpperCase(), nombre: String(fd.get('nombre')).trim(), dian: String(fd.get('dian')) };
+    const errs = erroresUnidad({ ...nu, idx }, l); if (errs.length) throw new Error(errs.join(' '));
+    const lista = l.map(x => ({ ...x })); if (idx == null) lista.push(nu); else lista[idx] = nu;
+    // Si cambió la sigla, los productos que la usaban toman la nueva.
+    if (idx != null && u.codigo !== nu.codigo) for (const p of S.d.productos.filter(p => String(p.unidad || '').toUpperCase() === String(u.codigo).toUpperCase())) await store.save('productos', { id: p.id, unidad: nu.codigo });
+    await guardar(lista);
+    if (idx != null && u.codigo !== nu.codigo) await cargarEmpresa();
+  });
+  $('nuevaU').onclick = () => formU({}, null);
+  m.querySelectorAll('[data-eu]').forEach(b => b.onclick = () => formU(l[Number(b.dataset.eu)], Number(b.dataset.eu)));
+  m.querySelectorAll('[data-du]').forEach(b => b.onclick = async () => { const u = l[Number(b.dataset.du)]; if (!await confirmar('Quitar unidad', `Se quita <b>${esc(u.codigo)} · ${esc(u.nombre)}</b> de la lista.`, 'Quitar')) return; try { await guardar(l.filter((_, i) => i !== Number(b.dataset.du))); } catch (e) { fail(e); } });
 }
 /* ---------- Inventario: traslados entre bodegas ---------- */
 function vTraslados(m) {
