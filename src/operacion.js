@@ -403,3 +403,23 @@ export function erroresCotizacion(c) {
   ls.forEach((l, i) => { if (!String(l.descripcion || '').trim()) e.push(`La línea ${i + 1} necesita una descripción.`); if (!(n(l.precio) >= 0)) e.push(`El precio de la línea ${i + 1} no puede ser negativo.`); });
   return e;
 }
+
+/* ---------- Horas por cerrar ---------- */
+// Lo que falta pagar (sin cierre_pago) y lo que falta facturar (sin cierre_cobro) hasta una fecha. Valores estimados con las tarifas vigentes.
+export function porCerrar(registros, tipo, { hasta = '9999-12-31', tarifas = [], cotizaciones = [], elementos = [], centros = [], productos = [] } = {}) {
+  const cfg = cfgTipo(tipo), regs = registros.filter(r => r.tipo_id === tipo.id && r.fecha <= hasta);
+  const conPago = cfg.salidas.pago !== 'ninguno', conCobro = cfg.salidas.cobro !== 'ninguno';
+  const sinPago = conPago ? regs.filter(r => !r.cierre_pago) : [], sinCobro = conCobro ? regs.filter(r => !r.cierre_cobro) : [];
+  const personas = resumen(sinPago, tipo, tarifas).map(p => {
+    const rs = sinPago.filter(r => r.tercero_id === p.tercero_id);
+    return { tercero_id: p.tercero_id, registros: rs.length, cantidad: p.cantidad, valor: p.total, desde: rs.reduce((m, r) => r.fecha < m ? r.fecha : m, rs[0]?.fecha || ''), enCorte: rs.filter(r => r.corte_id).length, pendientes: rs.filter(r => esPendiente(r, tipo)).length };
+  }).sort((a, b) => b.valor - a.valor);
+  const cobro = conCobro ? facturables(sinCobro, tipo, { cotizaciones, tarifas, elementos, centros, productos }) : { grupos: [], sinPrecio: [] };
+  return {
+    conPago, conCobro,
+    pago: { personas, registros: sinPago.length, valor: r2(personas.reduce((s, p) => s + p.valor, 0)) },
+    cobro: { ...cobro, registros: sinCobro.length, valor: r2(cobro.grupos.reduce((s, g) => s + g.total, 0)) },
+    pagadoSinFacturar: conPago && conCobro ? regs.filter(r => r.cierre_pago && !r.cierre_cobro).length : 0,
+    facturadoSinPagar: conPago && conCobro ? regs.filter(r => r.cierre_cobro && !r.cierre_pago).length : 0,
+  };
+}

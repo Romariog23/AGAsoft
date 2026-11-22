@@ -21,7 +21,7 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
-import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -264,7 +264,7 @@ function renderNav(actual) {
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Tipos de operación'], ...tiposOp().filter(t => t.activo !== false).map(t => ['opregistros/' + t.id, t.nombre])] }; }
+    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Tipos de operación'], ...(tiposOp().length ? [['opporcerrar', 'Horas por cerrar']] : []), ...tiposOp().filter(t => t.activo !== false).map(t => ['opregistros/' + t.id, t.nombre])] }; }
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -301,6 +301,7 @@ function route() {
     if (v === 'opcortes') return operacionActiva() ? vOpCortes(m, arg) : vOperacion(m);
     if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
     if (v === 'opfacturar') return operacionActiva() ? vOpFacturar(m, arg, q) : vOperacion(m);
+    if (v === 'opporcerrar') return operacionActiva() ? vOpPorCerrar(m) : vOperacion(m);
     if (v === 'cotizaciones') return vCotizaciones(m);
     if (v === 'cotizacion') return vCotizacion(m, arg);
     if (TIPOS[v]) return vLista(m, v);

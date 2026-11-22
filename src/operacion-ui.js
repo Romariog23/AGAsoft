@@ -1,6 +1,6 @@
 // Pantallas de Operación (módulo opcional por empresa). La lógica está en operacion.js; aquí solo se pinta y se guarda.
 // main.js entrega sus utilidades con iniciarOperacion(ctx) para no duplicarlas.
-import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante, facturables, itemsDeGrupo, cotizacionVigente } from './operacion.js';
+import { TIPOS_CAMPO, MODOS_TARIFA, USOS_TARIFA, CUANDO, SALIDAS_PAGO, SALIDAS_COBRO, PLANTILLAS, nuevoTipo, cfgTipo, calcular, resumen, avisos, erroresTipo, erroresRegistro, erroresTarifa, ultimaLectura, claveDe, diaDe, NOMBRE_DIA, compilar, esPendiente, elegiblesCorte, volantes, dsDeVolante, facturables, itemsDeGrupo, cotizacionVigente, porCerrar } from './operacion.js';
 import { totalesCompra, erroresCompra } from './compras.js';
 import { enLetras, totales } from './calc.js';
 
@@ -56,7 +56,7 @@ export function vOperacion(m) {
       <div class="row"><a class="btn primary" href="#/opregistros/${t.id}">Registrar</a><a class="btn" href="#/opcfg/${t.id}">Configurar</a></div></article>`;
   };
   m.innerHTML = `<header class="vhead"><div><h2>Operación</h2><p class="sub">Registros operativos que no afectan la contabilidad hasta que generes un documento. Cada tipo se arma a la medida de la empresa.</p></div>
-    <a class="btn ghost" href="#/config">Apagar o encender en Configuración</a></header>
+    <div class="row"><a class="btn ghost" href="#/config">Apagar o encender en Configuración</a>${tipos.length ? '<a class="btn" href="#/opporcerrar">Horas por cerrar</a>' : ''}</div></header>
   ${tipos.length ? `<div class="op-cards">${tipos.map(tarjeta).join('')}</div>` : '<p class="muted">Todavía no hay tipos de operación. Empieza con una plantilla o desde cero.</p>'}
   <section class="stack"><h3>Agregar un tipo de operación</h3><div class="op-cards">${Object.entries(PLANTILLAS).map(([k, p]) => `<article class="op-card dash">${icono(p.icono)}<h3>${esc(p.nombre)}</h3><p class="hint">${esc(p.descripcion)}</p><div class="row"><button data-pl="${k}">${k === 'libre' ? 'Crear' : 'Usar plantilla'}</button></div></article>`).join('')}</div>
   <p class="hint">Las plantillas son un punto de partida: después cambias campos, fórmulas, tarifas y reglas en Configurar.</p></section>`;
@@ -492,6 +492,37 @@ async function crearFactura(g, t, periodo) {
     await guardarVarios('op_registros', g.registros.map(r => ({ id: r.id, cierre_cobro: d.id })));
     await X.cargarEmpresa(); X.toast('Factura en borrador creada. Revísala y emítela.'); location.hash = '#/editar/' + d.id;
   } catch (e) { await X.cargarEmpresa(); X.fail(e); X.route(); }
+}
+
+/* ---------- Horas por cerrar ---------- */
+// Lo que falta pagar y lo que falta facturar, por tipo de operación. Cada lado se cierra por separado.
+let pcHasta = '', pcTipo = '';
+const nReg = k => `${k} registro${k === 1 ? '' : 's'}`;
+const diasDesde = f => Math.round((new Date(X.hoy() + 'T12:00:00') - new Date(f + 'T12:00:00')) / 864e5);
+export function vOpPorCerrar(m) {
+  const { esc, money } = X, hasta = pcHasta || X.hoy();
+  const tipos = tiposOp().filter(t => t.activo !== false && (!pcTipo || t.id === pcTipo));
+  const bloques = tipos.map(t => ({ t, cfg: cfgTipo(t), x: porCerrar(registrosDe(t), t, { hasta, tarifas: tarifasDe(t), cotizaciones: X.S.d.cotizaciones || [], ...ctxCC(), productos: X.S.d.productos || [] }) }));
+  const viejo = f => { const d = diasDesde(f); return d > 15 ? ` <span class="tag bad" title="Registro más antiguo sin cerrar">${d} días</span>` : ''; };
+  const bloque = ({ t, cfg, x }) => {
+    if (!x.conPago && !x.conCobro) return `<section class="panel stack"><h3>${esc(t.nombre)}</h3><p class="hint">Este tipo no genera pago ni cobro (solo control). Cámbialo en <a href="#/opcfg/${t.id}">Configurar › Salidas</a>.</p></section>`;
+    return `<section class="stack"><h3>${esc(t.nombre)}</h3>
+    <div class="kpis">${x.conPago ? `<div class="kpi"><span>Falta pagar</span><b>${money(x.pago.valor)}</b><small>${nReg(x.pago.registros)}</small></div>` : ''}${x.conCobro ? `<div class="kpi"><span>Falta facturar</span><b>${money(x.cobro.valor)}</b><small>${nReg(x.cobro.registros)}${x.cobro.sinPrecio.length ? ` · ${x.cobro.sinPrecio.length} sin precio` : ''}</small></div>` : ''}
+      ${x.conPago && x.conCobro ? `<div class="kpi"><span>Pagados sin facturar</span><b>${x.pagadoSinFacturar}</b><small>registros</small></div><div class="kpi"><span>Facturados sin pagar</span><b>${x.facturadoSinPagar}</b><small>registros</small></div>` : ''}</div>
+    <div class="op-pc">
+    ${x.conPago ? `<section class="panel stack"><header class="vhead"><h3>Falta pagar</h3><a class="btn sm" href="#/opcortes/${t.id}">Cortes de pago</a></header><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(cfg.persona)}</th><th>Desde</th><th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
+      ${x.pago.personas.map(p => `<tr><td><b>${esc(nomT(p.tercero_id))}</b><br><small class="muted">${p.registros} reg.${p.enCorte ? ` · ${p.enCorte} en corte abierto` : ''}${p.pendientes ? ` · ${p.pendientes} sin soporte` : ''}</small></td><td class="nowrap">${X.fFecha(p.desde)}${viejo(p.desde)}</td><td class="r mono">${cant(p.cantidad)}</td><td class="r mono">${money(p.valor)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Todo pagado.</td></tr>'}</tbody></table></div></section>` : ''}
+    ${x.conCobro ? `<section class="panel stack"><header class="vhead"><h3>Falta facturar</h3><a class="btn sm" href="#/opfacturar/${t.id}?desde=${x.cobro.grupos.reduce((mn, g) => g.desde < mn ? g.desde : mn, hasta)}&hasta=${hasta}&cot=">Facturar</a></header><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cliente</th><th>Desde</th><th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
+      ${x.cobro.grupos.sort((a, b) => b.total - a.total).map(g => `<tr><td><b>${esc(nomT(g.tercero_id))}</b><br><small class="muted">${g.cotizacion ? `Cotización N.º ${g.cotizacion.numero}` : 'Tarifa de cobro'} · ${g.registros.length} reg.</small></td><td class="nowrap">${X.fFecha(g.desde)}${viejo(g.desde)}</td><td class="r mono">${cant(g.cantidad)}</td><td class="r mono">${money(g.total)}</td></tr>`).join('')}
+      ${x.cobro.sinPrecio.length ? `<tr><td colspan="2"><span class="tag demo">Sin precio de cobro</span> <small class="muted">crea una cotización o una tarifa de cobro</small></td><td class="r mono">${cant(x.cobro.sinPrecio.reduce((s, y) => s + y.cantidad, 0))}</td><td class="r muted">${x.cobro.sinPrecio.length} reg.</td></tr>` : ''}
+      ${!x.cobro.grupos.length && !x.cobro.sinPrecio.length ? '<tr><td colspan="4" class="muted">Todo facturado.</td></tr>' : ''}</tbody></table></div></section>` : ''}
+    </div></section>`;
+  };
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/operacion">← Operación</a><h2>Horas por cerrar</h2><p class="sub">Lo registrado que todavía no se ha pagado a la persona o no se ha facturado al cliente. Los valores son estimados con las tarifas y cotizaciones vigentes.</p></div></header>
+  <section class="panel row op-filtros"><div><label for="pcH">Registrado hasta</label><input type="date" id="pcH" value="${hasta}"></div>${tiposOp().length > 1 ? `<div><label for="pcT">Tipo</label><select id="pcT"><option value="">Todos</option>${tiposOp().map(t => `<option value="${t.id}" ${t.id === pcTipo ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>` : ''}</section>
+  ${bloques.map(bloque).join('') || '<p class="muted">No hay tipos de operación activos.</p>'}`;
+  X.$('pcH').onchange = e => { pcHasta = e.target.value; vOpPorCerrar(m); };
+  if (X.$('pcT')) X.$('pcT').onchange = e => { pcTipo = e.target.value; vOpPorCerrar(m); };
 }
 
 /* ---------- Impresión ---------- */
