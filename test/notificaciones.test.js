@@ -38,3 +38,11 @@ test('vencimientos de AGA Calendar con estado y avisos por etapa', () => {
   const av = avisosVencimientos([{ ...ret, dias: 1, estado: 'pronto', presentada: null }, { ...ret, clave: 'k2', dias: 20, presentada: null }]);
   assert.equal(av.length, 1); assert.match(av[0].texto, /vence mañana/);
 });
+test('el calendario muestra solo la empresa con el NIT de la empresa abierta', () => {
+  const base = { regimen: 'ordinario_pj', extras: {} };
+  const datos = { empresas: [{ ...base, id: 'a', nombre: 'Otra', nit: '800111222', mia: true }, { ...base, id: 'b', nombre: 'La abierta', nit: '900123451', mia: false, comoResp: true }], aprob: [], reglas: DEFAULT_RULES };
+  const v = vencimientos(datos, '2026-11-01', '2026-12-31', { nit: '900.123.451' });
+  assert.ok(v.length > 0);
+  assert.ok(v.every(x => x.empresa_id === 'b'));
+  assert.equal(vencimientos(datos, '2026-11-01', '2026-12-31', { nit: '111' }).length, 0);
+});

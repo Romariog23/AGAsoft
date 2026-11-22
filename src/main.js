@@ -17,7 +17,7 @@ import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, compras
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
-import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, URL_APP_CALENDARIO } from './calendario.js';
+import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
@@ -202,7 +202,7 @@ $('empSel').onchange = async () => {
   const v = $('empSel').value;
   if (v === '__nueva') { $('empSel').value = S.eid || ''; return formEmpresa(); }
   S.eid = v; try { localStorage.setItem('agasoft-empresa', v); } catch (_) {}
-  await cargarEmpresa(); location.hash = '#/inicio'; route();
+  await cargarEmpresa(); location.hash = '#/inicio'; route(); cargarVencimientos();
 };
 $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-open'); $('menuBtn').setAttribute('aria-expanded', o); };
 
@@ -3870,14 +3870,14 @@ async function cargarVencimientos(forzar = false) {
     if (!(await sesionCalendario())) { S.venc = []; return pintarCampana(); }
     const datos = await cargarCalendario({ forzar });
     S.calDatos = datos;
-    S.venc = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), 60), { todas: S.calTodas === true });
+    S.venc = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), 60), { nit: emp()?.nit || '' });
     pintarCampana();
   } catch (_) { /* sin conexión con el calendario: la bandeja sigue con los avisos de AGAsoft */ }
 }
 
 /* ---------- Calendario (AGA Calendar) ---------- */
 async function vCalendario(m) {
-  m.innerHTML = `<div class="head"><div><h1>Calendario tributario</h1><p class="sub">Los vencimientos de tus empresas en AGA Calendar, con el mismo usuario y contraseña de allá.</p></div><div class="row" id="calAcc"></div></div><div id="calOut"><p class="muted">Cargando…</p></div>`;
+  m.innerHTML = `<div class="head"><div><h1>Calendario tributario</h1><p class="sub">Los vencimientos de la empresa abierta, tomados de AGA Calendar con su NIT.</p></div><div class="row" id="calAcc"></div></div><div id="calOut"><p class="muted">Cargando…</p></div>`;
   const out = $('calOut');
   if (!calendarioConfigurado()) {
     out.innerHTML = `<section class="panel stack"><h2>AGA Calendar todavía no está conectado</h2>
@@ -3899,37 +3899,36 @@ async function vCalendario(m) {
     return;
   }
   let datos; try { datos = await cargarCalendario(); } catch (e) { out.innerHTML = `<p class="err">No se pudo leer AGA Calendar: ${esc(e.message)}</p>`; return; }
-  const opc = S.calOpc = S.calOpc || { empresa: '', estado: 'pendientes', dias: 60 };
+  const opc = S.calOpc = S.calOpc || { estado: 'pendientes', dias: 60 };
   $('calAcc').innerHTML = `${URL_APP_CALENDARIO ? `<a class="btn ghost" href="${esc(URL_APP_CALENDARIO)}" target="_blank" rel="noopener">Abrir AGA Calendar</a>` : ''}<button class="ghost" id="calRe">Actualizar</button><button class="ghost" id="calSal" title="${esc(user.email)}">Salir del calendario</button>`;
   const pintar = () => {
-    const todas = S.calTodas === true;
-    const emps = datos.empresas.filter(x => todas || x.mia || x.comoResp);
-    let l = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), Number(opc.dias)), { todas });
-    if (opc.empresa) l = l.filter(v => v.empresa_id === opc.empresa);
+    // Solo la empresa abierta en AGAsoft, buscada por su NIT en AGA Calendar.
+    const e = emp(), ce = empresaPorNit(datos, e?.nit);
+    if (!ce) {
+      out.innerHTML = `<section class="panel stack"><h2>${esc(e?.nombre || 'Esta empresa')} no está en tu AGA Calendar</h2>
+        <p>Busqué el NIT <b class="mono">${esc(fmtNit(e?.nit || ''))}</b> entre las empresas de tu usuario de AGA Calendar y no lo encontré. Créala allá con ese mismo NIT (o pide que te den acceso como responsable) y vuelve a tocar Actualizar.</p></section>`;
+      return;
+    }
+    let l = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), Number(opc.dias)), { nit: e.nit });
     const cuenta = k => l.filter(v => v.estado === k).length;
     const vis = opc.estado === 'pendientes' ? l.filter(v => v.estado !== 'presentada') : opc.estado === 'todas' ? l : l.filter(v => v.estado === opc.estado);
     const meses = [...new Set(vis.map(v => v.fecha.slice(0, 7)))];
     const tag = v => v.estado === 'presentada' ? `<span class="tag ok" title="${esc(v.presentada.aprobado_por_nombre || '')}">Presentada</span>` : v.estado === 'vencida' ? `<span class="tag bad">Vencida hace ${-v.dias} d</span>` : v.dias === 0 ? '<span class="tag bad">Vence hoy</span>' : v.estado === 'pronto' ? `<span class="tag warn">En ${v.dias} d</span>` : `<span class="tag">En ${v.dias} d</span>`;
-    out.innerHTML = `<div class="cal-res">
+    out.innerHTML = `<div class="cal-emp">${navIco('calendario')}<span><b>${esc(ce.nombre)}</b><small class="muted">NIT ${esc(fmtNit(ce.nit))} · según AGA Calendar</small></span></div><div class="cal-res">
         <button type="button" class="cal-k bad" data-est="vencida"><b>${cuenta('vencida')}</b><span>Vencidas sin presentar</span></button>
         <button type="button" class="cal-k warn" data-est="pronto"><b>${cuenta('pronto')}</b><span>Vencen en 7 días</span></button>
         <button type="button" class="cal-k" data-est="futura"><b>${cuenta('futura')}</b><span>Más adelante</span></button>
         <button type="button" class="cal-k ok" data-est="presentada"><b>${cuenta('presentada')}</b><span>Presentadas</span></button></div>
-      <div class="row filtros">
-        <select id="calE" aria-label="Empresa"><option value="">Todas las empresas (${emps.length})</option>${emps.map(x => `<option value="${x.id}" ${x.id === opc.empresa ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>
-        <select id="calS" aria-label="Estado">${[['pendientes', 'Sin presentar'], ['todas', 'Todas'], ['vencida', 'Vencidas'], ['pronto', 'En 7 días'], ['presentada', 'Presentadas']].map(([k, t]) => `<option value="${k}" ${k === opc.estado ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <div class="row filtros cal-filtros">        <select id="calS" aria-label="Estado">${[['pendientes', 'Sin presentar'], ['todas', 'Todas'], ['vencida', 'Vencidas'], ['pronto', 'En 7 días'], ['presentada', 'Presentadas']].map(([k, t]) => `<option value="${k}" ${k === opc.estado ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <select id="calD" aria-label="Hasta">${[[30, 'Próximos 30 días'], [60, 'Próximos 60 días'], [120, 'Próximos 4 meses']].map(([k, t]) => `<option value="${k}" ${Number(opc.dias) === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
-        ${datos.perfil?.es_admin ? `<label class="check"><input type="checkbox" id="calT" ${todas ? 'checked' : ''}> Ver empresas de todos los usuarios</label>` : ''}</div>
-      ${emps.length ? '' : '<section class="panel"><p class="muted">Tu usuario de AGA Calendar no tiene empresas todavía. Créalas en el calendario y aparecerán aquí.</p></section>'}
-      ${meses.map(mes => `<section class="panel cal-mes"><h2>${new Date(mes + '-15T12:00:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}</h2>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Obligación</th><th>Periodo</th><th>Empresa</th><th>Estado</th></tr></thead><tbody>
-        ${vis.filter(v => v.fecha.startsWith(mes)).map(v => `<tr class="${v.estado === 'presentada' ? 'muted' : ''}"><td class="nowrap">${fFecha(v.fecha)}</td><td><b>${esc(v.obligacion)}</b>${v.formulario ? ` <span class="muted">· ${esc(v.formulario)}</span>` : ''}</td><td>${esc(v.periodo)}</td><td>${esc(v.empresa)}</td><td class="nowrap">${tag(v)}</td></tr>`).join('')}
-        </tbody></table></div></section>`).join('') || (emps.length ? '<section class="panel"><p class="muted">No hay vencimientos con ese filtro.</p></section>' : '')}
+</div>
+      ${meses.map(mes => `<section class="panel cal-mes"><h2>${(t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(mes + '-15T12:00:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }))}</h2>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Obligación</th><th>Periodo</th><th>Estado</th></tr></thead><tbody>
+        ${vis.filter(v => v.fecha.startsWith(mes)).map(v => `<tr class="${v.estado === 'presentada' ? 'muted' : ''}"><td class="nowrap">${fFecha(v.fecha)}</td><td><b>${esc(v.obligacion)}</b>${v.formulario ? ` <span class="muted">· ${esc(v.formulario)}</span>` : ''}</td><td>${esc(v.periodo)}</td><td class="nowrap">${tag(v)}</td></tr>`).join('')}
+        </tbody></table></div></section>`).join('') || '<section class="panel"><p class="muted">No hay vencimientos con ese filtro.</p></section>'}
       <p class="hint">Para marcar una declaración como presentada y adjuntar el formulario, hazlo en AGA Calendar: aquí se ve reflejado al actualizar.</p>`;
-    $('calE').onchange = () => { opc.empresa = $('calE').value; pintar(); };
     $('calS').onchange = () => { opc.estado = $('calS').value; pintar(); };
     $('calD').onchange = () => { opc.dias = $('calD').value; pintar(); };
-    if ($('calT')) $('calT').onchange = () => { S.calTodas = $('calT').checked; opc.empresa = ''; cargarVencimientos(); pintar(); };
     out.querySelectorAll('[data-est]').forEach(b => b.onclick = () => { opc.estado = b.dataset.est; pintar(); });
   };
   pintar();
