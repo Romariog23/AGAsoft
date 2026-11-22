@@ -17,15 +17,16 @@ import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, compras
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
+import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const COP2 = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-// Siempre con dos decimales, para que las cifras queden alineadas.
-const money = v => COP2.format(r2(num(v)));
+// Formato escogido por la empresa (Configuración › Formato de números): con o sin decimales, miles con punto o coma.
+const fmtEmp = () => formatoDe(emp()?.contabilidad);
+const money = v => moneyTxt(r2(num(v)), fmtEmp());
 const hoy = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const sumarDias = (f, n) => { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + Number(n || 0)); return d.toISOString().slice(0, 10); };
 const fFecha = f => f ? new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -616,6 +617,7 @@ function vEmpresa(m) {
       ['datos', 'empresa', 'Datos de la empresa', `NIT ${fmtNit(e.nit)}-${e.dv} · ${REGIMENES.find(r => r[0] === e.regimen)?.[1] || e.regimen || ''}`, () => formEmpresa(e)],
       ['usuarios', 'usuarios', 'Usuarios', 'Quién entra y con qué permiso', '#/usuarios'],
       ['apariencia', 'color', 'Apariencia', `${colorN} · ${modoN}`, abrirApariencia],
+      ['formatonum', 'numero', 'Formato de números', `${money(1234567.89)} · ${fmtEmp().decimales ? 'con decimales' : 'sin decimales'}`, formFormatoNum],
       !S.perfil?.es_admin && ['miplan', 'plan', 'Mi plan', S.plan?.nombre ? `Plan ${S.plan.nombre}` : 'Lo que incluye tu plan', '#/miplan'],
     ]],
     ['Facturación', [
@@ -654,6 +656,17 @@ function vEmpresa(m) {
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
   };
   if ($('delDemo')) $('delDemo').onclick = async () => { if (await confirmar(store.publico ? 'Volver al demo inicial' : 'Borrar demostración', store.publico ? 'Se borra lo que registraste y vuelve la empresa de demostración como estaba al empezar.' : 'Se borran todas las empresas y documentos de este navegador.', store.publico ? 'Volver al inicial' : 'Borrar todo')) { store.borrarDemo(); location.hash = ''; location.reload(); } };
+}
+function formFormatoNum() {
+  const f = fmtEmp(), ej = x => moneyTxt(1234567.89, x);
+  const pinta = () => { const fd = new FormData($('dlgForm')); $('fnEj').textContent = ej({ decimales: fd.get('dec') === '1', miles: fd.get('miles') }); };
+  dialogo(`<h2>Formato de números</h2><p class="hint">Cómo se muestran los valores en pantallas, facturas e informes de esta empresa. Los valores guardados no cambian.</p>
+    <div class="grid2">${campoSel('dec', 'Decimales', [['1', 'Con decimales (,00)'], ['0', 'Sin decimales']], f.decimales ? '1' : '0')}${campoSel('miles', 'Separador de miles', [['.', 'Punto: 1.234.567,89'], [',', 'Coma: 1,234,567.89']], f.miles)}</div>
+    <p>Así se verá: <b class="mono" id="fnEj">${ej(f)}</b></p>${pie()}`, async fd => {
+    await guardarContab('formato_num', { decimales: fd.get('dec') === '1', miles: fd.get('miles') === ',' ? ',' : '.' });
+    toast('Formato de números guardado.'); route();
+  });
+  $('f_dec').onchange = $('f_miles').onchange = pinta;
 }
 function abrirApariencia() {
   dialogo('<section id="apariencia" class="stack"></section><div class="row end"><button value="cancel" class="primary">Listo</button></div>', () => {});
@@ -1223,7 +1236,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
       ${num(d.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(d.anticipo)}</td></tr>` : ''}
       <tr class="strong"><td>Total</td><td class="r mono">${money(d.total)}</td></tr></tbody></table>` :
     `<table class="tbl rep-items"><thead><tr><th>#</th><th>Código</th><th>Descripción</th><th class="r">Cant.</th><th class="r">Vr. unitario</th><th class="r">Desc.</th><th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
-      ${its.map((it, i) => { const l = linea(it); return `<tr><td>${i + 1}</td><td class="mono">${esc(it.codigo)}</td><td>${esc(it.descripcion)}</td><td class="r mono">${num(it.cantidad).toLocaleString('es-CO')}</td><td class="r mono">${money(it.precio)}</td><td class="r mono">${l.descuento ? money(l.descuento) : ''}</td><td class="r mono">${num(it.iva_pct)}%</td><td class="r mono">${money(l.total)}</td></tr>`; }).join('')}
+      ${its.map((it, i) => { const l = linea(it); return `<tr><td>${i + 1}</td><td class="mono">${esc(it.codigo)}</td><td>${esc(it.descripcion)}</td><td class="r mono">${cantTxt(it.cantidad, fmtEmp())}</td><td class="r mono">${money(it.precio)}</td><td class="r mono">${l.descuento ? money(l.descuento) : ''}</td><td class="r mono">${num(it.iva_pct)}%</td><td class="r mono">${money(l.total)}</td></tr>`; }).join('')}
     </tbody></table>
     <section class="rep-tot"><p class="letras">Son: ${enLetras(tot.neto)}</p><dl class="tot">
       <dt>Subtotal</dt><dd class="mono">${money(tot.bruto)}</dd>${tot.descuento ? `<dt>Descuentos</dt><dd class="mono">−${money(tot.descuento)}</dd>` : ''}
