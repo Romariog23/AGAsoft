@@ -41,3 +41,79 @@ export function erroresCentro(c, centros) {
   if ((centros || []).some(x => x.id !== c.id && Number(x.nivel) === Number(c.nivel) && String(x.codigo).toLowerCase() === cod.toLowerCase())) out.push('Ya existe un centro con ese código en este nivel.');
   return out;
 }
+
+/* ---------- Distribución en documentos automáticos ---------- */
+// Una distribución es una lista [{cc1, cc2, cc3, pct}]: un solo centro es [{cc1, …, pct: 100}].
+// Se escoge en el documento (centro general), en cada línea (cambia el general), en el producto o en el empleado.
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+const r4 = v => Math.round((Number(v) || 0) * 1e4) / 1e4;
+export function normDist(dist) {
+  const ls = (Array.isArray(dist) ? dist : []).filter(x => x && (x.cc1 || x.cc2 || x.cc3));
+  if (ls.length === 1) return [{ ...soloCC(ls[0]), pct: 100 }];
+  return ls.map(x => ({ ...soloCC(x), pct: r4(x.pct) }));
+}
+const soloCC = x => Object.fromEntries(['cc1', 'cc2', 'cc3'].filter(k => x[k]).map(k => [k, x[k]]));
+export const tieneDist = d => normDist(d).length > 0;
+// La primera distribución que tenga algo (línea, producto, documento…).
+export const primeraDist = (...ds) => { for (const d of ds) { const n = normDist(d); if (n.length) return n; } return []; };
+const claveCC = x => `${x.cc1 || ''}|${x.cc2 || ''}|${x.cc3 || ''}`;
+export const claveDist = d => normDist(d).map(x => `${claveCC(x)}:${x.pct}`).join(';');
+// Une varias distribuciones según el valor de cada una (para clientes, proveedores, IVA y retenciones del documento).
+export function distPonderada(partes) {
+  const pesos = {}, ccs = {};
+  let total = 0;
+  for (const { dist, valor } of partes || []) {
+    const v = Math.abs(Number(valor) || 0), n = normDist(dist);
+    if (!v || !n.length) continue;
+    total += v;
+    for (const x of n) { const k = claveCC(x); ccs[k] = soloCC(x); pesos[k] = (pesos[k] || 0) + v * x.pct / 100; }
+  }
+  if (!total) return [];
+  const ks = Object.keys(pesos), out = ks.map(k => ({ ...ccs[k], pct: r4(pesos[k] / total * 100) }));
+  const dif = r4(100 - out.reduce((s, x) => s + x.pct, 0)); if (dif && out.length) out[out.length - 1].pct = r4(out[out.length - 1].pct + dif);
+  return out.length === 1 ? [{ ...out[0], pct: 100 }] : out;
+}
+// Reparte un movimiento contable entre los centros de la distribución (los centavos van al último).
+export function repartirMov(m, dist) {
+  const n = normDist(dist);
+  if (!n.length) return [m];
+  let rd = m.debito || 0, rc = m.credito || 0;
+  return n.map((x, i) => {
+    const ult = i === n.length - 1, d = ult ? r2(rd) : r2((m.debito || 0) * x.pct / 100), c = ult ? r2(rc) : r2((m.credito || 0) * x.pct / 100);
+    rd = r2(rd - d); rc = r2(rc - c);
+    return { ...m, debito: d, credito: c, ...soloCC(x) };
+  }).filter(x => x.debito || x.credito);
+}
+// Último paso de la contabilidad: cada movimiento con distribución (_dist) se reparte si su cuenta lleva centro de costo.
+export function aplicarCC(movs, cfg) {
+  const out = [];
+  for (const m0 of movs) {
+    const { _dist, ...m } = m0;
+    if (!cfg?.activo) { delete m.cc1; delete m.cc2; delete m.cc3; out.push(m); continue; }
+    if (m.cc1 || !_dist || !cuentaConCC(cfg, m.cuenta)) { out.push(m); continue; }
+    out.push(...repartirMov(m, _dist));
+  }
+  return out;
+}
+// Errores de una distribución: cada parte lleva el nivel 1 y los porcentajes suman 100.
+export function erroresDist(dist, cfg, centros, que = 'Centro de costo') {
+  if (!cfg?.activo) return [];
+  const n = normDist(dist), out = [];
+  if (!n.length) return out;
+  out.push(...erroresCC(n.map(x => ({ ...x, cuenta: cfg.alcance === 'todo' ? '1' : '4' })), cfg, centros, i => n.length > 1 ? `${que} (parte ${i + 1})` : que));
+  if (n.some(x => x.pct <= 0)) out.push(`${que}: cada parte debe tener un porcentaje mayor que cero.`);
+  const s = r4(n.reduce((a, x) => a + x.pct, 0));
+  if (Math.abs(s - 100) > 0.001) out.push(`${que}: los porcentajes suman ${s} % y deben sumar 100 %.`);
+  return out;
+}
+// Cuentas que quedarían sin centro de costo en el asiento de un documento (ya repartido con aplicarCC).
+export function sinCentro(movs, cfg) {
+  if (!cfg?.activo) return [];
+  return [...new Set((movs || []).filter(m => cuentaConCC(cfg, m.cuenta) && !m.cc1).map(m => m.cuenta))];
+}
+// Texto corto de una distribución: "Retro 01 · Obra 80" o "Retro 01 60 % · Volqueta 40 %".
+export function textoDist(dist, centros) {
+  const por = Object.fromEntries((centros || []).map(c => [c.id, c])), n = normDist(dist);
+  const t = x => ['cc1', 'cc2', 'cc3'].filter(k => x[k]).map(k => por[x[k]]?.nombre || '?').join(' / ');
+  return n.length === 1 ? t(n[0]) : n.map(x => `${t(x)} ${x.pct} %`).join(' · ');
+}
