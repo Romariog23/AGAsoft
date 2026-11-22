@@ -133,12 +133,17 @@ function localStore({ publico = false } = {}) {
     async guardarTema() {},
     async planesActivos() { return PLANES_DEMO; },
     async miPlan() { return null; },
+    // Notificaciones leídas (en la demostración se reinician con los datos).
+    async leidas() { return { ...(db.notif_leidas || {}) }; },
+    async marcarLeidas(claves) { db.notif_leidas = db.notif_leidas || {}; const t = ahora(); for (const c of claves) db.notif_leidas[c] = t; persist(); },
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
   };
   return api;
 }
 
 /* ---------- Modo Supabase ---------- */
+const leidasLocal = () => { try { return JSON.parse(localStorage.getItem('agasoft-notif-leidas') || '{}'); } catch (_) { return {}; } };
+function guardarLeidasLocal(claves, t) { const l = leidasLocal(); for (const c of claves) l[c] = t; try { localStorage.setItem('agasoft-notif-leidas', JSON.stringify(l)); } catch (_) { /* sin almacenamiento */ } }
 function supabaseStore(url, key) {
   const sb = createClient(url, key);
   const ok = ({ data, error }) => { if (error) throw new Error(traducir(error.message)); return data; };
@@ -178,6 +183,17 @@ function supabaseStore(url, key) {
     async eliminar(id) { ok(await sb.rpc('eliminar_documento', { p_id: id })); },
     async importarDoc(doc, items) { return ok(await sb.rpc('importar_documento', { p_doc: doc, p_items: items })); },
     async miPlan() { return ok(await sb.rpc('mi_plan')); },
+    // Notificaciones leídas por el usuario. Sin la tabla (falta 031_notificaciones.sql) se guardan en este navegador.
+    async leidas() {
+      const loc = leidasLocal();
+      const { data, error } = await sb.from('notificaciones_leidas').select('clave,leida_en');
+      if (error) return loc;
+      return { ...loc, ...Object.fromEntries((data || []).map(x => [x.clave, x.leida_en])) };
+    },
+    async marcarLeidas(claves) {
+      const t = ahora(); guardarLeidasLocal(claves, t);
+      if (claves.length) await sb.from('notificaciones_leidas').upsert(claves.map(clave => ({ clave, leida_en: t })), { onConflict: 'user_id,clave' });
+    },
     // Facturación electrónica: la función de Supabase "fe-factus" habla con Factus con la cuenta de cada empresa.
     async fe(accion, datos = {}) {
       const { data, error } = await sb.functions.invoke('fe-factus', { body: { accion, ...datos } });

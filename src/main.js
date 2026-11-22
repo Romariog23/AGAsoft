@@ -16,6 +16,8 @@ import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA } from './reportes.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
+import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
+import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
 aplicarTema(leerTema());
@@ -117,7 +119,9 @@ async function iniciar() {
   let guardada = null; try { guardada = localStorage.getItem('agasoft-empresa'); } catch (_) {}
   S.eid = S.empresas.find(e => e.id === guardada)?.id || S.empresas[0]?.id || null;
   await cargarEmpresa();
+  try { S.leidas = await store.leidas(); } catch (_) { S.leidas = {}; }
   route();
+  cargarVencimientos();
 }
 // Prueba gratis: días que le quedan (null si la cuenta no está en prueba).
 function diasPrueba(f) { return f ? Math.max(0, Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5)) : null; }
@@ -206,6 +210,7 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 // Menú lateral: cada módulo con su ícono; los grupos se abren con animación y muestran avisos (vencidas).
 const MENU = [
   { k: 'inicio', t: 'Inicio', i: 'inicio' },
+  { k: 'calendario', t: 'Calendario', i: 'calendario' },
   { t: 'Ventas', i: 'ventas', l: [['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
   { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
@@ -225,6 +230,7 @@ const NAV_ICO = {
   datos: 'M12 8c5 0 9-1.3 9-3s-4-3-9-3-9 1.3-9 3 4 3 9 3M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3',
   importar: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
   config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+  calendario: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01',
   car: 'M9 18l6-6-6-6',
 };
 const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
@@ -267,6 +273,7 @@ function route() {
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
   renderNav(['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
+  pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
   if (!S.eid && v !== 'usuarios') return sinEmpresa(m);
@@ -317,6 +324,7 @@ function route() {
     if (v === 'balance') return vBalance(m);
     if (v === 'auxiliar') return vAuxiliar(m, q);
     if (v === 'informes') return vInformes(m);
+    if (v === 'calendario') return vCalendario(m);
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
@@ -3807,4 +3815,124 @@ async function vBloqueado(m, mod) {
     <p class="sub">Tu plan <b>${esc(S.plan?.nombre || '')}</b> no incluye ${esc(MODULOS[mod].nombre.toLowerCase())}.<span id="desde"></span></p>
     <div class="row"><a class="btn primary" href="#/miplan">Ver Mi plan</a><a class="btn ghost" href="#/inicio">Volver al inicio</a></div></section>`;
   try { const d = planDesde(await store.planesActivos(), mod); if (d && $('desde')) $('desde').textContent = ` Está disponible desde el plan ${d.nombre} (${money(d.precio_mensual)} al mes).`; } catch (_) {}
+}
+
+/* ---------- Notificaciones (campanita) ---------- */
+S.leidas = {}; S.venc = [];
+function avisosActuales() {
+  const a = avisosEmpresa({ empresa: emp(), d: S.d, hoy: hoy(), local: store.mode === 'local', diasPrueba: diasPrueba(S.perfil?.prueba_hasta) });
+  return pendientes([...avisosVencimientos(S.venc), ...a], S.leidas || {});
+}
+const ICO_NOTIF = { config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+  operacion: 'M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z', vencimiento: NAV_ICO.calendario };
+const NOM_NOTIF = { vencimiento: 'Vencimientos', operacion: 'Operación', config: 'Configuración pendiente' };
+function pintarCampana() {
+  const b = $('notifBtn'); if (!b) return;
+  const l = S.d ? avisosActuales() : [];
+  $('notifN').textContent = l.length > 9 ? '9+' : l.length; $('notifN').hidden = !l.length;
+  b.title = l.length ? `${l.length} notificaci${l.length === 1 ? 'ón' : 'ones'} sin leer` : 'Notificaciones';
+  if (!$('notifPanel').hidden) pintarPanelNotif(l);
+}
+function pintarPanelNotif(l = avisosActuales()) {
+  const p = $('notifPanel');
+  const grupos = ['vencimiento', 'operacion', 'config'].map(t => [t, l.filter(a => a.tipo === t)]).filter(([, x]) => x.length);
+  p.innerHTML = `<div class="np-h"><b>Notificaciones</b>${l.length ? '<button type="button" class="ghost sm" id="npTodas">Marcar todas como leídas</button>' : ''}</div>
+    ${grupos.length ? grupos.map(([t, x]) => `<p class="np-g">${NOM_NOTIF[t]}</p>${x.map(a => `<button type="button" class="np-it ${a.nivel}" data-k="${esc(a.clave)}" data-href="${esc(a.enlace)}">
+      <span class="np-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICO_NOTIF[a.tipo]}"/></svg></span><span class="np-tx"><b>${esc(a.titulo)}</b><span>${esc(a.texto)}</span></span>
+      <span class="np-x" data-leer="${esc(a.clave)}" title="Marcar como leída" aria-label="Marcar como leída">✓</span></button>`).join('')}`).join('')
+      : `<div class="np-vacio"><b>Estás al día</b><span>No tienes notificaciones sin leer.</span></div>`}
+    ${S.venc.length || !calendarioConfigurado() ? '' : '<a class="np-pie" href="#/calendario">Conecta AGA Calendar para ver aquí los vencimientos de tus empresas</a>'}`;
+}
+async function leerAvisos(claves) {
+  const t = new Date().toISOString(); for (const c of claves) S.leidas[c] = t;
+  pintarCampana();
+  try { await store.marcarLeidas(claves); } catch (_) { /* queda leído en esta sesión */ }
+}
+$('notifBtn').onclick = ev => {
+  ev.stopPropagation();
+  const p = $('notifPanel'), abrir = p.hidden; p.hidden = !abrir; $('notifBtn').setAttribute('aria-expanded', abrir);
+  if (abrir) pintarPanelNotif();
+};
+$('notifPanel').onclick = ev => {
+  ev.stopPropagation();
+  if (ev.target.id === 'npTodas') return leerAvisos(avisosActuales().map(a => a.clave));
+  const x = ev.target.closest('[data-leer]'); if (x) return leerAvisos([x.dataset.leer]);
+  const it = ev.target.closest('.np-it'); if (!it) return;
+  leerAvisos([it.dataset.k]); $('notifPanel').hidden = true; if (it.dataset.href) location.hash = it.dataset.href;
+};
+document.addEventListener('click', () => { if (!$('notifPanel').hidden) { $('notifPanel').hidden = true; $('notifBtn').setAttribute('aria-expanded', false); } });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('notifPanel').hidden) { $('notifPanel').hidden = true; $('notifBtn').focus(); } });
+
+// Vencimientos de AGA Calendar: del último mes (vencidos sin presentar) a los próximos 60 días.
+async function cargarVencimientos(forzar = false) {
+  if (!calendarioConfigurado()) return;
+  try {
+    if (!(await sesionCalendario())) { S.venc = []; return pintarCampana(); }
+    const datos = await cargarCalendario({ forzar });
+    S.calDatos = datos;
+    S.venc = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), 60), { todas: S.calTodas === true });
+    pintarCampana();
+  } catch (_) { /* sin conexión con el calendario: la bandeja sigue con los avisos de AGAsoft */ }
+}
+
+/* ---------- Calendario (AGA Calendar) ---------- */
+async function vCalendario(m) {
+  m.innerHTML = `<div class="head"><div><h1>Calendario tributario</h1><p class="sub">Los vencimientos de tus empresas en AGA Calendar, con el mismo usuario y contraseña de allá.</p></div><div class="row" id="calAcc"></div></div><div id="calOut"><p class="muted">Cargando…</p></div>`;
+  const out = $('calOut');
+  if (!calendarioConfigurado()) {
+    out.innerHTML = `<section class="panel stack"><h2>AGA Calendar todavía no está conectado</h2>
+      <p>${S.perfil?.es_admin ? 'Para activarlo, agrega en Vercel (proyecto agasoft › Settings › Environment Variables) las variables <code>VITE_CALENDARIO_URL</code> y <code>VITE_CALENDARIO_KEY</code> con los mismos valores de <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> del proyecto del calendario, y vuelve a publicar. Opcional: <code>VITE_CALENDARIO_APP</code> con la dirección del calendario.' : 'Pronto podrás ver aquí los vencimientos de tus empresas.'}</p></section>`;
+    return;
+  }
+  let user = null; try { user = await sesionCalendario(); } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if (!user) {
+    out.innerHTML = `<section class="panel cal-login"><form id="calF" class="stack" autocomplete="on">
+      <div class="cal-login-h">${navIco('calendario')}<div><h2>Entra con tu usuario de AGA Calendar</h2><p class="hint">Es el mismo correo y contraseña con que entras al calendario. Tus vencimientos también llegarán a la campanita de notificaciones.</p></div></div>
+      <div><label for="calC">Correo</label><input id="calC" type="email" required autocomplete="username"></div>
+      <div><label for="calP">Contraseña</label><input id="calP" type="password" required autocomplete="current-password"></div>
+      <p class="err" id="calErr" hidden></p><div class="row"><button class="primary" id="calOk">Entrar</button>${URL_APP_CALENDARIO ? `<a class="btn ghost" href="${esc(URL_APP_CALENDARIO)}" target="_blank" rel="noopener">¿No tienes usuario? Pídelo en AGA Calendar</a>` : ''}</div></form></section>`;
+    $('calF').onsubmit = async ev => {
+      ev.preventDefault(); $('calOk').disabled = true; $('calErr').hidden = true;
+      try { await entrarCalendario($('calC').value.trim(), $('calP').value); await cargarVencimientos(true); vCalendario(m); }
+      catch (e) { $('calErr').textContent = e.message; $('calErr').hidden = false; } finally { $('calOk').disabled = false; }
+    };
+    return;
+  }
+  let datos; try { datos = await cargarCalendario(); } catch (e) { out.innerHTML = `<p class="err">No se pudo leer AGA Calendar: ${esc(e.message)}</p>`; return; }
+  const opc = S.calOpc = S.calOpc || { empresa: '', estado: 'pendientes', dias: 60 };
+  $('calAcc').innerHTML = `${URL_APP_CALENDARIO ? `<a class="btn ghost" href="${esc(URL_APP_CALENDARIO)}" target="_blank" rel="noopener">Abrir AGA Calendar</a>` : ''}<button class="ghost" id="calRe">Actualizar</button><button class="ghost" id="calSal" title="${esc(user.email)}">Salir del calendario</button>`;
+  const pintar = () => {
+    const todas = S.calTodas === true;
+    const emps = datos.empresas.filter(x => todas || x.mia || x.comoResp);
+    let l = vencimientos(datos, sumarDias(hoy(), -30), sumarDias(hoy(), Number(opc.dias)), { todas });
+    if (opc.empresa) l = l.filter(v => v.empresa_id === opc.empresa);
+    const cuenta = k => l.filter(v => v.estado === k).length;
+    const vis = opc.estado === 'pendientes' ? l.filter(v => v.estado !== 'presentada') : opc.estado === 'todas' ? l : l.filter(v => v.estado === opc.estado);
+    const meses = [...new Set(vis.map(v => v.fecha.slice(0, 7)))];
+    const tag = v => v.estado === 'presentada' ? `<span class="tag ok" title="${esc(v.presentada.aprobado_por_nombre || '')}">Presentada</span>` : v.estado === 'vencida' ? `<span class="tag bad">Vencida hace ${-v.dias} d</span>` : v.dias === 0 ? '<span class="tag bad">Vence hoy</span>' : v.estado === 'pronto' ? `<span class="tag warn">En ${v.dias} d</span>` : `<span class="tag">En ${v.dias} d</span>`;
+    out.innerHTML = `<div class="cal-res">
+        <button type="button" class="cal-k bad" data-est="vencida"><b>${cuenta('vencida')}</b><span>Vencidas sin presentar</span></button>
+        <button type="button" class="cal-k warn" data-est="pronto"><b>${cuenta('pronto')}</b><span>Vencen en 7 días</span></button>
+        <button type="button" class="cal-k" data-est="futura"><b>${cuenta('futura')}</b><span>Más adelante</span></button>
+        <button type="button" class="cal-k ok" data-est="presentada"><b>${cuenta('presentada')}</b><span>Presentadas</span></button></div>
+      <div class="row filtros">
+        <select id="calE" aria-label="Empresa"><option value="">Todas las empresas (${emps.length})</option>${emps.map(x => `<option value="${x.id}" ${x.id === opc.empresa ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>
+        <select id="calS" aria-label="Estado">${[['pendientes', 'Sin presentar'], ['todas', 'Todas'], ['vencida', 'Vencidas'], ['pronto', 'En 7 días'], ['presentada', 'Presentadas']].map(([k, t]) => `<option value="${k}" ${k === opc.estado ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <select id="calD" aria-label="Hasta">${[[30, 'Próximos 30 días'], [60, 'Próximos 60 días'], [120, 'Próximos 4 meses']].map(([k, t]) => `<option value="${k}" ${Number(opc.dias) === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        ${datos.perfil?.es_admin ? `<label class="check"><input type="checkbox" id="calT" ${todas ? 'checked' : ''}> Ver empresas de todos los usuarios</label>` : ''}</div>
+      ${emps.length ? '' : '<section class="panel"><p class="muted">Tu usuario de AGA Calendar no tiene empresas todavía. Créalas en el calendario y aparecerán aquí.</p></section>'}
+      ${meses.map(mes => `<section class="panel cal-mes"><h2>${new Date(mes + '-15T12:00:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })}</h2>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Obligación</th><th>Periodo</th><th>Empresa</th><th>Estado</th></tr></thead><tbody>
+        ${vis.filter(v => v.fecha.startsWith(mes)).map(v => `<tr class="${v.estado === 'presentada' ? 'muted' : ''}"><td class="nowrap">${fFecha(v.fecha)}</td><td><b>${esc(v.obligacion)}</b>${v.formulario ? ` <span class="muted">· ${esc(v.formulario)}</span>` : ''}</td><td>${esc(v.periodo)}</td><td>${esc(v.empresa)}</td><td class="nowrap">${tag(v)}</td></tr>`).join('')}
+        </tbody></table></div></section>`).join('') || (emps.length ? '<section class="panel"><p class="muted">No hay vencimientos con ese filtro.</p></section>' : '')}
+      <p class="hint">Para marcar una declaración como presentada y adjuntar el formulario, hazlo en AGA Calendar: aquí se ve reflejado al actualizar.</p>`;
+    $('calE').onchange = () => { opc.empresa = $('calE').value; pintar(); };
+    $('calS').onchange = () => { opc.estado = $('calS').value; pintar(); };
+    $('calD').onchange = () => { opc.dias = $('calD').value; pintar(); };
+    if ($('calT')) $('calT').onchange = () => { S.calTodas = $('calT').checked; opc.empresa = ''; cargarVencimientos(); pintar(); };
+    out.querySelectorAll('[data-est]').forEach(b => b.onclick = () => { opc.estado = b.dataset.est; pintar(); });
+  };
+  pintar();
+  $('calRe').onclick = async () => { try { datos = await cargarCalendario({ forzar: true }); await cargarVencimientos(); pintar(); toast('Calendario actualizado.'); } catch (e) { fail(e); } };
+  $('calSal').onclick = async () => { await salirCalendario(); S.venc = []; pintarCampana(); vCalendario(m); };
 }
