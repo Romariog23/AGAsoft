@@ -20,7 +20,7 @@ export function datosDemo(hoy = hoyLocal()) {
   let n = 0;
   const id = p => `demo-${p}-${++n}`;
   const ahora = new Date().toISOString();
-  const db = { empresas: [], cuentas: [], terceros: [], productos: [], numeraciones: [], documentos: [], items: [], aplicaciones: [], miembros: [], comprobantes: [], compras: [], empleados: [], nominas: [], fe_envios: [], bodegas: [] };
+  const db = { empresas: [], cuentas: [], terceros: [], productos: [], numeraciones: [], documentos: [], items: [], aplicaciones: [], miembros: [], comprobantes: [], compras: [], empleados: [], nominas: [], fe_envios: [], bodegas: [], inventario_docs: [] };
   const eid = 'demo-empresa';
   const add = (t, r) => { const row = { id: id(t.slice(0, 3)), empresa_id: eid, creado_en: r.fecha ? `${r.fecha}T${String(10 + (n % 9)).padStart(2, '0')}:00:00.000Z` : ahora, ...r }; db[t].push(row); return row; };
 
@@ -154,11 +154,15 @@ export function datosDemo(hoy = hoyLocal()) {
 
   // Saldos iniciales (el día que empieza el demo).
   comp('SI', inicio, 'Saldos iniciales', [
-    [P.caja, T.s1, 2500000, 0, 'Caja general'], [P.bancos, T.banco, 48000000, 0, 'Cuenta corriente'], ['14350501', T.p1, 32000000, 0, 'Inventario de mercancías'],
+    [P.caja, T.s1, 2500000, 0, 'Caja general'], [P.bancos, T.banco, 48000000, 0, 'Cuenta corriente'], 
     [P.clientes, T.c2, 3570000, 0, 'Factura anterior pendiente'], ['15280501', T.p5, 9600000, 0, 'Equipo de cómputo'], ['15920501', T.p5, 0, 1600000, 'Depreciación acumulada'],
     [P.proveedores, T.p1, 0, 7140000, 'Factura anterior pendiente'], ['31050501', T.s1, 0, 30000000, 'Aporte Jorge Martínez'], ['31050501', T.s2, 0, 30000000, 'Aporte Ana Lucía Torres'],
-    ['37050501', T.s1, 0, 26930000, 'Utilidades de años anteriores'],
+    ['37050501', T.s1, 32000000 - 26930000, 0, 'Utilidades de años anteriores (neto del inventario inicial)'],
   ]);
+  // Inventario inicial por productos (cantidad y costo); la contrapartida son las utilidades acumuladas.
+  const INI = [['CEM-50', 600, 19000], ['VAR-38', 400, 14800], ['PIN-GL', 60, 35500], ['TAL-750', 15, 178000], ['PVC-4', 120, 43500], ['LED-12', 500, 5360], ['CAB-12', 15, 132000]];
+  add('inventario_docs', { tipo: 'AI', numero: 1, fecha: inicio, tercero_id: T.s1.id, concepto: 'inicial', cuenta_contra: '37050501', observaciones: 'Inventario inicial al empezar a usar AGAsoft',
+    lineas: INI.map(([k, cantidad, costo]) => ({ producto_id: PR[k].id, bodega_id: PR[k].bodega_id || BOD.principal.id, sentido: 'entrada', cantidad, costo })), estado: 'contabilizado' });
   const siCliente = { id: null };
 
   // Préstamo bancario en el primer mes (financiación) y su cuota mensual.
@@ -186,15 +190,14 @@ export function datosDemo(hoy = hoyLocal()) {
     ].filter(Boolean);
     FAC.push(...ventas.map(f => ({ f, mes: i })));
 
-    // Costo de ventas del mes (62 % de la base vendida) contra el inventario.
-    const baseMes = r2(ventas.reduce((s, f) => s + f.base, 0));
+    // El costo de ventas lo calcula el inventario (promedio ponderado) desde las facturas: no hay comprobante manual.
     const finM = finMes(mes) > hoy ? hoy : finMes(mes);
-    if (baseMes) comp('CC', finM, `Costo de ventas ${mes}`, [['61350501', T.p1, baseMes * 0.62, 0], ['14350501', T.p1, 0, baseMes * 0.62]]);
 
     // Compras del mes.
     // Mercancía por productos: entra a la bodega de cada producto (cuenta 14350501).
     const lp = (cod, cantidad, costo) => { const p = PR[cod], b = p.bodega_id || BOD.principal.id; return { producto_id: p.id, bodega_id: b, cantidad, costo, cuenta: '14350501', descripcion: p.nombre, base: r2(cantidad * costo), iva_pct: 19 }; };
-    const mercancia = compra('FC', dia(i, 3), 'p1', [lp('CEM-50', 700 + 30 * k, 19500), lp('VAR-38', 400 + 15 * k, 18000), lp('PIN-GL', 80 + 3 * i, 41000), lp('CAB-12', 20 + i, 162000)], { num_proveedor: `DFN-${4810 + i * 7}` });
+    const mercancia = compra('FC', dia(i, 3), 'p1', [lp('CEM-50', 900 + 40 * i, 19500 + 150 * i), lp('VAR-38', 260 + 24 * i, 15000), lp('PIN-GL', 18, 36000), lp('CAB-12', 20, 133000),
+      lp('PVC-4', 75 + 5 * i, 44000), lp('LED-12', 175, 5500), lp('TAL-750', 3, 180000)], { num_proveedor: `DFN-${4810 + i * 7}` });
     const arriendo = compra('FC', dia(i, 1), 'p2', [['51200501', `Arriendo local comercial ${mes}`, 3500000]], { num_proveedor: `ARR-${mes.replace('-', '')}` });
     const energia = compra('FC', dia(i, 14), 'p3', [['51350501', `Energía eléctrica ${mes}`, 460000 + 35000 * k]], { num_proveedor: `EL-${77120 + i}`, cuenta_pago: P.bancos });
     const honorarios = compra('DS', dia(i, 26), 'p4', [['51100501', `Honorarios asesoría contable ${mes}`, 1600000, 0]]);
