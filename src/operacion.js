@@ -333,3 +333,73 @@ export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, product
     retefuente_pct: n(tercero.ret_compra_fuente_pct), reteiva_pct: n(tercero.ret_compra_iva_pct), reteica_milaje: n(tercero.ret_compra_ica_milaje), cuenta_retefuente: '', retenciones: {},
     cuenta_pago: '', aplicaciones: [], anticipo: 0, observaciones: `Generado desde Operación · ${tipoNombre} · ${periodo}` } };
 }
+
+/* ---------- Cobro: factura desde cotización ---------- */
+// La cotización fija el precio de cobro. Se amarra a un tipo de operación y, si quiere, a elementos (obra, equipo…);
+// cada línea puede pedir más elementos. Sin cotización que coincida se usa la tarifa de cobro, si existe.
+export const ESTADOS_COT = [['abierta', 'Abierta'], ['aceptada', 'Aceptada'], ['rechazada', 'Rechazada'], ['cerrada', 'Cerrada']];
+export const cotizacionVigente = c => !!c && (c.estado === 'abierta' || c.estado === 'aceptada');
+const coincide = (criterios, r) => Object.entries(criterios || {}).every(([k, v]) => !v || r.datos?.[k] === v);
+const pesoCrit = c => Object.values(c || {}).filter(Boolean).length;
+export function cotizacionPara(r, cotizaciones) {
+  if (r.cotizacion_id) return (cotizaciones || []).find(c => c.id === r.cotizacion_id) || null;
+  return (cotizaciones || []).filter(c => cotizacionVigente(c) && c.op_tipo_id === r.tipo_id && coincide(c.criterios, r))
+    .sort((a, b) => pesoCrit(b.criterios) - pesoCrit(a.criterios) || String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
+}
+export const lineaCotPara = (r, cot) => (cot?.lineas || []).map((l, i) => ({ ...l, i })).filter(l => l.op !== false && coincide(l.criterios, r))
+  .sort((a, b) => pesoCrit(b.criterios) - pesoCrit(a.criterios) || a.i - b.i)[0] || null;
+// Cliente de un registro sin cotización: el tercero del primer elemento escogido que tenga uno (la obra, por lo general).
+export function clienteDe(r, tipo, elementos) {
+  for (const f of cfgTipo(tipo).campos.filter(x => x.tipo === 'elemento')) { const e = (elementos || []).find(x => x.id === r.datos?.[f.k]); if (e?.tercero_id) return e.tercero_id; }
+  return null;
+}
+export const totalLineaCot = l => r2(n(l.cantidad) * n(l.precio) * (1 - n(l.descuento_pct) / 100));
+// Registros sin facturar agrupados en facturas: una por cotización (o por cliente con tarifa de cobro).
+export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], elementos = [], centros = [], productos = [] } = {}) {
+  const cfg = cfgTipo(tipo), grupos = new Map(), sinPrecio = [];
+  for (const r of [...registros].filter(x => x.tipo_id === tipo.id && !x.cierre_cobro).sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+    const k = calcular(r, tipo, tarifas), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
+    const cot = cotizacionPara(r, cotizaciones), lc = cot && lineaCotPara(r, cot);
+    let cliente = null, clave = null, linea = null, motivo = '';
+    if (lc) {
+      cliente = cot.tercero_id; clave = 'c:' + cot.id;
+      linea = { clave: 'l' + lc.i, producto_id: lc.producto_id || null, codigo: lc.codigo || '', descripcion: lc.descripcion || '', unidad: lc.unidad || 'UND', precio: n(lc.precio), descuento_pct: n(lc.descuento_pct), iva_pct: n(lc.iva_pct), modo: 'unidad' };
+    } else {
+      const t = tarifaPara(r, tarifas, 'cobro'); cliente = cot ? cot.tercero_id : clienteDe(r, tipo, elementos);
+      if (t && cliente) {
+        const p = productos.find(x => x.id === t.producto_id); clave = cot ? 'c:' + cot.id : 't:' + cliente;
+        linea = { clave: 't' + t.id, producto_id: t.producto_id || null, codigo: p?.codigo || '', descripcion: p?.nombre || tipo.nombre, unidad: p?.unidad || 'UND', precio: n(t.valor), descuento_pct: 0, iva_pct: p ? n(p.iva_pct) : 0, modo: t.modo || 'unidad' };
+      } else motivo = cot ? 'La cotización no tiene una línea para este registro' : t ? 'La obra no tiene cliente' : 'Sin cotización ni tarifa de cobro';
+    }
+    if (!linea) { sinPrecio.push({ registro: r, motivo, cantidad: q }); continue; }
+    const g = grupos.get(clave) || { clave, tercero_id: cliente, cotizacion: clave.startsWith('c:') ? cot : null, lineas: new Map(), registros: [], desde: r.fecha, hasta: r.fecha };
+    const l = g.lineas.get(linea.clave) || { ...linea, cantidad: 0, registros: 0, partes: [] };
+    l.cantidad = linea.modo === 'fijo' ? 1 : linea.modo === 'registro' ? l.cantidad + 1 : r2(l.cantidad + q);
+    l.registros++; l.partes.push({ dist: ccDeRegistro(r, tipo, elementos, centros), valor: linea.modo === 'unidad' ? q : 1 });
+    g.lineas.set(linea.clave, l); g.registros.push({ id: r.id, fecha: r.fecha, datos: r.datos, tercero_id: r.tercero_id, cantidad: q });
+    if (r.fecha > g.hasta) g.hasta = r.fecha;
+    grupos.set(clave, g);
+  }
+  return {
+    grupos: [...grupos.values()].map(g => {
+      const lineas = [...g.lineas.values()].filter(l => l.cantidad > 0).map(({ partes, ...l }) => ({ ...l, cc: normDist(distPonderada(partes.filter(p => p.dist.length)) || []), valor: totalLineaCot(l) }));
+      return { ...g, lineas, cantidad: r2(g.registros.reduce((s, x) => s + x.cantidad, 0)), total: r2(lineas.reduce((s, l) => s + l.valor, 0)) };
+    }),
+    sinPrecio,
+  };
+}
+// Ítems de la factura de venta para un grupo (mismas columnas de la tabla items).
+export const itemsDeGrupo = (g, { periodo = '', conCC = false, bodega = () => null } = {}) => g.lineas.map(l => ({
+  producto_id: l.producto_id || null, bodega_id: bodega(l.producto_id) || null, codigo: l.codigo || '', descripcion: `${l.descripcion}${periodo ? ' · ' + periodo : ''}`.slice(0, 300), unidad: l.unidad || 'UND',
+  cantidad: l.cantidad, precio: l.precio, descuento_pct: l.descuento_pct || 0, iva_pct: l.iva_pct || 0, cuenta: '', ...(conCC && l.cc?.length ? { cc: l.cc } : {}),
+}));
+export function erroresCotizacion(c) {
+  const e = [];
+  if (!c.tercero_id) e.push('Escoge el cliente.');
+  if (!c.fecha) e.push('Escribe la fecha.');
+  if (c.vence && c.fecha && c.vence < c.fecha) e.push('La fecha de vencimiento es anterior a la fecha de la cotización.');
+  const ls = c.lineas || [];
+  if (!ls.length) e.push('Agrega al menos una línea.');
+  ls.forEach((l, i) => { if (!String(l.descripcion || '').trim()) e.push(`La línea ${i + 1} necesita una descripción.`); if (!(n(l.precio) >= 0)) e.push(`El precio de la línea ${i + 1} no puede ser negativo.`); });
+  return e;
+}

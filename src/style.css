@@ -597,3 +597,11 @@ button.cfg-main:hover{background:none}
 .op-prev{margin:0;padding:8px 12px;border-radius:10px;background:var(--surface-2);font-size:.9rem;min-height:1.5em}
 .op-vol .tbl{font-size:.85rem}
 @media print{.op-vol tr.op-fest td{background:#fbf3d6!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+/* Cotizaciones */
+.cq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.cq-lineas td{vertical-align:middle}.cq-lineas td.c{text-align:center}
+.cq-lineas input,.cq-lineas select{width:100%;min-width:70px}
+.cq-lineas td:nth-child(2) input{min-width:200px}
+.op-fac{border-left:3px solid var(--lime,#b5d334)}
+.cq-lineas [data-k=precio]{min-width:120px}.cq-lineas [data-lc]{min-width:140px}.cq-lineas [data-k=producto_id]{min-width:150px}
+.op-fac .vhead{margin:0}

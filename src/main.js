@@ -21,7 +21,8 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
-import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -216,7 +217,7 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   { k: 'inicio', t: 'Inicio', i: 'inicio' },
   { k: 'calendario', t: 'Calendario', i: 'calendario' },
-  { t: 'Ventas', i: 'ventas', l: [['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
+  { t: 'Ventas', i: 'ventas', l: [['cotizaciones', 'Cotizaciones'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
   { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
@@ -284,7 +285,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes', 'opfacturar'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v === 'cotizacion' ? 'cotizaciones' : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -299,6 +300,9 @@ function route() {
     if (v === 'opregistros') return operacionActiva() ? vOpRegistros(m, arg, q) : vOperacion(m);
     if (v === 'opcortes') return operacionActiva() ? vOpCortes(m, arg) : vOperacion(m);
     if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
+    if (v === 'opfacturar') return operacionActiva() ? vOpFacturar(m, arg, q) : vOperacion(m);
+    if (v === 'cotizaciones') return vCotizaciones(m);
+    if (v === 'cotizacion') return vCotizacion(m, arg);
     if (TIPOS[v]) return vLista(m, v);
     if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero'), clase: q.get('clase') });
     if (v === 'editar') return vEditor(m, { id: arg });
@@ -4667,5 +4671,7 @@ async function vCalendario(m) {
 }
 
 // Operación (módulo opcional): sus pantallas usan las mismas utilidades de esta página.
-iniciarOperacion({ S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
-  cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v) });
+const ctxOp = { S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
+  cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
+  bodegaVenta: pid => { const p = S.d.productos.find(x => x.id === pid); return p && esInventariable(p) && conInv() ? bodegaVentaDe(p, bodegas()) : null; } };
+iniciarOperacion(ctxOp); iniciarCotizaciones(ctxOp);
