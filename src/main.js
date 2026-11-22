@@ -108,13 +108,12 @@ async function iniciar() {
   if (dp !== null) { $('pruebaTag').textContent = dp ? `Prueba gratis: ${dp} día${dp === 1 ? '' : 's'}` : 'Prueba gratis: último día'; $('pruebaTag').classList.toggle('bad', dp <= 3); }
   $('auth').hidden = true; $('app').hidden = false;
   $('demoTag').hidden = store.mode !== 'local';
+  if (store.publico) { $('demoTag').textContent = 'Demo · se reinicia cada día'; $('demoTag').title = 'Empresa ficticia para probar. Lo que registres se guarda solo en este navegador y se borra al día siguiente.'; }
   $('salir').hidden = store.mode === 'local';
   $('who').textContent = store.mode === 'local' ? '' : (S.perfil?.nombre || S.user.email);
   S.plan = null;
   if (store.mode === 'supabase' && !S.perfil?.es_admin) { try { S.plan = (await store.miPlan())?.plan || null; } catch (_) { /* falta 009: sin límites */ } }
   S.empresas = await store.listEmpresas();
-  // Enlace de demostración (/demo): la primera vez entra con la empresa de ejemplo ya creada.
-  if (store.mode === 'local' && /^\/demo\/?$/.test(location.pathname) && !S.empresas.length) return cargarEjemplo();
   let guardada = null; try { guardada = localStorage.getItem('agasoft-empresa'); } catch (_) {}
   S.eid = S.empresas.find(e => e.id === guardada)?.id || S.empresas[0]?.id || null;
   await cargarEmpresa();
@@ -632,7 +631,7 @@ function vEmpresa(m) {
     ]],
   ].filter(Boolean);
   pintarTarjetas(m, 'Configuración', esc(e.nombre), grupos, 'Buscar un ajuste…');
-  m.insertAdjacentHTML('beforeend', `<div class="row cfg-peligro"><button class="ghost" id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button class="ghost" id="delDemo">Borrar datos de demostración</button>' : ''}</div>`);
+  m.insertAdjacentHTML('beforeend', `<div class="row cfg-peligro"><button class="ghost" id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? `<button class="ghost" id="delDemo">${store.publico ? 'Volver al demo inicial' : 'Borrar datos de demostración'}</button>` : ''}</div>`);
   const interruptor = (id, clave, msgOn, msgOff, antes) => { if ($(id)) $(id).onchange = async ev => {
     const on = ev.target.checked;
     if (antes && on && !await antes()) { ev.target.checked = false; return; }
@@ -646,7 +645,7 @@ function vEmpresa(m) {
     if (!await confirmar('Borrar empresa', `Se borrará <b>${esc(e.nombre)}</b> con todos sus clientes, productos y documentos. Esto no se puede deshacer.`, 'Borrar')) return;
     try { await store.remove('empresas', e.id); S.eid = null; await recargar(); S.eid = S.empresas[0]?.id || null; await cargarEmpresa(); location.hash = '#/inicio'; route(); } catch (er) { fail(er); }
   };
-  if ($('delDemo')) $('delDemo').onclick = async () => { if (await confirmar('Borrar demostración', 'Se borran todas las empresas y documentos de este navegador.', 'Borrar todo')) { store.borrarDemo(); location.hash = ''; location.reload(); } };
+  if ($('delDemo')) $('delDemo').onclick = async () => { if (await confirmar(store.publico ? 'Volver al demo inicial' : 'Borrar demostración', store.publico ? 'Se borra lo que registraste y vuelve la empresa de demostración como estaba al empezar.' : 'Se borran todas las empresas y documentos de este navegador.', store.publico ? 'Volver al inicial' : 'Borrar todo')) { store.borrarDemo(); location.hash = ''; location.reload(); } };
 }
 function abrirApariencia() {
   dialogo('<section id="apariencia" class="stack"></section><div class="row end"><button value="cancel" class="primary">Listo</button></div>', () => {});
