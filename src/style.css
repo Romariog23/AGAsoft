@@ -595,3 +595,5 @@ button.cfg-main:hover{background:none}
 .tbl.op-reg tr.op-fest td{background:var(--warn-soft)}
 .tbl tr.op-p td{border-top:1px solid var(--line)}
 .op-prev{margin:0;padding:8px 12px;border-radius:10px;background:var(--surface-2);font-size:.9rem;min-height:1.5em}
+.op-vol .tbl{font-size:.85rem}
+@media print{.op-vol tr.op-fest td{background:#fbf3d6!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
