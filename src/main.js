@@ -1905,13 +1905,14 @@ function vInventarioCfg(m) {
   </section>
   <section class="panel stack"><header class="vhead"><h3>Bodegas</h3><button class="primary" id="nuevaB">Nueva bodega</button></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Cuenta de inventario</th><th></th></tr></thead><tbody>
-    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r">${b.id ? `<button class="sm ghost" data-eb="${b.id}">Editar</button>` : ''}</td></tr>`).join('')}
+    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r"><button class="sm ghost" data-eb="${b.id || '__principal'}">Editar</button></td></tr>`).join('')}
     </tbody></table></div>
     <p class="hint">Cada bodega lleva una cuenta auxiliar de la clase 14. Las bodegas solo trasladan cantidades: un traslado entre bodegas con cuentas distintas se contabiliza entre esas cuentas 14; si comparten la cuenta, no hay asiento.</p>
   </section>`;
   const guardarCfg = async () => { try { await guardarContab('inventario', { ...(e.contabilidad?.inventario || {}), metodo: $('f_inv_metodo').value, negativo: $('f_inv_neg').value }); toast('Inventario guardado.'); } catch (er) { fail(er); } };
   $('f_inv_metodo').onchange = guardarCfg; $('f_inv_neg').onchange = guardarCfg;
-  const formB = (b = {}) => dialogo(`<h2>${b.id ? 'Editar bodega' : 'Nueva bodega'}</h2>
+  // La bodega principal que aún no existe (se crea al primer uso) también se edita: al guardar se crea con la cuenta escogida.
+  const formB = (b = {}, principal = false) => dialogo(`<h2>${b.id || principal ? 'Editar bodega' : 'Nueva bodega'}</h2>
     <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
     <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><input id="f_cuenta" name="cuenta" list="ctas14" class="mono" value="${esc(b.cuenta || param().inventario)}" autocomplete="off" required><datalist id="ctas14">${optsLista(cuentasAux().filter(c => /^14/.test(c.codigo)))}</datalist>
       <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
@@ -1923,7 +1924,7 @@ function vInventarioCfg(m) {
     await cargarEmpresa(); toast('Bodega guardada.'); route();
   });
   $('nuevaB').onclick = async () => { try { if (!reales.length) await asegurarBodega(); formB(); } catch (er) { fail(er); } };
-  m.querySelectorAll('[data-eb]').forEach(x => x.onclick = () => formB(reales.find(b => b.id === x.dataset.eb)));
+  m.querySelectorAll('[data-eb]').forEach(x => x.onclick = () => x.dataset.eb === '__principal' ? formB({ ...bodegas()[0], id: undefined }, true) : formB(reales.find(b => b.id === x.dataset.eb)));
 }
 /* ---------- Inventario: existencias y ajustes ---------- */
 const invDocs = () => S.d?.inventario_docs || [];
