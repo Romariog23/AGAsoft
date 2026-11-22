@@ -1,6 +1,7 @@
 // Facturación electrónica con Factus (proveedor tecnológico autorizado por la DIAN). Arma el JSON de factura,
 // nota crédito y nota débito con los códigos DIAN que usa Factus. La función de Supabase (supabase/functions/fe-factus)
 // pone el código DANE del municipio (_municipio) y el rango de numeración antes de enviar.
+import { codigoDian } from './unidades.js';
 import { r2, num, linea } from './calc.js';
 import qrcode from 'qrcode-generator';
 
@@ -13,7 +14,7 @@ const soloDigitos = v => String(v || '').replace(/\D/g, '');
 const referenciaFE = d => `${d.tipo}-${d.prefijo || ''}${d.numero}`;
 
 // numeroRef: número con que Factus validó la factura a la que se refiere una nota.
-function jsonFE({ doc, items, tercero, ref, numeroRef }) {
+function jsonFE({ doc, items, tercero, ref, numeroRef, unidades }) {
   const ls = (items || []).map(it => ({ it, l: linea(it) }));
   const total = r2(ls.reduce((s, x) => s + x.l.base + x.l.iva, 0));
   const juridica = (tercero.tipo_persona || (tercero.tipo_id === '31' ? 'juridica' : 'natural')) === 'juridica';
@@ -41,7 +42,7 @@ function jsonFE({ doc, items, tercero, ref, numeroRef }) {
       quantity: String(num(it.cantidad)),
       discount_rate: num(it.descuento_pct).toFixed(2),
       price: dinero(it.precio), // sin IVA y antes del descuento
-      unit_measure_code: '94', // unidad
+      unit_measure_code: codigoDian(unidades, it.unidad), // código DIAN de la unidad de medida (94 = unidad)
       standard_code: '999', // estándar de adopción del contribuyente
       taxes: [{ code: '01', rate: num(it.iva_pct).toFixed(2) }],
     })),
