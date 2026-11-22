@@ -57,3 +57,14 @@ test('retenciones practicadas y certificados', () => {
   assert.equal(c.porTipo.reteiva[0].base, 9500);
   assert.deepEqual(tercerosConRetencion(compras, '2026-01-01', '2026-12-31').sort(), ['p1', 'p2']);
 });
+
+test('anexos de IVA y retenciones', async () => {
+  const { anexoIva, anexoRetenciones } = await import('../src/informes.js');
+  const a = anexoIva({ documentos, items, compras }, '2026-11-01', '2026-12-31');
+  assert.equal(a.filter(f => f.seccion === 'ventas').reduce((s, f) => s + f.valor, 0), 15200);
+  assert.equal(a.filter(f => f.seccion === 'compras').reduce((s, f) => s + f.valor, 0), 9500);
+  assert.equal(a.find(f => f.doc?.id === 'n1').valor, -3800);
+  const r = anexoRetenciones(compras, [{ origen: 'nomina', fecha: '2026-11-30', cuenta: '23650501', credito: 120000, debito: 0, ref: 'NE 1' }], '2026-11-01', '2026-11-30');
+  assert.equal(r.filter(f => f.tipo === 'retefuente').length, 3);
+  assert.equal(r.reduce((s, f) => s + f.valor, 0), 2000 + 1425 + 110000 + 9660 + 120000);
+});

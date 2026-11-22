@@ -13,7 +13,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION } from './informes.js';
+import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -2684,9 +2684,37 @@ const rangoPer = mensual => mensual ? periodo(PER.anio, 'mensual', PER.mes) : pe
 const pct = v => `${String(v).replace('.', ',')} %`;
 const botonImprimir = (titulo, html) => { $('print').innerHTML = html(); const t = document.title; document.title = `${titulo} - ${emp().nombre}`; window.print(); document.title = t; };
 
+// Anexo de un informe de impuestos: lo que soporta cada cifra, documento por documento (auxiliar de impuestos).
+// grupos = [{ titulo, filas }]; cada fila: { fecha, doc|compra|mov, tercero_id, concepto?, base, tarifa, valor, milaje? }
+const refAnexo = f => f.doc ? { txt: nomDoc(f.doc), href: '#/doc/' + f.doc.id } : f.compra ? { txt: `${TIPOS_COMPRA[f.compra.tipo].corto} ${f.compra.num_proveedor || f.compra.numero}`, href: '#/compra/' + f.compra.id }
+  : { txt: f.mov?.ref || '', href: f.mov?.origen === 'nomina' ? '#/nominadoc/' + f.mov.doc_id : f.mov?.origen === 'comp' ? '#/comp/' + f.mov.doc_id : '' };
+const tasa = (v, milaje) => v == null ? '' : milaje ? `${String(v).replace('.', ',')} ‰` : pct(v);
+function htmlAnexo(titulo, sub, grupos) {
+  const fila = f => { const r = refAnexo(f), t = terc(f.tercero_id);
+    return `<tr><td class="nowrap">${fFecha(f.fecha)}</td><td class="mono nowrap">${r.href ? `<a href="${r.href}">${esc(r.txt)}</a>` : esc(r.txt)}</td><td class="mono nowrap">${esc(t ? docId(t) : '')}</td><td>${esc(t?.nombre || '')}${f.concepto ? `<br><small class="hint">${esc(f.concepto)}</small>` : ''}</td>
+      <td class="r mono">${f.base == null ? '' : money(f.base)}</td><td class="r mono nowrap">${tasa(f.tarifa, f.milaje)}</td><td class="r mono">${money(f.valor)}</td></tr>`; };
+  return cabInforme(titulo, sub) + (grupos.some(g => g.filas.length) ? grupos.filter(g => g.filas.length).map(g => `<h4>${esc(g.titulo)}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>NIT o cédula</th><th>Tercero</th><th class="r">Base</th><th class="r">${g.colTarifa || 'Tarifa'}</th><th class="r">${g.colValor || 'Valor'}</th></tr></thead><tbody>
+    ${g.filas.map(fila).join('')}<tr class="strong"><td colspan="4">Total (${g.filas.length})</td><td class="r mono">${g.filas.every(f => f.base == null) ? '' : money(g.filas.reduce((s, f) => s + (f.base || 0), 0))}</td><td></td><td class="r mono">${money(g.filas.reduce((s, f) => s + f.valor, 0))}</td></tr></tbody></table></div>`).join('')
+    : '<p class="muted">No hay documentos en el período.</p>');
+}
+function csvAnexo(grupos) {
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`, n = v => v == null ? '' : String(v).replace('.', ',');
+  const rows = [['Sección', 'Fecha', 'Documento', 'NIT o cédula', 'Tercero', 'Concepto', 'Base', 'Tarifa', 'Valor']];
+  for (const g of grupos) for (const f of g.filas) { const t = terc(f.tercero_id); rows.push([g.titulo, f.fecha, refAnexo(f).txt, t ? docId(t).trim() : '', t?.nombre || '', f.concepto || '', n(f.base), n(f.tarifa), n(f.valor)]); }
+  return '\ufeff' + rows.map(r => r.map(q).join(';')).join('\r\n');
+}
+// Botones del anexo: ver debajo del informe, imprimir y descargar.
+function botonesAnexo(titulo, datos) {
+  const box = $('anexo');
+  $('verAnexo').onclick = () => { const { sub, grupos } = datos(); box.hidden = !box.hidden; if (!box.hidden) { box.innerHTML = `<div class="row end noprint"><button class="sm" id="axImp">Imprimir anexo</button><button class="sm" id="axCsv">Descargar CSV</button></div>${htmlAnexo('Anexo · ' + titulo, sub, grupos)}`;
+    $('axImp').onclick = () => { const d = datos(); botonImprimir('Anexo ' + titulo, () => htmlAnexo('Anexo · ' + titulo, d.sub, d.grupos)); };
+    $('axCsv').onclick = () => { const d = datos(); descargar(`anexo-${titulo.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${emp().nit}-${d.desde}.csv`, csvAnexo(d.grupos)); };
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+}
+
 function vIva(m) {
-  m.innerHTML = `<header class="vhead noprint"><div><h2>IVA del período</h2><p class="sub">Lo que va en el formulario 300: IVA generado en ventas, IVA descontable en compras y el saldo a pagar o a favor.</p></div><button id="imp">Imprimir</button></header>
-    ${selPeriodo('pIva', ['bimestral', 'cuatrimestral'], () => pintar())}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead noprint"><div><h2>IVA del período</h2><p class="sub">Lo que va en el formulario 300: IVA generado en ventas, IVA descontable en compras y el saldo a pagar o a favor.</p></div><div class="row"><button id="verAnexo">Ver anexo</button><button id="imp">Imprimir</button></div></header>
+    ${selPeriodo('pIva', ['bimestral', 'cuatrimestral'], () => pintar())}<section class="panel" id="out"></section><section class="panel" id="anexo" hidden></section>`;
   const tabla = (filas, titulo) => `<h4>${titulo}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tarifa</th><th class="r">Base</th><th class="r">IVA</th></tr></thead><tbody>
     ${filas.map(x => `<tr><td>${x.tarifa ? pct(x.tarifa) : 'Excluidos, exentos o 0 %'}</td><td class="r mono">${money(x.base)}</td><td class="r mono">${money(x.iva)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Sin movimientos en el período.</td></tr>'}
     ${filas.length ? `<tr class="strong"><td>Total</td><td class="r mono">${money(filas.reduce((s, x) => s + x.base, 0))}</td><td class="r mono">${money(filas.reduce((s, x) => s + x.iva, 0))}</td></tr>` : ''}</tbody></table></div>`;
@@ -2708,14 +2736,19 @@ function vIva(m) {
       ${Math.abs(cont - neto) < 1 ? '<p class="okmsg">Cuadra con la contabilidad (cuentas 2408).</p>' : `<p class="hint">En la contabilidad, las cuentas 2408 suman ${money(cont)} en el período y aquí el IVA generado menos el descontable da ${money(neto)}. La diferencia suele venir de comprobantes contables o ajustes hechos a mano en esas cuentas: revísalos en el <a href="#/auxiliar">libro auxiliar</a>.</p>`}
       <p class="rep-small">Informe de apoyo para diligenciar el formulario 300. Verifica las cifras antes de presentarlo.</p>`;
   };
-  const pintar = () => { $('out').innerHTML = html(); };
+  const pintar = () => { $('out').innerHTML = html(); if (!$('anexo').hidden) { $('anexo').hidden = true; $('verAnexo').click(); } };
   $('imp').onclick = () => botonImprimir('IVA del período', html);
+  botonesAnexo('IVA del período', () => { const { desde, hasta } = rangoPer(false), fs = anexoIva(S.d, desde, hasta);
+    return { desde, sub: `Del ${fFecha(desde)} al ${fFecha(hasta)}`, grupos: [
+      { titulo: 'IVA generado en ventas (las notas crédito restan)', filas: fs.filter(f => f.seccion === 'ventas'), colValor: 'IVA' },
+      { titulo: 'IVA descontable en compras', filas: fs.filter(f => f.seccion === 'compras'), colValor: 'IVA' },
+      { titulo: 'Retenciones de IVA que le practicaron', filas: fs.filter(f => f.seccion === 'reteiva').map(f => ({ ...f, concepto: 'Base: IVA de la factura' })), colValor: 'Retenido' }] }; });
   pintar();
 }
 
 function vRetPracticadas(m) {
-  m.innerHTML = `<header class="vhead noprint"><div><h2>Retenciones practicadas</h2><p class="sub">Lo que va en el formulario 350: las retenciones que la empresa practicó en el mes, por concepto.</p></div><button id="imp">Imprimir</button></header>
-    ${selPeriodo('pRet', ['mensual'], () => pintar())}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Retenciones practicadas</h2><p class="sub">Lo que va en el formulario 350: las retenciones que la empresa practicó en el mes, por concepto.</p></div><div class="row"><button id="verAnexo">Ver anexo</button><button id="imp">Imprimir</button></div></header>
+    ${selPeriodo('pRet', ['mensual'], () => pintar())}<section class="panel" id="out"></section><section class="panel" id="anexo" hidden></section>`;
   const P = param(), cts = { retefuente: P.retefuente_pagar.slice(0, 4), reteiva: P.reteiva_pagar.slice(0, 4), reteica: P.reteica_pagar.slice(0, 4) };
   const html = () => {
     const { desde, hasta } = rangoPer(true), r = informeRetenciones(S.d.compras, movs(), desde, hasta, cts);
@@ -2728,8 +2761,10 @@ function vRetPracticadas(m) {
       <p class="rep-small">La retención de ICA se declara en el municipio, no en el formulario 350. Las filas sin tarifa vienen de la nómina o de comprobantes contables registrados en las cuentas ${cts.retefuente}, ${cts.reteiva} y ${cts.reteica}.</p>`
       : '<p class="muted">No hubo retenciones practicadas en este mes.</p>') + '<p class="rep-small">Informe de apoyo para diligenciar el formulario 350. Verifica las cifras antes de presentarlo.</p>';
   };
-  const pintar = () => { $('out').innerHTML = html(); };
+  const pintar = () => { $('out').innerHTML = html(); if (!$('anexo').hidden) { $('anexo').hidden = true; $('verAnexo').click(); } };
   $('imp').onclick = () => botonImprimir('Retenciones practicadas', html);
+  botonesAnexo('Retenciones practicadas', () => { const { desde, hasta } = rangoPer(true), fs = anexoRetenciones(S.d.compras, movs(), desde, hasta, cts);
+    return { desde, sub: `${MESES_C[PER.mes - 1]} de ${PER.anio}`, grupos: TIPOS_RETENCION.map(([k, nombre]) => ({ titulo: nombre, filas: fs.filter(f => f.tipo === k).map(f => ({ ...f, milaje: k === 'reteica' })), colValor: 'Retenido' })) }; });
   pintar();
 }
 
