@@ -9,6 +9,7 @@ export const MODULOS = {
   avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp', 'ercc', 'flujocaja'] },
   consulta: { nombre: 'Usuarios de solo consulta', rutas: [] },
   // Productos y servicios (catálogo) y unidades de medida no son del módulo: todos los planes los tienen.
+  operacion: { nombre: 'Operación', rutas: ['operacion', 'opcfg', 'opregistros'] },
   inventario: { nombre: 'Control de inventario', rutas: ['existencias', 'kardex', 'ajustesinv', 'ajusteinvnuevo', 'ajusteinveditar', 'ajusteinv', 'traslados', 'trasladonuevo', 'trasladoeditar', 'traslado', 'costoproducto', 'inventariocfg'] },
 };
 
@@ -57,7 +58,7 @@ export function incluye(p) {
 
 // Planes de la demostración (los mismos que crea 029).
 export const PLANES_DEMO = [
-  { id: 'demo-emp', nombre: 'Emprendedor', precio_mensual: 31000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 0, max_empleados: 0, modulos: { nomina: false, exogena: false, importar: false, informes: false, avanzados: false, consulta: false, inventario: false }, descripcion: 'Para facturar electrónicamente y llevar la contabilidad básica. 1 usuario.', activo: true, orden: 10 },
-  { id: 'demo-pyme', nombre: 'Pyme', precio_mensual: 69000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 2, max_empleados: 5, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: false, consulta: true, inventario: true }, descripcion: 'Suma nómina hasta 5 empleados, medios magnéticos, importar de Excel e informes de ventas y cartera. 3 usuarios.', activo: true, orden: 11 },
-  { id: 'demo-empresa', nombre: 'Empresa', precio_mensual: 119000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: null, max_empleados: null, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: true, consulta: true, inventario: true }, descripcion: 'Todo AGAsoft: informes avanzados, exportar a Excel, nómina y usuarios sin límite.', activo: true, orden: 12 },
+  { id: 'demo-emp', nombre: 'Emprendedor', precio_mensual: 31000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 0, max_empleados: 0, modulos: { nomina: false, exogena: false, importar: false, informes: false, avanzados: false, consulta: false, inventario: false, operacion: false }, descripcion: 'Para facturar electrónicamente y llevar la contabilidad básica. 1 usuario.', activo: true, orden: 10 },
+  { id: 'demo-pyme', nombre: 'Pyme', precio_mensual: 69000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: 2, max_empleados: 5, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: false, consulta: true, inventario: true, operacion: false }, descripcion: 'Suma nómina hasta 5 empleados, medios magnéticos, importar de Excel e informes de ventas y cartera. 3 usuarios.', activo: true, orden: 11 },
+  { id: 'demo-empresa', nombre: 'Empresa', precio_mensual: 119000, por_empresa: true, max_documentos_fe_mes: null, max_usuarios: null, max_empleados: null, modulos: { nomina: true, exogena: true, importar: true, informes: true, avanzados: true, consulta: true, inventario: true, operacion: true }, descripcion: 'Todo AGAsoft: informes avanzados, exportar a Excel, nómina y usuarios sin límite.', activo: true, orden: 12 },
 ];

@@ -21,6 +21,7 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -221,6 +222,7 @@ const MENU = [
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
+  { t: 'Operación', i: 'operacion', op: true, l: [] },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
   { k: 'config', t: 'Configuración', i: 'config' },
@@ -238,6 +240,7 @@ const NAV_ICO = {
   calendario: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01',
   car: 'M9 18l6-6-6-6',
   inventario: 'M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
+  operacion: ICONO_OP,
 };
 const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
@@ -259,6 +262,8 @@ function renderNav(actual) {
   actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
+    // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
+    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Tipos de operación'], ...tiposOp().filter(t => t.activo !== false).map(t => ['opregistros/' + t.id, t.nombre])] }; }
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -279,7 +284,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg'].includes(v) ? 'opregistros/' + arg : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -289,6 +294,9 @@ function route() {
     const mod = moduloDeRuta(v);
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
+    if (v === 'operacion') return vOperacion(m);
+    if (v === 'opcfg') return operacionActiva() ? vOpCfg(m, arg) : vOperacion(m);
+    if (v === 'opregistros') return operacionActiva() ? vOpRegistros(m, arg, q) : vOperacion(m);
     if (TIPOS[v]) return vLista(m, v);
     if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero'), clase: q.get('clase') });
     if (v === 'editar') return vEditor(m, { id: arg });
@@ -659,6 +667,9 @@ function vEmpresa(m) {
       ['centroscfg', 'capas', 'Centros de costo', ccCfg().activo ? `${nivelesActivos(ccCfg()).map(n => n.nombre).join(' · ')} · ${ccCfg().alcance === 'todo' ? 'balance y resultado' : 'solo resultado'}` : 'Desactivados', '#/centroscfg', { id: 'ccOn', on: ccCfg().activo }],
       ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
+    ['Módulos opcionales', [
+      ['operacion', 'capas', 'Operación', operacionActiva() ? `${tiposOp().length} tipo${tiposOp().length === 1 ? '' : 's'} de operación` : 'Horas máquina, viajes y otros registros sin contabilidad', '#/operacion', { id: 'opOn', on: operacionActiva() }],
+    ]],
     S.perfil?.es_admin && ['Administrador', [
       ['feHab', 'admin', 'Habilitada ante la DIAN', 'Ya superó el set de pruebas', null, { id: 'feHab', on: feHabilitada() }],
       ['feActiva', 'envio', 'Botón "Enviar a la DIAN"', 'En facturas y notas electrónicas', null, { id: 'feActiva', on: feActiva() }],
@@ -672,6 +683,7 @@ function vEmpresa(m) {
     try { await guardarContab(clave, on); toast(on ? msgOn : msgOff); } catch (er) { fail(er); ev.target.checked = !on; }
   }; };
   if ($('ccOn')) $('ccOn').onchange = async ev => { try { await guardarContab('cc', { ...(emp()?.contabilidad?.cc || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Centros de costo activados: configúralos y crea los centros.' : 'Centros de costo desactivados.'); if (ev.target.checked) location.hash = '#/centroscfg'; else route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
+  if ($('opOn')) $('opOn').onchange = async ev => { try { await guardarContab('operacion', { ...(emp()?.contabilidad?.operacion || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Operación activada para esta empresa.' : 'Operación apagada: los registros se conservan.'); route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
   interruptor('factNormal', 'factura_normal', 'Facturas normales habilitadas para esta empresa.', 'Facturas normales ocultas: solo se ofrece la factura electrónica.');
   interruptor('feHab', 'fe_habilitada', 'Facturación electrónica habilitada para esta empresa.', 'Facturación electrónica deshabilitada para esta empresa.',
     () => confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada'));
@@ -4650,3 +4662,7 @@ async function vCalendario(m) {
   $('calRe').onclick = async () => { try { datos = await cargarCalendario({ forzar: true }); await cargarVencimientos(); pintar(); toast('Calendario actualizado.'); } catch (e) { fail(e); } };
   $('calSal').onclick = async () => { await salirCalendario(); S.venc = []; pintarCampana(); vCalendario(m); };
 }
+
+// Operación (módulo opcional): sus pantallas usan las mismas utilidades de esta página.
+iniciarOperacion({ S, store, $, esc, emp, money: v => money(v), num, fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
+  cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v) });

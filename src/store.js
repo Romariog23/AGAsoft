@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PLANES_DEMO } from './planes.js';
 import { datosDemo, hoyLocal } from './demo.js';
 
-const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo'];
+const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo', 'op_tipos', 'op_elementos', 'op_tarifas', 'op_registros', 'op_cortes'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const ahora = () => new Date().toISOString();
 
@@ -78,6 +78,7 @@ function localStore({ publico = false } = {}) {
       db[t] = db[t].filter(r => r.id !== id);
       if (t === 'documentos') { db.items = db.items.filter(r => r.documento_id !== id); db.aplicaciones = db.aplicaciones.filter(r => r.recibo_id !== id); }
       if (t === 'empresas') for (const k of TABLAS) db[k] = db[k].filter(r => r.empresa_id !== id);
+      if (t === 'op_tipos') for (const k of ['op_elementos', 'op_tarifas', 'op_registros', 'op_cortes']) db[k] = db[k].filter(r => r.tipo_id !== id);
       persist();
     },
     async saveDoc(doc, items, apl) {
@@ -163,7 +164,7 @@ function supabaseStore(url, key) {
     async signUp(email, password, nombre) { return ok(await sb.auth.signUp({ email, password, options: { data: { nombre } } })); },
     async signOut() { await sb.auth.signOut(); },
     async listEmpresas() { return ok(await sb.from('empresas').select('*').order('nombre')); },
-    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
+    async loadEmpresa(eid) { const r = await Promise.all(TABLAS.map(t => ['comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo', 'op_tipos', 'op_elementos', 'op_tarifas', 'op_registros', 'op_cortes'].includes(t) ? todo(t, 'empresa_id', eid).catch(() => []) : todo(t, 'empresa_id', eid))); return Object.fromEntries(TABLAS.map((t, i) => [t, r[i]])); },
     async save(t, row) {
       const { id, creado_en, owner, ...campos } = row;
       if (id) return ok(await sb.from(t).update(campos).eq('id', id).select().single());
