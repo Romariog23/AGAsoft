@@ -6,7 +6,7 @@ export const MODULOS = {
   exogena: { nombre: 'Medios magnéticos', rutas: ['exogena', 'exogenacfg'] },
   importar: { nombre: 'Importar plantillas', rutas: ['importar'] },
   informes: { nombre: 'Informes de ventas, compras, cartera y retenciones', rutas: ['auxiliar', 'retpracticadas', 'certificados', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor'] },
-  avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp', 'flujocaja'] },
+  avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp', 'ercc', 'flujocaja'] },
   consulta: { nombre: 'Usuarios de solo consulta', rutas: [] },
 };
 

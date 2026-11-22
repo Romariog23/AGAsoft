@@ -241,7 +241,7 @@ const NAV_ICO = {
 const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
-  informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
+  informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
@@ -340,6 +340,7 @@ function route() {
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
+    if (v === 'ercc') return vErComp(m, true);
     if (v === 'iva') return vIva(m);
     if (v === 'libroventas') return vLibroVentas(m);
     if (v === 'ventascliente') return vVentasCliente(m);
@@ -601,6 +602,7 @@ function vInformes(m) {
     ]],
     ['Financieros', [
       ['ercomp', 'columnas', 'Resultados comparativo', 'Meses lado a lado', '#/ercomp'],
+      ...(ccCfg().activo ? [['ercc', 'columnas', 'Resultados por centro de costo', 'Un centro por columna', '#/ercc']] : []),
       ['flujocaja', 'caja2', 'Flujo de caja', 'Entradas y salidas por mes', '#/flujocaja'],
     ]],
     ['Impuestos', [
@@ -3065,29 +3067,30 @@ function vBalance(m) {
     <div class="row filters"><div><label for="niv">Nivel</label><select id="niv">${opts([['1', 'Clase'], ['2', 'Grupo'], ['4', 'Cuenta'], ['6', 'Subcuenta'], ['8', 'Auxiliar']], balOpc.nivel)}</select></div>
       <div class="grow"><label for="bter">Tercero</label><select id="bter"><option value="">Todos los terceros</option>${terceros.map(t => `<option value="${t.id}" ${t.id === balOpc.tercero ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>
       <div><label for="bdet">Detallar por tercero</label><select id="bdet">${opts([['', 'No'], ['si', 'Sí, en las cuentas auxiliares']], balOpc.detalle ? 'si' : '')}</select></div></div>
-    <section class="panel" id="out"></section>`;
+    ${filtroCC()}<section class="panel" id="out"></section>`;
   let b, ms;
   const nomT = id => id ? (terc(id)?.nombre || 'Tercero borrado') : 'Sin tercero';
   // Terceros solo debajo de las cuentas del último nivel (auxiliares de 8 dígitos).
   const conDet = f => !!balOpc.detalle && f.codigo.length === 8;
   const detalle = f => saldosPorTercero(ms, S.d.cuentas, f.codigo, F.desde, F.hasta).sort((a, c) => nomT(a.tercero_id).localeCompare(nomT(c.tercero_id)));
   const pintar = () => {
-    ms = movs().filter(x => !balOpc.tercero || x.tercero_id === balOpc.tercero);
+    ms = movs().filter(x => (!balOpc.tercero || x.tercero_id === balOpc.tercero) && pasaCC(x));
     b = balancePrueba(ms, S.d.cuentas, F.desde, F.hasta);
     const n = Number(balOpc.nivel);
     const l = b.filas.filter(f => f.codigo.length <= n);
-    const sub = balOpc.tercero ? `${esc(nomT(balOpc.tercero))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>` : `${fFecha(F.desde)} a ${fFecha(F.hasta)}`;
+    const sub = (ccFiltroTxt() ? `${esc(ccFiltroTxt())}<br>` : '') + (balOpc.tercero ? `${esc(nomT(balOpc.tercero))}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>` : `${fFecha(F.desde)} a ${fFecha(F.hasta)}`);
     $('out').innerHTML = cabInforme(balOpc.tercero ? 'Balance de prueba por tercero' : 'Balance de prueba', sub) + (l.length ? `<div class="tbl-wrap"><table class="tbl bal"><thead><tr><th>Código</th><th>Cuenta</th><th class="r">Saldo anterior</th><th class="r">Débitos</th><th class="r">Créditos</th><th class="r">Saldo final</th></tr></thead><tbody>
       ${l.map(f => `<tr class="lv${f.codigo.length} click" data-go="#/auxiliar?cuenta=${f.codigo}"><td class="mono">${f.codigo}</td><td>${esc(f.nombre)}</td><td class="r mono">${valor(f.inicial)}</td><td class="r mono">${valor(f.debito)}</td><td class="r mono">${valor(f.credito)}</td><td class="r mono">${valor(f.final)}</td></tr>
         ${conDet(f) ? detalle(f).map(x => `<tr class="ter"><td></td><td>${esc(nomT(x.tercero_id))}</td><td class="r mono">${valor(x.inicial)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${valor(x.final)}</td></tr>`).join('') : ''}`).join('')}
       <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(b.debitos)}</td><td class="r mono">${money(b.creditos)}</td><td></td></tr></tbody></table></div>
-      ${!balOpc.tercero && Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.${balOpc.tercero ? ' Al filtrar por un tercero, las sumas no tienen que ser iguales.' : ''}</p>` : '<p class="muted">No hay movimientos en este periodo con ese filtro.</p>');
+      ${!balOpc.tercero && !ccFiltroTxt() && Math.abs(b.debitos - b.creditos) > 0.009 ? '<p class="err">Los débitos y créditos no cuadran. Revisa las cuentas de la contabilización.</p>' : ''}<p class="hint">Saldos según la naturaleza de cada cuenta. Toca una fila para ver su libro auxiliar.${balOpc.tercero ? ' Al filtrar por un tercero, las sumas no tienen que ser iguales.' : ''}</p>` : '<p class="muted">No hay movimientos en este periodo con ese filtro.</p>');
   };
   $('niv').onchange = () => { balOpc.nivel = $('niv').value; pintar(); };
   $('bter').onchange = () => { balOpc.tercero = $('bter').value; pintar(); };
   // Para ver los terceros hay que llegar al nivel auxiliar.
   sinModulo('bdet', 'informes', () => { balOpc.detalle = ''; });
   $('bdet').onchange = () => { balOpc.detalle = $('bdet').value; if (balOpc.detalle) { balOpc.nivel = '8'; $('niv').value = '8'; } pintar(); };
+  ligarCC(pintar);
   $('csv').onclick = () => {
     const n = Number(balOpc.nivel), filas = [['Código', 'Cuenta', 'Tercero', 'Identificación', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final']];
     const v = x => String(x).replace('.', ',');
@@ -3110,15 +3113,15 @@ function vAuxiliar(m, q) {
     <div class="row filters">${caja('cta', 'Desde la cuenta', desdeC)}${caja('cta2', 'Hasta la cuenta', hastaC)}
       <div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
     ${lista}<p class="hint">Escribe el código de cualquier nivel (por ejemplo 1105 o 11050501) o parte del nombre. Para una sola cuenta pon la misma en los dos campos; desde 1 hasta 1 es toda la clase 1.</p>
-    ${filtroFechas('fa', true, () => pintar())}
+    ${filtroFechas('fa', true, () => pintar())}${filtroCC()}
     <section class="panel" id="out"></section>`;
   const rango = () => desdeC === hastaC ? `${esc(desdeC)} ${esc(nomCta(desdeC))}` : `Desde ${esc(desdeC)} ${esc(nomCta(desdeC))} hasta ${esc(hastaC)} ${esc(nomCta(hastaC))}`;
   const pintar = () => {
-    const r = auxiliarRango(movs(), S.d.cuentas, desdeC, hastaC, F.desde, F.hasta, tercero);
-    $('out').innerHTML = cabInforme('Libro auxiliar', `${rango()}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
+    const r = auxiliarRango(movs().filter(pasaCC), S.d.cuentas, desdeC, hastaC, F.desde, F.hasta, tercero);
+    $('out').innerHTML = cabInforme('Libro auxiliar', `${rango()}<br>${ccFiltroTxt() ? esc(ccFiltroTxt()) + '<br>' : ''}<small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th class="r">Saldo</th></tr></thead><tbody>
       ${r.secciones.map(a => `<tr class="strong"><td colspan="7"><span class="mono">${a.cuenta}</span> ${esc(nomCta(a.cuenta))}</td></tr>
       <tr class="muted"><td colspan="6">Saldo anterior</td><td class="r mono">${money(a.inicial)}</td></tr>
-      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td><td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('')}
+      ${a.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkDoc(x)}</td><td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre : '')}</td><td>${esc(x.detalle)}${ccTxt(x) ? `<br><small class="muted">${esc(ccTxt(x))}</small>` : ''}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('')}
       <tr><td colspan="4" class="muted">Total ${a.cuenta}</td><td class="r mono">${money(a.debitos)}</td><td class="r mono">${money(a.creditos)}</td><td class="r mono">${money(a.final)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Sin movimientos en el periodo.</td></tr>'}
       ${r.secciones.length > 1 ? `<tr class="strong"><td colspan="4">Totales del rango</td><td class="r mono">${money(r.debitos)}</td><td class="r mono">${money(r.creditos)}</td><td></td></tr>` : ''}</tbody></table></div>`;
   };
@@ -3135,6 +3138,7 @@ function vAuxiliar(m, q) {
   };
   for (const id of ['cta', 'cta2']) { $(id).onchange = () => ir(id); $(id).onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ir(id); } }; }
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
+  ligarCC(pintar);
   pintar();
 }
 
@@ -3157,7 +3161,20 @@ function filtrosInf(pintar) {
   sinModulo('idet', 'informes', () => { infOpc.detalle = ''; });
   $('idet').onchange = () => { infOpc.detalle = $('idet').value; if (infOpc.detalle && infOpc.nivel !== '0') { infOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
 }
-const movsInf = (desde, hasta) => { const ms = movs().filter(x => !infOpc.tercero || x.tercero_id === infOpc.tercero); infCtx = { ms, desde, hasta }; return ms; };
+const movsInf = (desde, hasta) => { const ms = movs().filter(x => (!infOpc.tercero || x.tercero_id === infOpc.tercero) && pasaCC(x)); infCtx = { ms, desde, hasta }; return ms; };
+// Filtro de centros de costo de los informes (uno por nivel habilitado). '__sin' = solo lo que no tiene centro en ese nivel.
+// Es un filtro de la misma contabilidad: con todos los centros (y "Sin centro") la suma es igual al informe sin filtro.
+const ccFil = { cc1: '', cc2: '', cc3: '' };
+const pasaCC = x => !ccCfg().activo || [1, 2, 3].every(n => { const v = ccFil['cc' + n]; return !v || (v === '__sin' ? !x['cc' + n] : x['cc' + n] === v); });
+const ccFiltroTxt = () => !ccCfg().activo ? '' : nivelesActivos(ccCfg()).filter(n => ccFil['cc' + n.nivel]).map(n => `${n.nombre}: ${ccFil['cc' + n.nivel] === '__sin' ? 'sin centro' : centros().find(c => c.id === ccFil['cc' + n.nivel])?.nombre || ''}`).join(' · ');
+function filtroCC(sinNivel = 0) {
+  const cfg = ccCfg(); if (!cfg.activo) return '';
+  const nv = nivelesActivos(cfg).filter(n => n.nivel !== sinNivel);
+  if (sinNivel) ccFil['cc' + sinNivel] = '';
+  if (!nv.length) return '';
+  return `<div class="row filters" id="ccFil">${nv.map(n => `<div><label for="ccf${n.nivel}">${esc(n.nombre)}</label><select id="ccf${n.nivel}" data-ccf="${n.nivel}"><option value="">Todos</option><option value="__sin" ${ccFil['cc' + n.nivel] === '__sin' ? 'selected' : ''}>Sin centro</option>${centrosDe(centros(), n.nivel, true).map(c => `<option value="${c.id}" ${c.id === ccFil['cc' + n.nivel] ? 'selected' : ''}>${esc(c.codigo)} · ${esc(c.nombre)}</option>`).join('')}</select></div>`).join('')}</div>`;
+}
+const ligarCC = pintar => document.querySelectorAll('[data-ccf]').forEach(sl => sl.onchange = () => { ccFil['cc' + sl.dataset.ccf] = sl.value; pintar(); });
 // Filas de terceros debajo de una cuenta, con el mismo signo del rubro.
 function tercerosInf(codigo, signo, nivelFila) {
   if (!infOpc.detalle || nivelFila !== 8) return '';
@@ -3182,29 +3199,29 @@ function lineaInforme(x) {
     : `<div class="inf-l plain"><span>${esc(x.nombre)}</span><span class="mono">${money(x.valor)}</span></div>`;
 }
 function vEsf(m) {
-  m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead"><h2>Estado de situación financiera</h2></header>${filtroFechas('fe', false, () => pintar())}${selNivelInf()}${filtroCC()}<section class="panel" id="out"></section>`;
   const pintar = () => {
     const e = situacionFinanciera(movsInf(null, F.hasta), S.d.cuentas, F.hasta);
-    $('out').innerHTML = cabInforme('Estado de situación financiera', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. ${infOpc.nivel === '0' ? 'Toca un rubro para ver las cuentas del PUC que lo forman.' : 'Cada rubro muestra sus cuentas del PUC hasta el nivel escogido. Toca una cuenta para ver su libro auxiliar.'}</p>
+    $('out').innerHTML = cabInforme('Estado de situación financiera', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}${ccFiltroTxt() ? esc(ccFiltroTxt()) + '<br>' : ''}A ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes (Decreto 2420 de 2015, Grupo 2). Cifras en pesos colombianos. ${infOpc.nivel === '0' ? 'Toca un rubro para ver las cuentas del PUC que lo forman.' : 'Cada rubro muestra sus cuentas del PUC hasta el nivel escogido. Toca una cuenta para ver su libro auxiliar.'}</p>
       <div class="inf">${e.grupos.map(g => `<section class="inf-g"><h3>${g.titulo}</h3>${g.secciones.map(sx => sx.lineas.length ? `${sx.titulo ? `<h4>${sx.titulo}</h4>` : ''}${sx.lineas.map(lineaInforme).join('')}<div class="inf-l sub"><span>Total ${(sx.titulo || g.titulo).toLowerCase()}</span><span class="mono">${money(sx.lineas.reduce((s, x) => s + x.valor, 0))}</span></div>` : '').join('') || '<p class="muted">Sin saldos.</p>'}
         <div class="inf-l tot"><span>Total ${g.titulo.toLowerCase()}</span><span class="mono">${money(g.total)}</span></div></section>`).join('')}
         <div class="inf-l tot big"><span>Total pasivo y patrimonio</span><span class="mono">${money(e.pasivo + e.patrimonio)}</span></div></div>
       ${e.cuadra ? '<p class="okmsg">El activo es igual al pasivo más el patrimonio.</p>' : `<p class="err">No cuadra: diferencia de ${money(e.activo - e.pasivo - e.patrimonio)}. Revisa la homologación de las cuentas.</p>`}
       <p class="hint">El resultado del ejercicio incluye los ingresos, costos y gastos que aún no se han cerrado contra la cuenta 36.</p>`;
   };
-  filtrosInf(pintar);
+  filtrosInf(pintar); ligarCC(pintar);
   pintar();
 }
 function vEr(m) {
-  m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}<section class="panel" id="out"></section>`;
+  m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}${filtroCC()}<section class="panel" id="out"></section>`;
   const pintar = () => {
     // El cierre contable no se muestra en el estado de resultados (lo dejaría en cero).
     const r = estadoResultados(movsInf(F.desde, F.hasta).filter(x => x.tipo !== 'CI'), S.d.cuentas, F.desde, F.hasta);
-    $('out').innerHTML = cabInforme('Estado de resultados', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
+    $('out').innerHTML = cabInforme('Estado de resultados', `${infOpc.tercero ? esc(terc(infOpc.tercero)?.nombre || '') + '<br>' : ''}${ccFiltroTxt() ? esc(ccFiltroTxt()) + '<br>' : ''}Del ${fFecha(F.desde)} al ${fFecha(F.hasta)}`) + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
       <div class="inf">${r.secciones.map(sx => sx.total ? `<div class="inf-l tot ${sx.final ? 'big' : ''}"><span>${sx.total}</span><span class="mono">${money(sx.valor)}</span></div>`
         : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
   };
-  filtrosInf(pintar);
+  filtrosInf(pintar); ligarCC(pintar);
   pintar();
 }
 
@@ -3357,20 +3374,26 @@ function vCertificados(m, tid) {
 
 /* ---------- Estado de resultados comparativo (columnas por mes) ---------- */
 const MESES_C = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-let ercOpc = { anio: '', meses: null, nivel: '0', tercero: '', detalle: '' };
-function vErComp(m) {
+let ercOpc = { anio: '', meses: null, nivel: '0', tercero: '', detalle: '', nivelCC: '1' };
+// porCC: una columna por cada centro de costo del nivel escogido (más "Sin centro"), en vez de una por mes.
+function vErComp(m, porCC = false) {
+  const cfgC = ccCfg(), nvC = nivelesActivos(cfgC);
+  if (porCC && !cfgC.activo) { m.innerHTML = `<header class="vhead"><h2>Estado de resultados por centro de costo</h2></header><section class="panel"><p class="muted">La empresa no trabaja con centros de costo. Actívalos en <a href="#/centroscfg">Configuración › Centros de costo</a>.</p></section>`; return; }
+  if (!nvC.some(n => String(n.nivel) === ercOpc.nivelCC)) ercOpc.nivelCC = '1';
   const ms0 = movs().filter(x => x.tipo !== 'CI');
   const anios = [...new Set([hoy().slice(0, 4), ...ms0.map(x => x.fecha.slice(0, 4))])].sort().reverse();
   if (!anios.includes(ercOpc.anio)) { ercOpc.anio = anios[0]; ercOpc.meses = null; }
   const ts = [...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  m.innerHTML = `<header class="vhead"><div><h2>Estado de resultados comparativo</h2><p class="sub">Una columna por cada mes que escojas, con el total al final.</p></div><button id="csv">Descargar CSV</button></header>
-    <div class="row filters"><div><label for="caA">Año</label><select id="caA">${anios.map(a => `<option ${a === ercOpc.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+  const titulo = porCC ? 'Estado de resultados por centro de costo' : 'Estado de resultados comparativo';
+  m.innerHTML = `<header class="vhead"><div><h2>${titulo}</h2><p class="sub">${porCC ? 'Una columna por cada centro del nivel escogido, más lo que no tiene centro. El total es igual al estado de resultados.' : 'Una columna por cada mes que escojas, con el total al final.'}</p></div><button id="csv">Descargar CSV</button></header>
+    <div class="row filters">${porCC ? `<div><label for="ccNiv">Columnas</label><select id="ccNiv">${opts(nvC.map(n => [String(n.nivel), n.nombre]), ercOpc.nivelCC)}</select></div>` : ''}<div><label for="caA">Año</label><select id="caA">${anios.map(a => `<option ${a === ercOpc.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div><label for="ninf">Nivel</label><select id="ninf">${opts(NIVELES_INF, ercOpc.nivel)}</select></div>
       <div class="grow"><label for="iter">Tercero</label><select id="iter"><option value="">Todos los terceros</option>${ts.map(t => `<option value="${t.id}" ${t.id === ercOpc.tercero ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>
       <div><label for="idet">Detallar por tercero</label><select id="idet">${opts([['', 'No'], ['si', 'Sí, en las cuentas auxiliares']], ercOpc.detalle ? 'si' : '')}</select></div></div>
+    ${filtroCC(porCC ? Number(ercOpc.nivelCC) : 0)}
     <div class="row filters" id="caM" style="flex-wrap:wrap;gap:4px 14px"></div>
     <section class="panel" id="out"></section>`;
-  let tabla = [];
+  let tabla = [], colsAct = [];
   const pintarMeses = () => {
     const conMov = new Set(ms0.filter(x => x.fecha.startsWith(ercOpc.anio)).map(x => x.fecha.slice(5, 7)));
     if (!ercOpc.meses) ercOpc.meses = MESES_C.map((_, i) => String(i + 1).padStart(2, '0')).filter(k => conMov.has(k));
@@ -3382,17 +3405,26 @@ function vErComp(m) {
   };
   const pintar = () => {
     const a = ercOpc.anio, n = Number(ercOpc.nivel);
-    const cols = [...ercOpc.meses].sort().map(k => ({ k, nombre: MESES_C[Number(k) - 1], desde: `${a}-${k}-01`, hasta: `${a}-${k}-${String(new Date(Number(a), Number(k), 0).getDate()).padStart(2, '0')}` }));
-    if (!cols.length) { $('out').innerHTML = '<p class="muted">Escoge al menos un mes.</p>'; tabla = []; return; }
-    const ms = ms0.filter(x => !ercOpc.tercero || x.tercero_id === ercOpc.tercero);
-    const rs = cols.map(c => estadoResultados(ms, S.d.cuentas, c.desde, c.hasta));
+    const meses = [...ercOpc.meses].sort();
+    if (!meses.length) { $('out').innerHTML = '<p class="muted">Escoge al menos un mes.</p>'; tabla = []; colsAct = []; return; }
+    let cols = meses.map(k => ({ k, nombre: MESES_C[Number(k) - 1], desde: `${a}-${k}-01`, hasta: `${a}-${k}-${String(new Date(Number(a), Number(k), 0).getDate()).padStart(2, '0')}` }));
+    if (porCC) {
+      // Columnas por centro: el período son los meses escogidos; la última columna es lo que no tiene centro en ese nivel.
+      const k = 'cc' + ercOpc.nivelCC, enMes = new Set(meses), base = { desde: `${a}-01-01`, hasta: `${a}-12-31` };
+      cols = centrosDe(centros(), Number(ercOpc.nivelCC), true).map(c => ({ ...base, nombre: c.nombre, f: x => enMes.has(x.fecha.slice(5, 7)) && x[k] === c.id }))
+        .concat([{ ...base, nombre: 'Sin centro', f: x => enMes.has(x.fecha.slice(5, 7)) && !x[k] }]);
+    }
+    colsAct = cols;
+    const ms = ms0.filter(x => (!ercOpc.tercero || x.tercero_id === ercOpc.tercero) && pasaCC(x));
+    const msC = c => c.f ? ms.filter(c.f) : ms;
+    const rs = cols.map(c => estadoResultados(msC(c), S.d.cuentas, c.desde, c.hasta));
     const nom = id => id ? (terc(id)?.nombre || 'Tercero borrado') : 'Sin tercero';
     const fila = (tipo, texto, vals, extra = {}) => tabla.push({ tipo, texto, vals, total: r2(vals.reduce((s, v) => s + v, 0)), ...extra });
     // Terceros de una cuenta auxiliar en cada mes.
     const filasTerceros = (codigo, signo) => {
       if (!ercOpc.detalle) return;
       const acc = {};
-      cols.forEach((c, i) => { for (const x of ms) if (x.cuenta === codigo && x.fecha >= c.desde && x.fecha <= c.hasta) { const k = x.tercero_id || ''; (acc[k] = acc[k] || cols.map(() => 0))[i] = r2(acc[k][i] + signo * (x.debito - x.credito)); } });
+      cols.forEach((c, i) => { for (const x of msC(c)) if (x.cuenta === codigo && x.fecha >= c.desde && x.fecha <= c.hasta) { const k = x.tercero_id || ''; (acc[k] = acc[k] || cols.map(() => 0))[i] = r2(acc[k][i] + signo * (x.debito - x.credito)); } });
       Object.entries(acc).filter(([, v]) => v.some(Boolean)).sort(([x], [y]) => nom(x).localeCompare(nom(y))).forEach(([id, v]) => fila('ter', nom(id), v));
     };
     tabla = [];
@@ -3413,7 +3445,8 @@ function vErComp(m) {
       }
     });
     const cls = { tit: 'inf-tit', tot: 'strong', big: 'strong big', rub: '', ter: 'ter' };
-    $('out').innerHTML = cabInforme('Estado de resultados comparativo', `${ercOpc.tercero ? esc(nom(ercOpc.tercero)) + '<br>' : ''}${cols.length === 1 ? cols[0].nombre : `${cols[0].nombre} a ${cols.at(-1).nombre}`} de ${a}${cols.length > 1 && cols.length < 12 && cols.some((c, i) => i && Number(c.k) !== Number(cols[i - 1].k) + 1) ? ' (meses escogidos)' : ''}`)
+    const nm = meses.map(k => MESES_C[Number(k) - 1]);
+    $('out').innerHTML = cabInforme(titulo, `${ercOpc.tercero ? esc(nom(ercOpc.tercero)) + '<br>' : ''}${ccFiltroTxt() ? esc(ccFiltroTxt()) + '<br>' : ''}${porCC ? esc(nvC.find(n => String(n.nivel) === ercOpc.nivelCC)?.nombre || '') + ' · ' : ''}${nm.length === 1 ? nm[0] : `${nm[0]} a ${nm.at(-1)}`} de ${a}${meses.length > 1 && meses.length < 12 && meses.some((k, i) => i && Number(k) !== Number(meses[i - 1]) + 1) ? ' (meses escogidos)' : ''}`)
       + `<p class="rep-small">Bajo NIIF para Pymes, gastos clasificados por función. Cifras en pesos colombianos.</p>
       <div class="tbl-wrap"><table class="tbl bal erc"><thead><tr><th>Concepto</th>${cols.map(c => `<th class="r">${c.nombre}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
       ${tabla.map(f => f.tipo === 'tit' ? `<tr class="erc-tit"><td colspan="${cols.length + 2}"><b>${esc(f.texto)}</b></td></tr>`
@@ -3426,10 +3459,12 @@ function vErComp(m) {
   sinModulo('idet', 'informes', () => { ercOpc.detalle = ''; });
   $('idet').onchange = () => { ercOpc.detalle = $('idet').value; if (ercOpc.detalle && ercOpc.nivel !== '0') { ercOpc.nivel = '8'; $('ninf').value = '8'; } pintar(); };
   $('csv').onclick = () => {
-    const cols = [...ercOpc.meses].sort().map(k => MESES_C[Number(k) - 1]), v = x => String(r2(x)).replace('.', ',');
+    const cols = colsAct.map(c => c.nombre), v = x => String(r2(x)).replace('.', ',');
     const filas = [['Concepto', ...cols, 'Total'], ...tabla.map(f => [f.tipo === 'ter' ? '   ' + f.texto : f.texto, ...(f.tipo === 'tit' ? cols.map(() => '') : f.vals.map(v)), f.tipo === 'tit' ? '' : v(f.total)])];
-    descargar(`estado-resultados-comparativo-${emp().nit}-${ercOpc.anio}.csv`, '﻿' + filas.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+    descargar(`estado-resultados-${porCC ? 'centros-costo' : 'comparativo'}-${emp().nit}-${ercOpc.anio}.csv`, '﻿' + filas.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   };
+  if ($('ccNiv')) $('ccNiv').onchange = () => { ercOpc.nivelCC = $('ccNiv').value; vErComp(m, true); };
+  ligarCC(pintar);
   pintarMeses(); pintar();
 }
 
