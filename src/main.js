@@ -489,7 +489,9 @@ function vEmpresa(m) {
     <p class="hint">Cuando la DIAN te dé una resolución nueva, regístrala aquí y queda como la activa. Las notas y los recibos se manejan en <a href="#/numeraciones">Numeraciones</a>.</p></section>
   <section class="panel stack"><header class="vhead"><h3>Factura normal (no electrónica)</h3><button id="editResN">${resN ? 'Modificar' : 'Crear'}</button></header>
     ${resN ? `<dl class="kv"><dt>Prefijo</dt><dd class="mono">${esc(resN.prefijo) || '—'}</dd><dt>Siguiente factura</dt><dd class="mono">${esc(resN.prefijo)} ${resN.siguiente}</dd></dl>` : '<p class="muted">Sin numeración de facturas normales.</p>'}
-    <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p></section>
+    <p class="hint">Las facturas normales no se reportan a la DIAN: se contabilizan al guardar y se pueden editar o anular.</p>
+    <label class="check"><input type="checkbox" id="factNormal" ${facturaNormal() ? 'checked' : ''}> Permitir facturas normales en esta empresa</label>
+    <p class="hint">Mientras esté apagado, Ventas › Facturas solo ofrece la factura electrónica. Las facturas normales que ya existan se siguen viendo y editando.</p></section>
   ${S.perfil?.es_admin ? `<section class="panel stack"><header class="vhead"><h3>Facturación electrónica (Factus)</h3><a class="btn" href="#/habilitacion">Conectar o probar</a></header>
     <p class="hint">Solo la ve el administrador. La cuenta de Factus de la empresa se conecta en Configuración › Factura electrónica (DIAN). Al probar una cuenta de producción con numeración activa, la empresa queda habilitada sola.</p>
     <label class="check"><input type="checkbox" id="feHab" ${feHabilitada() ? 'checked' : ''}> Empresa habilitada ante la DIAN (ya superó el set de pruebas)</label>
@@ -510,6 +512,7 @@ function vEmpresa(m) {
     if (on && !await confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada')) { ev.target.checked = false; return; }
     try { await guardarContab('fe_habilitada', on); toast(on ? 'Facturación electrónica habilitada para esta empresa.' : 'Facturación electrónica deshabilitada para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !on; }
   };
+  $('factNormal').onchange = async ev => { try { await guardarContab('factura_normal', ev.target.checked); toast(ev.target.checked ? 'Facturas normales habilitadas para esta empresa.' : 'Facturas normales ocultas: solo se ofrece la factura electrónica.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
   if ($('feActiva')) $('feActiva').onchange = async ev => { try { await guardarContab('fe_activa', ev.target.checked); toast(ev.target.checked ? 'Envío a la DIAN activado para esta empresa.' : 'Envío a la DIAN oculto para esta empresa.'); } catch (e) { fail(e); ev.target.checked = !ev.target.checked; } };
   $('editResN').onclick = () => resN ? formNumeracion(resN) : formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   $('delEmp').onclick = async () => {
@@ -685,7 +688,7 @@ document.addEventListener('click', ev => { const tr = ev.target.closest('tr[data
 function vLista(m, tipo) {
   const T = TIPOS[tipo];
   let q = '', est = '';
-  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2>${tipo === 'FV' ? '<div class="row"><a class="btn" href="#/nuevo/FV?clase=normal">Nueva factura normal</a><a class="btn primary" href="#/nuevo/FV?clase=electronica">Nueva factura electrónica</a></div>'
+  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2>${tipo === 'FV' ? `<div class="row">${facturaNormal() ? '<a class="btn" href="#/nuevo/FV?clase=normal">Nueva factura normal</a>' : ''}<a class="btn primary" href="#/nuevo/FV?clase=electronica">Nueva factura electrónica</a></div>`
     : `<a class="btn primary" href="#/nuevo/${tipo}">Nueva ${T.corto.toLowerCase().replace('recibo', 'recibo de caja')}</a>`}</header>
     <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o cliente"><select id="est" aria-label="Estado"><option value="">Todos</option><option value="borrador">Borradores</option><option value="emitido">Emitidos</option><option value="anulado">Anulados</option></select></div>
     ${tipo === 'NC' || tipo === 'ND' ? `<p class="hint">Las notas se crean desde la factura que corrigen. También puedes crear una aquí y escoger la factura.</p>` : ''}
@@ -750,7 +753,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     doc = { empresa_id: S.eid, tipo, fecha: hoy(), tercero_id: t?.id || '', forma_pago: t?.plazo_dias > 0 ? 'credito' : 'contado', vence: t?.plazo_dias > 0 ? sumarDias(hoy(), t.plazo_dias) : '', medio_pago: 'transferencia', ref_id: f?.tipo === 'FV' && (tipo === 'NC' || tipo === 'ND') ? f.id : '', concepto: tipo === 'NC' ? '1' : tipo === 'ND' ? '4' : '', observaciones: '', anticipo: 0, ...retDe(t) };
     // Clase de la factura: la que se pidió; si no, normal salvo que solo exista numeración electrónica. Las notas heredan la de su factura.
     const numFV = el => S.d.numeraciones.some(x => x.tipo === 'FV' && x.activa && !!x.electronica === el);
-    doc.electronica = tipo === 'FV' ? (clase ? clase === 'electronica' : !numFV(false) && numFV(true)) : (tipo === 'NC' || tipo === 'ND') ? !!f?.electronica : false;
+    doc.electronica = tipo === 'FV' ? (!facturaNormal() || (clase ? clase === 'electronica' : !numFV(false) && numFV(true))) : (tipo === 'NC' || tipo === 'ND') ? !!f?.electronica : false;
     if (f && tipo !== 'RC') Object.assign(doc, { retefuente_pct: num(f.retefuente_pct), reteiva_pct: num(f.reteiva_pct), reteica_milaje: num(f.reteica_milaje) });
     items = tipo === 'NC' && f ? itemsDe(f.id).map(i => ({ ...i, id: undefined, documento_id: undefined })) : tipo === 'RC' ? [] : [nuevoItem()];
     apl = tipo === 'RC' && f ? [{ factura_id: f.id, valor: Math.max(0, saldoDe(f.id)) }] : [];
@@ -770,7 +773,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
         <div class="row nowrap"><select id="cli" required><option value="">Escoge el cliente…</option>${clientes.map(t => `<option value="${t.id}" ${t.id === doc.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
         <button type="button" id="newCli" title="Crear cliente">+ Nuevo</button></div></div>
       <div><label for="fecha">Fecha</label><input id="fecha" type="date" value="${doc.fecha}" required></div>
-      ${tipo === 'FV' ? `<div><label for="clase">Clase de factura</label><select id="clase" ${editando ? 'disabled' : ''}>${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
+      ${tipo === 'FV' && (facturaNormal() || !doc.electronica) ? `<div><label for="clase">Clase de factura</label><select id="clase" ${editando ? 'disabled' : ''}>${opts([['normal', 'Normal (no electrónica)'], ['electronica', 'Electrónica (DIAN)']], doc.electronica ? 'electronica' : 'normal')}</select></div>` : ''}
       ${tipo === 'FV' ? `<div><label for="fp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="fp">${fVenta().map(f => `<option value="${f.id}" ${f.id === formaDe(fVenta(), doc.forma_pago === 'credito', doc.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div id="wVence"><label for="vence">Vence</label><input id="vence" type="date" value="${doc.vence || ''}"></div>` : ''}
       ${esRC ? `<div><label for="rfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="rfp">${optsContado(fVenta(), doc.cuenta_pago || (doc.id ? (doc.medio_pago === 'efectivo' ? param().caja : param().bancos) : ''))}</select></div>` : ''}
@@ -1254,6 +1257,8 @@ function vDoc(m, id) {
 /* ---------- Facturación electrónica (DIAN por Factus) ---------- */
 // El envío a la DIAN se activa por empresa cuando ya hay proveedor conectado (lo activa el administrador).
 const feActiva = () => emp()?.contabilidad?.fe_activa === true;
+// Facturas normales (no electrónicas): apagadas salvo que la empresa las habilite en Configuración.
+const facturaNormal = () => emp()?.contabilidad?.factura_normal === true;
 // Habilitada = la empresa ya superó el set de pruebas de la DIAN. Antes de eso no se emiten documentos electrónicos.
 const feHabilitada = () => emp()?.contabilidad?.fe_habilitada === true;
 const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
