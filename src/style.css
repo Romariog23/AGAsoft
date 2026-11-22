@@ -157,7 +157,9 @@ pre{background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:0;font
 .nav .nav-sub a:hover{color:var(--fg);background:var(--surface-2)}
 .nav .nav-sub a[aria-current="page"]{background:var(--accent-soft);color:var(--fg)!important;font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
 .nav-badge{margin-left:auto;font-size:.68rem;font-weight:700;padding:0 6px;border-radius:99px;background:var(--warn-soft);color:var(--warn);line-height:1.5}
-.nav-it .nav-badge+.nav-car{margin-left:6px}
+.nav-it>span:not([class]){flex:1;min-width:0;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.nav-it .nav-badge{margin-left:0}
+.nav-it .nav-badge+.nav-car{margin-left:4px}
 .nav-sub a .nav-badge{margin-left:auto}
 @media (prefers-reduced-motion:reduce){.nav-sub,.nav-car,.nav-ico{transition:none}}
 main{display:flex;flex-direction:column;gap:16px;min-width:0}
