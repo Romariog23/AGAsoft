@@ -79,9 +79,9 @@ pre{background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:0;font
 /* Marca */
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none}
 /* Logo: siglas AGA oficiales (trazos del manual, nunca reescritas con Inter) en un solo color + nombre del producto en Inter. */
-.brand{font-size:1.45rem;line-height:1;color:var(--logo);align-items:baseline;gap:.05em;margin:0}
+.brand{font-size:1.45rem;line-height:1;color:var(--logo);align-items:baseline;gap:.08em;margin:0}
 .brand-logo{display:inline-block;height:.74em;aspect-ratio:3/1;flex:none;background:currentColor;-webkit-mask:url(/brand/aga.svg) center/contain no-repeat;mask:url(/brand/aga.svg) center/contain no-repeat}
-.brand-name{font-weight:500;font-size:1em;letter-spacing:-.025em;color:var(--fg)}
+.brand-name{font-weight:500;font-size:1em;letter-spacing:-.025em;color:var(--lime-txt)}
 .brand .tag{align-self:center;margin-left:8px}
 .logo-full{display:block;width:180px;aspect-ratio:390/178.6;background:var(--logo);-webkit-mask:url(/brand/aga-growth-advisors.svg) center/contain no-repeat;mask:url(/brand/aga-growth-advisors.svg) center/contain no-repeat}
 /* Divisor editorial: línea Ink de 200-260 px con punto lima al final */
