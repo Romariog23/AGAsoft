@@ -2722,7 +2722,7 @@ function vRetPracticadas(m) {
     const bloque = ([k, nombre]) => { const gs = r.grupos.filter(g => g.tipo === k); if (!gs.length) return '';
       return `<h4>${nombre}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base</th><th class="r">Retenido</th></tr></thead><tbody>
         ${gs.map(g => `<tr><td>${esc(g.concepto)}${g.n > 1 ? ` <span class="hint">(${g.n})</span>` : ''}</td><td class="r mono">${g.tarifa == null ? '' : k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${g.base == null ? '' : money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}
-        <tr class="strong"><td colspan="3">Total ${nombre.toLowerCase()}</td><td class="r mono">${money(r[k])}</td></tr></tbody></table></div>`; };
+        <tr class="strong"><td colspan="3">Total ${nombre[0].toLowerCase() + nombre.slice(1)}</td><td class="r mono">${money(r[k])}</td></tr></tbody></table></div>`; };
     return cabInforme('Retenciones practicadas', `${MESES_C[PER.mes - 1]} de ${PER.anio}`) + (r.grupos.length ? TIPOS_RETENCION.map(bloque).join('') + `
       <div class="inf"><div class="inf-l tot big"><span>Total retenciones del mes</span><span class="mono">${money(r.total)}</span></div></div>
       <p class="rep-small">La retención de ICA se declara en el municipio, no en el formulario 350. Las filas sin tarifa vienen de la nómina o de comprobantes contables registrados en las cuentas ${cts.retefuente}, ${cts.reteiva} y ${cts.reteica}.</p>`
@@ -2753,7 +2753,7 @@ function vCertificados(m, tid) {
     const tabla = ([k, nombre]) => { const gs = c.porTipo[k]; if (!gs.length) return '';
       return `<h4>${nombre}</h4><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base sometida</th><th class="r">Valor retenido</th></tr></thead><tbody>
         ${gs.map(g => `<tr><td>${esc(g.concepto)}</td><td class="r mono">${k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}</tbody></table>`; };
-    const cuales = TIPOS_RETENCION.filter(([k]) => c.porTipo[k].length).map(([, n]) => n.toLowerCase());
+    const cuales = TIPOS_RETENCION.filter(([k]) => c.porTipo[k].length).map(([, n]) => n[0].toLowerCase() + n.slice(1));
     return `<header class="rep-head inf-head"><div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv}</p>${e.direccion ? `<p>${esc(e.direccion)}${e.ciudad ? ' · ' + esc(e.ciudad) : ''}</p>` : ''}</div><div class="rep-num"><span>CERTIFICADO DE RETENCIONES</span><b class="inf-per">Año gravable ${certAnio}</b></div></header>
       <p>${esc(e.nombre)}, NIT ${fmtNit(e.nit)}-${e.dv}, certifica que durante el año gravable ${certAnio} practicó ${cuales.join(', ').replace(/, ([^,]*)$/, ' y $1')} a:</p>
       <dl class="kv"><dt>Nombre o razón social</dt><dd><b>${esc(t?.nombre || '')}</b></dd><dt>Documento</dt><dd class="mono">${esc(docId(t))}</dd><dt>Período</dt><dd>Del ${fFecha(desde)} al ${fFecha(hasta)}</dd></dl>
