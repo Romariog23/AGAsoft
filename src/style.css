@@ -528,3 +528,34 @@ button.cfg-main:hover{background:none}
 .cal-filtros select{width:auto;flex:0 1 auto}
 @media (max-width:700px){.cal-res{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .cal-emp{display:flex;align-items:center;gap:10px}.cal-emp>span:last-child{display:flex;flex-direction:column;line-height:1.25}
+
+/* Cartera y cuentas por pagar */
+.kpis.edades .kpi{font:inherit;text-align:left;color:var(--fg);cursor:pointer;box-shadow:none;white-space:normal}
+.kpis.edades .kpi small{font-size:.72rem;color:var(--muted)}
+.kpis.edades .kpi:hover{border-color:var(--accent)}
+.kpis.edades .kpi.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.kpis.edades .kpi.warn b{color:var(--warn)}
+.saldos-bar{flex-wrap:wrap;align-items:center}
+.saldos-bar input[type=search]{flex:1 1 240px}
+.saldos-bar select{width:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:2px;background:var(--surface)}
+.seg button{border:0;background:none;box-shadow:none;border-radius:99px;padding:5px 12px;font-size:.85rem;color:var(--muted)}
+.seg button[aria-selected=true]{background:var(--accent);color:var(--accent-fg)}
+.tbl.saldos tr.grp-t td{vertical-align:middle}
+.tbl.saldos tr.grp-t.abierto td{background:var(--surface-2)}
+.tbl.saldos .chev{display:inline-grid;transition:transform .2s}
+.tbl.saldos tr.abierto .chev{transform:rotate(90deg)}
+.tbl.saldos td.warn-t{color:var(--warn)}
+.tbl.saldos tr.det>td{padding:0 0 10px 18px;background:var(--surface-2)}
+.tbl-det{background:var(--surface);border-radius:10px;font-size:.88rem}
+.tbl tfoot td{border-top:2px solid var(--line);font-weight:600}
+.center{text-align:center}
+@media print{.saldos-bar,.vhead .row{display:none!important}}
+.kpis.edades{grid-template-columns:repeat(6,minmax(0,1fr))}
+.kpis.edades .kpi{align-items:flex-start;padding:10px 12px}
+.kpis.edades .kpi b{font-size:1.05rem}
+.kpis.edades .kpi.total{background:var(--surface-2)}
+@media (max-width:1100px){.kpis.edades{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:600px){.kpis.edades{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.filters>div.seg,.seg{flex-direction:row;flex-wrap:nowrap;flex:none}.seg button{width:auto;flex:none;white-space:nowrap;margin:0}
+.tbl td.cli{min-width:170px}
