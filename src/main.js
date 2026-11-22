@@ -1424,22 +1424,71 @@ function imprimir(d) {
 
 /* ---------- Cartera ---------- */
 function vCartera(m) {
-  const c = cartera(S.d.documentos, S.d.aplicaciones).filter(x => x.saldo > 0.009);
-  const porCli = {};
-  for (const x of c) { const k = x.factura.tercero_id; (porCli[k] = porCli[k] || { t: terc(k), l: [], b: [0, 0, 0, 0, 0] }).l.push(x); const dv = x.diasVencida; porCli[k].b[dv <= 0 ? 0 : dv <= 30 ? 1 : dv <= 60 ? 2 : dv <= 90 ? 3 : 4] += x.saldo; }
-  const filas = Object.values(porCli).sort((a, b) => b.b.reduce((s, v) => s + v, 0) - a.b.reduce((s, v) => s + v, 0));
-  const tot = [0, 0, 0, 0, 0]; filas.forEach(f => f.b.forEach((v, i) => tot[i] += v));
-  const H = ['Por vencer', '1–30 días', '31–60', '61–90', 'Más de 90'];
-  m.innerHTML = `<header class="vhead"><h2>Cartera</h2><button id="csv">Descargar CSV</button></header>
-  <section class="kpis">${H.map((h, i) => `<div class="kpi ${i >= 2 && tot[i] > 0 ? 'warn' : ''}"><span>${h}</span><b class="mono">${money(tot[i])}</b></div>`).join('')}</section>
-  <section class="panel">${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cliente</th>${H.map(h => `<th class="r">${h}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
-    ${filas.map(f => `<tr class="grp"><td><b>${esc(f.t?.nombre)}</b><br><span class="muted mono">${esc(docId(f.t))}</span></td>${f.b.map(v => `<td class="r mono">${v ? money(v) : ''}</td>`).join('')}<td class="r mono strong">${money(f.b.reduce((s, v) => s + v, 0))}</td></tr>
-      ${f.l.map(x => `<tr class="click sub-row" data-go="#/doc/${x.factura.id}"><td><a class="mono" href="#/doc/${x.factura.id}">${esc(numDoc(x.factura))}</a> · vence ${fFecha(x.factura.vence)}</td><td colspan="5" class="muted">${x.diasVencida ? `${x.diasVencida} días vencida` : 'Al día'}</td><td class="r mono">${money(x.saldo)}</td></tr>`).join('')}`).join('')}
-    </tbody></table></div>` : '<p class="muted">No hay facturas pendientes de pago.</p>'}</section>`;
-  $('csv').onclick = () => {
-    const rows = [['Cliente', 'Identificación', 'Factura', 'Fecha', 'Vence', 'Días vencida', 'Saldo']].concat(c.map(x => { const t = terc(x.factura.tercero_id); return [t?.nombre, t?.numero, numDoc(x.factura), x.factura.fecha, x.factura.vence || '', x.diasVencida, String(x.saldo).replace('.', ',')]; }));
-    descargar(`cartera-${emp().nit}-${hoy()}.csv`, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  const items = cartera(S.d.documentos, S.d.aplicaciones).filter(x => x.saldo > 0.009).map(x => ({ id: x.factura.id, tercero_id: x.factura.tercero_id, doc: numDoc(x.factura), href: '#/doc/' + x.factura.id,
+    fecha: x.factura.fecha, vence: x.factura.vence, valor: x.neto, ajustes: r2(x.nd - x.nc), abonos: x.pagos, saldo: x.saldo, dias: x.diasVencida }));
+  vSaldos(m, { titulo: 'Cartera', quien: 'Cliente', quienes: 'clientes', vacio: 'No hay facturas pendientes de cobro.', archivo: `cartera-${emp().nit}-${hoy()}.csv`, abonos: 'Abonos', ajustes: 'Notas (ND − NC)', items, clave: 'cartera' });
+}
+// Cartera y cuentas por pagar con la misma pantalla: resumen por tercero que se despliega, o lista de todos los documentos.
+const EDADES = [['0', 'Por vencer', d => d <= 0], ['30', '1 a 30 días', d => d > 0 && d <= 30], ['60', '31 a 60', d => d > 30 && d <= 60], ['90', '61 a 90', d => d > 60 && d <= 90], ['mas', 'Más de 90', d => d > 90]];
+const edadDe = d => EDADES.findIndex(e => e[2](d));
+const fCor = f => f ? new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' }) : '';
+function vSaldos(m, cfg) {
+  const o = S['saldos_' + cfg.clave] = S['saldos_' + cfg.clave] || { vista: 'tercero', q: '', edad: '', orden: 'saldo', abiertos: [], limite: 50 };
+  const tot = EDADES.map(() => 0); for (const x of cfg.items) tot[edadDe(x.dias)] += x.saldo;
+  const total = r2(cfg.items.reduce((s, x) => s + x.saldo, 0));
+  m.innerHTML = `<header class="vhead"><h2>${cfg.titulo}</h2><div class="row"><button id="prt" class="ghost">Imprimir</button><button id="csv">Descargar CSV</button></div></header>
+    <section class="kpis edades">${EDADES.map(([k, h], i) => `<button type="button" class="kpi ${i >= 2 && tot[i] > 0 ? 'warn' : ''} ${o.edad === k ? 'on' : ''}" data-edad="${k}"><span>${h}</span><b class="mono">${money(tot[i])}</b><small>${cfg.items.filter(x => edadDe(x.dias) === i).length} doc.</small></button>`).join('')}
+      <button type="button" class="kpi total ${o.edad === '' ? 'on' : ''}" data-edad=""><span>Total</span><b class="mono">${money(total)}</b><small>${new Set(cfg.items.map(x => x.tercero_id)).size} ${cfg.quienes}</small></button></section>
+    <div class="row filters saldos-bar"><input id="q" type="search" placeholder="Buscar ${cfg.quien.toLowerCase()}, NIT o documento" value="${esc(o.q)}">
+      <div class="seg" role="tablist"><button type="button" data-vista="tercero" aria-selected="${o.vista === 'tercero'}">Por ${cfg.quien.toLowerCase()}</button><button type="button" data-vista="doc" aria-selected="${o.vista === 'doc'}">Por documento</button></div>
+      <select id="ord" aria-label="Ordenar">${[['saldo', 'Mayor saldo'], ['dias', 'Más vencido'], ['nombre', 'Nombre'], ['vence', 'Fecha de vencimiento']].map(([k, t]) => `<option value="${k}" ${o.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <button type="button" class="ghost sm" id="todo" ${o.vista === 'doc' ? 'hidden' : ''}>${o.abiertos.length ? 'Contraer todo' : 'Desplegar todo'}</button></div>
+    <section class="panel" id="out"></section>`;
+  const filtrados = () => {
+    const q = o.q.trim().toLowerCase();
+    return cfg.items.filter(x => (o.edad === '' || EDADES[edadDe(x.dias)][0] === o.edad) && (!q || `${terc(x.tercero_id)?.nombre} ${terc(x.tercero_id)?.numero} ${x.doc}`.toLowerCase().includes(q)));
   };
+  const estado = x => x.dias > 0 ? `<span class="tag ${x.dias > 60 ? 'bad' : 'warn'}" title="${x.dias} días vencida">${x.dias} d</span>` : '<span class="tag ok">Al día</span>';
+  const pintar = () => {
+    const l = filtrados();
+    if (!cfg.items.length) { $('out').innerHTML = `<p class="muted">${cfg.vacio}</p>`; return; }
+    if (!l.length) { $('out').innerHTML = '<p class="muted">Nada coincide con el filtro.</p>'; return; }
+    const ordDoc = (a, b) => o.orden === 'dias' ? b.dias - a.dias : o.orden === 'nombre' ? (terc(a.tercero_id)?.nombre || '').localeCompare(terc(b.tercero_id)?.nombre || '') : o.orden === 'vence' ? String(a.vence || a.fecha).localeCompare(String(b.vence || b.fecha)) : b.saldo - a.saldo;
+    const mas = n => n > o.limite ? `<p class="center"><button type="button" class="ghost" id="mas">Ver más (${n - o.limite} restantes)</button></p>` : '';
+    const detalle = ds => `<table class="tbl tbl-det"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Valor</th><th class="r">${cfg.ajustes}</th><th class="r">${cfg.abonos}</th><th class="r">Saldo</th><th>Mora</th></tr></thead><tbody>
+      ${ds.map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a></td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.ajustes ? money(x.ajustes) : ''}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}</tbody></table>`;
+    if (o.vista === 'doc') {
+      const ds = [...l].sort(ordDoc);
+      $('out').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>${cfg.quien}</th><th>Fecha</th><th>Vence</th><th class="r">Valor</th><th class="r">${cfg.abonos}</th><th class="r">Saldo</th><th>Mora</th></tr></thead><tbody>
+        ${ds.slice(0, o.limite * 2).map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a></td><td class="cli">${esc(terc(x.tercero_id)?.nombre)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}
+        </tbody><tfoot><tr><td colspan="6"><b>${ds.length} documentos</b></td><td class="r mono strong">${money(ds.reduce((s, x) => s + x.saldo, 0))}</td><td></td></tr></tfoot></table></div>${o.limite * 2 < ds.length ? `<p class="center"><button type="button" class="ghost" id="mas">Ver más (${ds.length - o.limite * 2} restantes)</button></p>` : ''}`;
+    } else {
+      const g = {};
+      for (const x of l) { const k = x.tercero_id; (g[k] = g[k] || { k, t: terc(k), l: [], b: EDADES.map(() => 0), s: 0, dias: 0 }); g[k].l.push(x); g[k].b[edadDe(x.dias)] += x.saldo; g[k].s += x.saldo; g[k].dias = Math.max(g[k].dias, x.dias); }
+      const gs = Object.values(g).sort((a, b) => o.orden === 'dias' ? b.dias - a.dias : o.orden === 'nombre' ? (a.t?.nombre || '').localeCompare(b.t?.nombre || '') : o.orden === 'vence' ? String(a.l.map(x => x.vence || x.fecha).sort()[0]).localeCompare(String(b.l.map(x => x.vence || x.fecha).sort()[0])) : b.s - a.s);
+      $('out').innerHTML = `<div class="tbl-wrap"><table class="tbl saldos"><thead><tr><th>${cfg.quien}</th><th class="r">Doc.</th>${EDADES.map(e => `<th class="r">${e[1]}</th>`).join('')}<th class="r">Total</th><th></th></tr></thead><tbody>
+        ${gs.slice(0, o.limite).map(f => { const ab = o.abiertos.includes(f.k); return `<tr class="click grp-t ${ab ? 'abierto' : ''}" data-t="${f.k}" aria-expanded="${ab}"><td><b>${esc(f.t?.nombre)}</b><br><span class="muted mono">${esc(docId(f.t))}</span></td><td class="r">${f.l.length}</td>${f.b.map((v, i) => `<td class="r mono ${v && i >= 2 ? 'warn-t' : ''}">${v ? money(v) : ''}</td>`).join('')}<td class="r mono strong">${money(f.s)}</td><td class="r"><span class="chev">${navIco('car', 'nav-car')}</span></td></tr>
+          ${ab ? `<tr class="det"><td colspan="${EDADES.length + 4}">${detalle([...f.l].sort(ordDoc))}</td></tr>` : ''}`; }).join('')}
+        </tbody><tfoot><tr><td><b>${gs.length} ${cfg.quienes}</b></td><td class="r">${l.length}</td>${EDADES.map((e, i) => `<td class="r mono">${money(gs.reduce((s, f) => s + f.b[i], 0))}</td>`).join('')}<td class="r mono strong">${money(l.reduce((s, x) => s + x.saldo, 0))}</td><td></td></tr></tfoot></table></div>${mas(gs.length)}`;
+    }
+    if ($('mas')) $('mas').onclick = () => { o.limite += 50; pintar(); };
+  };
+  $('out').onclick = ev => {
+    const t = ev.target.closest('tr[data-t]');
+    if (t && !ev.target.closest('a')) { const k = t.dataset.t; o.abiertos = o.abiertos.includes(k) ? o.abiertos.filter(x => x !== k) : [...o.abiertos, k]; $('todo').textContent = o.abiertos.length ? 'Contraer todo' : 'Desplegar todo'; return pintar(); }
+    const r = ev.target.closest('tr[data-go]'); if (r && !ev.target.closest('a')) location.hash = r.dataset.go;
+  };
+  m.querySelectorAll('[data-edad]').forEach(b => b.onclick = () => { o.edad = o.edad === b.dataset.edad ? '' : b.dataset.edad; o.limite = 50; vSaldos(m, cfg); });
+  m.querySelectorAll('[data-vista]').forEach(b => b.onclick = () => { o.vista = b.dataset.vista; o.limite = 50; vSaldos(m, cfg); });
+  $('q').oninput = () => { o.q = $('q').value; o.limite = 50; pintar(); };
+  $('ord').onchange = () => { o.orden = $('ord').value; pintar(); };
+  $('todo').onclick = () => { o.abiertos = o.abiertos.length ? [] : [...new Set(filtrados().map(x => x.tercero_id))]; $('todo').textContent = o.abiertos.length ? 'Contraer todo' : 'Desplegar todo'; pintar(); };
+  $('prt').onclick = () => { const ant = o.limite; o.limite = 1e9; pintar(); window.print(); o.limite = ant; pintar(); };
+  $('csv').onclick = () => {
+    const rows = [[cfg.quien, 'Identificación', 'Documento', 'Fecha', 'Vence', 'Valor', cfg.ajustes, cfg.abonos, 'Saldo', 'Días vencida', 'Edad']].concat(filtrados().map(x => { const t = terc(x.tercero_id); return [t?.nombre, t?.numero, x.doc, x.fecha, x.vence || '', nCsv(x.valor), nCsv(x.ajustes), nCsv(x.abonos), nCsv(x.saldo), x.dias, EDADES[edadDe(x.dias)][1]]; }));
+    descargar(cfg.archivo, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
+  };
+  pintar();
 }
 function descargar(nombre, texto, reporte = true) {
   if (reporte && !tieneModulo(S.plan, 'avanzados')) return fail(new Error('Exportar informes a Excel está incluido en el plan Empresa. Mira Mi plan.'));
@@ -3643,22 +3692,9 @@ function vCompra(m, id) {
 }
 
 function vCxp(m) {
-  const c = cxp().filter(x => x.saldo > 0.009);
-  const porP = {};
-  for (const x of c) { const k = x.compra.tercero_id; (porP[k] = porP[k] || { t: terc(k), l: [], b: [0, 0, 0, 0, 0] }).l.push(x); const dv = x.diasVencida; porP[k].b[dv <= 0 ? 0 : dv <= 30 ? 1 : dv <= 60 ? 2 : dv <= 90 ? 3 : 4] += x.saldo; }
-  const filas = Object.values(porP).sort((a, b) => b.b.reduce((s, v) => s + v, 0) - a.b.reduce((s, v) => s + v, 0));
-  const tot = [0, 0, 0, 0, 0]; filas.forEach(f => f.b.forEach((v, i) => tot[i] += v));
-  const H = ['Por vencer', '1–30 días', '31–60', '61–90', 'Más de 90'];
-  m.innerHTML = `<header class="vhead"><h2>Cuentas por pagar</h2><button id="csv">Descargar CSV</button></header>
-  <section class="kpis">${H.map((h, i) => `<div class="kpi ${i >= 1 && tot[i] > 0 ? 'warn' : ''}"><span>${h}</span><b class="mono">${money(tot[i])}</b></div>`).join('')}</section>
-  <section class="panel">${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th>${H.map(h => `<th class="r">${h}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
-    ${filas.map(f => `<tr class="grp"><td><b>${esc(f.t?.nombre)}</b><br><span class="muted mono">${esc(docId(f.t))}</span></td>${f.b.map(v => `<td class="r mono">${v ? money(v) : ''}</td>`).join('')}<td class="r mono strong">${money(f.b.reduce((s, v) => s + v, 0))}</td></tr>
-      ${f.l.map(x => `<tr class="click sub-row" data-go="#/compra/${x.compra.id}"><td><a class="mono" href="#/compra/${x.compra.id}">${esc(TIPOS_COMPRA[x.compra.tipo].corto)} ${x.compra.numero}${x.compra.num_proveedor ? ' · ' + esc(x.compra.num_proveedor) : ''}</a>${x.compra.vence ? ` · vence ${fFecha(x.compra.vence)}` : ''}</td><td colspan="5" class="muted">${x.diasVencida ? `Vencida hace ${x.diasVencida} días` : ''}</td><td class="r"><span class="mono">${money(x.saldo)}</span> <a class="btn ghost sm" href="#/compranueva?tipo=CE&ref=${x.compra.id}">Pagar</a></td></tr>`).join('')}`).join('')}
-    </tbody></table></div>` : '<p class="muted">No hay facturas de proveedor pendientes de pago.</p>'}</section>`;
-  $('csv').onclick = () => {
-    const rows = [['Proveedor', 'Identificación', 'Documento', 'Factura proveedor', 'Fecha', 'Vence', 'Días vencida', 'Saldo']].concat(c.map(x => { const t = terc(x.compra.tercero_id); return [t?.nombre, t?.numero, `${x.compra.tipo} ${x.compra.numero}`, x.compra.num_proveedor, x.compra.fecha, x.compra.vence || '', x.diasVencida, String(x.saldo).replace('.', ',')]; }));
-    descargar(`cuentas-por-pagar-${emp().nit}-${hoy()}.csv`, '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
-  };
+  const items = cxp().filter(x => x.saldo > 0.009).map(x => ({ id: x.compra.id, tercero_id: x.compra.tercero_id, doc: `${TIPOS_COMPRA[x.compra.tipo].corto} ${x.compra.numero}${x.compra.num_proveedor ? ' · ' + x.compra.num_proveedor : ''}`, href: '#/compra/' + x.compra.id,
+    fecha: x.compra.fecha, vence: x.compra.vence, valor: x.neto, ajustes: 0, abonos: x.pagado, saldo: x.saldo, dias: x.diasVencida }));
+  vSaldos(m, { titulo: 'Cuentas por pagar', quien: 'Proveedor', quienes: 'proveedores', vacio: 'No hay facturas de proveedor pendientes de pago.', archivo: `cuentas-por-pagar-${emp().nit}-${hoy()}.csv`, abonos: 'Pagos', ajustes: 'Ajustes', items, clave: 'cxp' });
 }
 
 function vProveedores(m) {
