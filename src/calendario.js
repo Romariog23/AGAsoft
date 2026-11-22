@@ -64,8 +64,15 @@ export async function cargarCalendario({ forzar = false } = {}) {
 }
 
 // Vencimientos de las empresas en un rango de fechas, con su estado: presentada, vencida o por vencer (días que faltan).
-export function vencimientos(datos, desde, hasta, { todas = false } = {}) {
+// nit: solo la empresa con ese NIT (la que está abierta en AGAsoft). Si varios usuarios la tienen, se prefiere la propia.
+export function empresaPorNit(datos, nit) {
+  const n = String(nit || '').replace(/\D/g, ''); if (!datos || !n) return null;
+  const l = datos.empresas.filter(x => String(x.nit || '').replace(/\D/g, '') === n);
+  return l.find(x => x.mia) || l.find(x => x.comoResp) || l[0] || null;
+}
+export function vencimientos(datos, desde, hasta, { todas = false, nit = null } = {}) {
   if (!datos) return [];
+  if (nit !== null) { const e = empresaPorNit(datos, nit); if (!e) return []; datos = { ...datos, empresas: [e] }; todas = true; }
   const pres = new Map(datos.aprob.map(x => [x.empresa_id + '_' + x.clave, x]));
   // También cuenta como presentada la del mismo mes y obligación (las fechas pueden moverse un día si cambian las reglas).
   const mes = new Map(datos.aprob.map(x => { const m = String(x.clave).match(/^(.*)_(\d{4}-\d{2})-\d{2}$/); return [m ? `${x.empresa_id}_${m[1]}_${m[2]}` : '', x]; }));
