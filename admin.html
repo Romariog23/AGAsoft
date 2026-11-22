@@ -9,12 +9,12 @@
 <meta name="theme-color" content="#0b2938">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap">
 </head>
 <body>
 <div class="auth-wrap" id="auth" hidden>
   <form class="auth-card panel stack" id="authForm" novalidate>
-    <div class="brand"><span class="mark" aria-hidden="true">AGA</span><h1>AGAsoft Admin</h1></div>
+    <h1 class="brand"><span class="brand-logo" role="img" aria-label="AGA"></span><span class="brand-name">soft</span><span class="tag">Admin</span></h1>
     <p class="sub" id="authSub">Panel de planes y uso. Solo para el administrador de AGAsoft.</p>
     <div><label for="aEmail">Correo</label><input id="aEmail" type="email" autocomplete="email" required></div>
     <div><label for="aPass">Clave</label><input id="aPass" type="password" autocomplete="current-password" required></div>
@@ -26,7 +26,7 @@
 
 <div id="app" hidden>
   <header class="topbar">
-    <a class="brand" href="/admin"><span class="mark" aria-hidden="true">AGA</span><span class="brand-name">AGAsoft Admin</span></a>
+    <a class="brand" href="/admin" aria-label="AGAsoft Admin"><span class="brand-logo" role="img" aria-label="AGA"></span><span class="brand-name">soft</span><span class="tag">Admin</span></a>
     <span class="spacer"></span>
     <span class="who" id="who"></span>
     <a class="btn ghost" href="/">Ir a AGAsoft</a>
