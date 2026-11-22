@@ -86,3 +86,23 @@ test('validaciones del tipo y del registro', () => {
   assert.deepEqual(erroresRegistro(reg('x', '2026-11-13', 'w', 'e', 'o', 5, 10), tipo), []);
   assert.equal(claveDe('Horas máquina 2'), 'horas_maquina_2');
 });
+
+import { volantes, elegiblesCorte, dsDeVolante } from '../src/operacion.js';
+test('corte: elegibles, volantes con centro de costo y documento soporte', () => {
+  const regs = [reg('a', '2026-11-14', 'waldy', 'bull', 'guac', 125.3, 131.3), reg('b', '2026-11-15', 'waldy', 'bull', 'guac', 131.3, 135.9), reg('c', '2026-11-16', 'waldy', 'bull', 'guac', 135.9, 140.3),
+    reg('d', '2026-11-20', 'waldy', 'bull', 'guac', 164.5, 172.5, { datos: { soporte: 'Foto horómetro' } }), { ...reg('e', '2026-11-13', 'waldy', 'bull', 'guac', 117.5, 125.3), cierre_pago: 'ds1' }];
+  assert.deepEqual(elegiblesCorte(regs, tipo, '2026-11-07', '2026-11-20').map(r => r.id), ['a', 'b', 'c']);
+  assert.equal(elegiblesCorte(regs, tipo, '2026-11-07', '2026-11-20', true).length, 4);
+  const elementos = [{ id: 'bull', centro_id: 'm1' }, { id: 'guac', centro_id: 'o1' }], centros = [{ id: 'm1', nivel: 1 }, { id: 'o1', nivel: 2 }];
+  const [v] = volantes(regs.slice(0, 3), tipo, tarifas, { elementos, centros });
+  assert.equal(v.lineas.length, 2);
+  assert.deepEqual(v.lineas[0].cc, [{ cc1: 'm1', cc2: 'o1', pct: 100 }]);
+  assert.equal(v.lineas[0].detalle, '15 h × $ 6.000');
+  const { errores, compra } = dsDeVolante(v, { empresa_id: 'e1', fecha: '2026-11-20', periodo: '07 al 20 nov 2026', tipoNombre: 'Maquinaria', productos: [{ id: 'p', cuenta_costo: '73559501' }], cuentaDefecto: '', conCC: true });
+  assert.ok(errores.length); // las tarifas del ejemplo no tienen ítem ni hay cuenta por defecto
+  const ok = dsDeVolante(v, { empresa_id: 'e1', fecha: '2026-11-20', periodo: 'x', tipoNombre: 'Maquinaria', cuentaDefecto: '73559501', conCC: true });
+  assert.deepEqual(ok.errores, []);
+  assert.equal(ok.compra.lineas.reduce((s, l) => s + l.base, 0), v.total);
+  assert.equal(ok.compra.lineas[1].cc[0].cc1, 'm1');
+  assert.equal(compra.tipo, 'DS');
+});

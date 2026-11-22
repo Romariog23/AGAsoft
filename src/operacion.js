@@ -3,6 +3,7 @@
 // listas, campos, fórmulas, tarifas, reglas de día y salidas. Aquí solo hay lógica pura (sin pantalla).
 // Tablas: supabase/037_operacion.sql (op_tipos, op_elementos, op_tarifas, op_registros, op_cortes).
 import { holidays } from './calendario/engine.js';
+import { distPonderada, normDist } from './centros.js';
 
 const fx = x => String(r2(x)).replace('.', ',');
 const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
@@ -270,4 +271,65 @@ export function erroresTarifa(t) {
   if (!MODOS_TARIFA.some(m => m[0] === t.modo)) e.push('Escoge el modo de la tarifa.');
   if (t.desde && t.hasta && t.hasta < t.desde) e.push('La vigencia termina antes de empezar.');
   return e;
+}
+
+/* ---------- Corte de pago ---------- */
+export const esPendiente = (r, tipo) => { const p = cfgTipo(tipo).pendiente; return !!(p?.campo && (p.valores || []).includes(r.datos?.[p.campo])); };
+// Registros que pueden entrar a un corte nuevo: del periodo, sin pagar y sin otro corte.
+export const elegiblesCorte = (registros, tipo, desde, hasta, incluirPendientes = false) =>
+  registros.filter(r => r.tipo_id === tipo.id && r.fecha >= desde && r.fecha <= hasta && !r.cierre_pago && !r.corte_id && (incluirPendientes || !esPendiente(r, tipo)));
+// Centro de costo de un registro: el de cada elemento escogido (equipo, obra…), cada uno en su nivel.
+export function ccDeRegistro(r, tipo, elementos, centros) {
+  const cc = {};
+  for (const f of cfgTipo(tipo).campos.filter(x => x.tipo === 'elemento')) {
+    const e = (elementos || []).find(x => x.id === r.datos?.[f.k]), c = e?.centro_id && (centros || []).find(x => x.id === e.centro_id);
+    if (c && !cc['cc' + c.nivel]) cc['cc' + c.nivel] = c.id;
+  }
+  return Object.keys(cc).length ? [{ ...cc, pct: 100 }] : [];
+}
+// Volante de cada persona: líneas (por tarifa y por regla) con su ítem de servicio y su reparto por centro de costo, y el detalle de registros.
+export function volantes(registros, tipo, tarifas, { elementos = [], centros = [] } = {}) {
+  const cfg = cfgTipo(tipo), out = new Map();
+  for (const r of [...registros].sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+    const c = calcular(r, tipo, tarifas), dist = ccDeRegistro(r, tipo, elementos, centros);
+    const v = out.get(r.tercero_id) || { tercero_id: r.tercero_id, lineas: new Map(), registros: [] };
+    const kt = c.tarifa?.id || 'sin-tarifa';
+    const l = v.lineas.get(kt) || { clave: kt, tarifa_id: c.tarifa?.id || null, producto_id: c.tarifa?.producto_id || null, modo: c.modo, tarifa: c.tarifa ? n(c.tarifa.valor) : 0, nota: c.tarifa?.nota || '', cantidad: 0, registros: 0, valor: 0, partes: [] };
+    l.cantidad = r2(l.cantidad + c.pagadas); l.registros++;
+    l.valor = c.fijo ? r2(n(c.tarifa.valor)) : r2(l.valor + c.base);
+    l.partes.push({ dist, valor: c.fijo ? c.pagadas || 1 : c.base });
+    v.lineas.set(kt, l);
+    for (const g of c.recargos) {
+      const k = 'regla:' + g.nombre, x = v.lineas.get(k) || { clave: k, regla: g.nombre, producto_id: c.tarifa?.producto_id || null, cantidad: 0, registros: 0, valor: 0, partes: [] };
+      x.cantidad = r2(x.cantidad + c.pagadas); x.registros++; x.valor = r2(x.valor + g.valor); x.partes.push({ dist, valor: g.valor }); v.lineas.set(k, x);
+    }
+    v.registros.push({ id: r.id, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
+    out.set(r.tercero_id, v);
+  }
+  return [...out.values()].map(v => {
+    const lineas = [...v.lineas.values()].filter(l => l.valor || l.cantidad).map(({ partes, ...l }) => ({ ...l, cc: normDist(distPonderada(partes.filter(p => p.dist.length)) || []), detalle: detalleLinea(l, cfg.unidad) }));
+    return { tercero_id: v.tercero_id, lineas, registros: v.registros, cantidad: r2(v.registros.reduce((s, x) => s + x.pagadas, 0)), total: r2(lineas.reduce((s, l) => s + l.valor, 0)) };
+  });
+}
+const pesos = x => '$ ' + Math.round(x).toLocaleString('es-CO');
+export function detalleLinea(l, unidad = '') {
+  const u = unidad ? ' ' + unidad : '';
+  if (l.regla) return `${l.regla} · ${fx(l.cantidad)}${u}`;
+  if (!l.tarifa_id) return `Sin tarifa · ${fx(l.cantidad)}${u}`;
+  if (l.modo === 'fijo') return `Pago fijo${l.nota ? ' ' + l.nota : ''} (${fx(l.cantidad)}${u})`;
+  if (l.modo === 'registro') return `${l.registros} × ${pesos(l.tarifa)}`;
+  return `${fx(l.cantidad)}${u} × ${pesos(l.tarifa)}`;
+}
+// Documento soporte de un volante. Cuenta de cada línea: la del ítem de servicio o la de Salidas del tipo.
+export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, productos = [], cuentaDefecto = '', tercero = {}, conCC = false }) {
+  const errores = [];
+  const lineas = v.lineas.filter(l => l.valor > 0).map(l => {
+    const p = productos.find(x => x.id === l.producto_id), cuenta = String(p?.cuenta_costo || cuentaDefecto || '').trim();
+    if (!cuenta) errores.push(`Falta la cuenta de "${p?.nombre || l.regla || 'la tarifa'}": ponla en el ítem de servicio o en Configurar › Salidas.`);
+    return { cuenta, descripcion: `${p?.nombre ? p.nombre + " · " : l.regla ? "" : tipoNombre + " · "}${l.detalle} · ${periodo}`.slice(0, 300), base: r2(l.valor), iva_pct: 0, ...(conCC && l.cc?.length ? { cc: l.cc } : {}) };
+  });
+  if (!lineas.length) errores.push('El volante no tiene valores para pagar.');
+  return { errores, compra: { empresa_id, tipo: 'DS', fecha, vence: null, tercero_id: v.tercero_id, num_proveedor: '', lineas,
+    retefuente_pct: n(tercero.ret_compra_fuente_pct), reteiva_pct: n(tercero.ret_compra_iva_pct), reteica_milaje: n(tercero.ret_compra_ica_milaje), cuenta_retefuente: '', retenciones: {},
+    cuenta_pago: '', aplicaciones: [], anticipo: 0, observaciones: `Generado desde Operación · ${tipoNombre} · ${periodo}` } };
 }

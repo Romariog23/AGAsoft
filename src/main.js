@@ -21,7 +21,7 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
-import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -284,7 +284,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg'].includes(v) ? 'opregistros/' + arg : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -297,6 +297,8 @@ function route() {
     if (v === 'operacion') return vOperacion(m);
     if (v === 'opcfg') return operacionActiva() ? vOpCfg(m, arg) : vOperacion(m);
     if (v === 'opregistros') return operacionActiva() ? vOpRegistros(m, arg, q) : vOperacion(m);
+    if (v === 'opcortes') return operacionActiva() ? vOpCortes(m, arg) : vOperacion(m);
+    if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
     if (TIPOS[v]) return vLista(m, v);
     if (v === 'nuevo') return vEditor(m, { tipo: arg, ref: q.get('ref'), tercero: q.get('tercero'), clase: q.get('clase') });
     if (v === 'editar') return vEditor(m, { id: arg });
@@ -1676,6 +1678,7 @@ function formProducto(p = {}) {
     <h3>Contabilización</h3>
     <div class="grid2">${selCuenta('cuenta_ingreso', 'Cuenta en factura y nota débito', /^4[12]/, p.cuenta_ingreso, param().ingresos)}${selCuenta('cuenta_devolucion', 'Cuenta en nota crédito y devolución', /^4/, p.cuenta_devolucion, param().devoluciones)}</div>
     <div class="grid2" data-inv ${conInv() ? '' : 'hidden'}>${selCuenta('cuenta_costo', 'Cuenta de costo de ventas', /^6/, p.cuenta_costo, param().costo_ventas)}<div><label>Cuenta de inventario</label><p class="hint">La da la bodega (clase 14). Se configura en <a href="#/inventariocfg">Inventario</a>.</p></div></div>
+    <div class="grid2" data-serv>${selCuenta('cuenta_servicio', 'Cuenta de costo o gasto (documentos soporte de Operación)', /^[567]/, p.tipo === 'servicio' ? p.cuenta_costo : '', 'la de Salidas en Operación')}<div></div></div>
     <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas. ${conInv() ? 'Los servicios no llevan inventario.' : 'Tu plan no incluye el control de inventario: los productos se venden y compran sin existencias ni costo de ventas automático.'}</p>
     ${ccCfg().activo ? `<h3>Centro de costo</h3><div id="pcc"></div><p class="hint">Opcional. Las líneas de este producto o servicio toman este centro (o el reparto por porcentajes) cuando no se escoge otro en el documento.</p>` : ''}
     ${p.id ? check('activo', 'Activo (aparece al facturar)', p.activo !== false) : ''}
@@ -1685,13 +1688,13 @@ function formProducto(p = {}) {
     if (S.d.productos.some(x => x.id !== p.id && x.codigo.toLowerCase() === codigo.toLowerCase())) throw new Error('Ya existe un producto con ese código.');
     const tipo = fd.get('tipo') === 'servicio' ? 'servicio' : 'producto';
     const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true,
-      tipo, cuenta_costo: tipo === 'producto' ? (conInv() ? fd.get('cuenta_costo') || '' : p.cuenta_costo || '') : '', bodega_id: tipo === 'producto' ? (conInv() ? fd.get('bodega_id') || null : p.bodega_id || null) : null };
+      tipo, cuenta_costo: tipo === 'producto' ? (conInv() ? fd.get('cuenta_costo') || '' : p.cuenta_costo || '') : fd.get('cuenta_servicio') || '', bodega_id: tipo === 'producto' ? (conInv() ? fd.get('bodega_id') || null : p.bodega_id || null) : null };
     if (getCC) { const d = getCC(), errs = erroresDist(d, ccCfg(), centros()); if (errs.length) throw new Error(errs.join(' ')); row.cc = d; }
     try { await store.save('productos', p.id ? { ...row, id: p.id } : row); }
     catch (e) { throw /\bcc\b/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/035_centros_documentos.sql.') : /tipo|cuenta_costo|bodega_id/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : e; }
     await cargarEmpresa(); toast('Guardado.'); route();
   });
-  const verInv = () => $('dlgForm').querySelectorAll('[data-inv]').forEach(x => x.hidden = !conInv() || $('f_tipo').value === 'servicio');
+  const verInv = () => { $('dlgForm').querySelectorAll('[data-inv]').forEach(x => x.hidden = !conInv() || $('f_tipo').value === 'servicio'); $('dlgForm').querySelectorAll('[data-serv]').forEach(x => x.hidden = $('f_tipo').value !== 'servicio'); };
   $('f_tipo').onchange = verInv; verInv();
   const getCC = $('pcc') ? editorDist($('pcc'), p.cc) : null;
 }
@@ -4664,5 +4667,5 @@ async function vCalendario(m) {
 }
 
 // Operación (módulo opcional): sus pantallas usan las mismas utilidades de esta página.
-iniciarOperacion({ S, store, $, esc, emp, money: v => money(v), num, fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
+iniciarOperacion({ S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
   cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v) });
