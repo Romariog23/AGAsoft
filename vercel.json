@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/demo",
-      "destination": "/index.html"
+      "destination": "/"
     }
   ]
 }
