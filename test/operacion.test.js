@@ -132,3 +132,17 @@ test('cobro: la cotización fija el precio por obra y equipo; sin cotización, l
   assert.ok(erroresCotizacion({ lineas: [] }).length >= 3);
   assert.deepEqual(erroresCotizacion(cot), []);
 });
+
+import { porCerrar } from '../src/operacion.js';
+test('horas por cerrar: falta pagar y falta facturar, cada lado por separado', () => {
+  const t2 = { ...tipo, config: { ...tipo.config, salidas: { pago: 'ds', cobro: 'fv' } } };
+  const cot = { id: 'q1', estado: 'abierta', op_tipo_id: 'maq', tercero_id: 'strabag', criterios: { obra: 'guac' }, lineas: [{ descripcion: 'Hora', precio: 100000, iva_pct: 19 }] };
+  const regs = [{ ...reg('a', '2026-11-14', 'waldy', 'bull', 'guac', 125.3, 131.3), cierre_pago: 'ds1' }, { ...reg('b', '2026-11-15', 'waldy', 'bull', 'guac', 131.3, 135.9), cierre_cobro: 'fv1' },
+    reg('c', '2026-11-16', 'waldy', 'bull', 'guac', 135.9, 140.3), reg('d', '2026-11-30', 'waldy', 'bull', 'guac', 140.3, 150)];
+  const x = porCerrar(regs, t2, { hasta: '2026-11-20', tarifas, cotizaciones: [cot] });
+  assert.equal(x.pago.registros, 2); assert.equal(x.pago.personas[0].cantidad, 9); // b y c (d es posterior)
+  assert.equal(x.cobro.registros, 2); assert.equal(x.cobro.valor, 1040000); // a y c: 10,4 h × 100.000
+  assert.equal(x.pagadoSinFacturar, 1); assert.equal(x.facturadoSinPagar, 1);
+  const soloPago = porCerrar(regs, { ...tipo, config: { ...tipo.config, salidas: { pago: 'ds', cobro: 'ninguno' } } }, { tarifas });
+  assert.equal(soloPago.conCobro, false); assert.equal(soloPago.cobro.registros, 0);
+});
