@@ -207,7 +207,7 @@ const MENU = [
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
   ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
-  ['-', 'Informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['-', 'Informes'], ['informes', 'Todos los informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
   ['#', 'Impuestos'], ['iva', 'IVA del período'], ['retpracticadas', 'Retenciones practicadas'], ['certificados', 'Certificados de retención'], ['exogena', 'Medios magnéticos'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
@@ -287,6 +287,7 @@ function route() {
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
     if (v === 'balance') return vBalance(m);
     if (v === 'auxiliar') return vAuxiliar(m, q);
+    if (v === 'informes') return vInformes(m);
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
@@ -485,8 +486,61 @@ const ICO = {
   nomina: 'M2 7h20v14H2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2',
   admin: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10',
   envio: 'M4 12h12M12 6l6 6-6 6M20 4v16',
+  balanza: 'M12 3v18M7 21h10M5 7h14M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z',
+  tendencia: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  columnas: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  lista: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
 };
 const ico = k => `<span class="cfg-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICO[k]}"/></svg></span>`;
+
+// Página de tarjetas (Configuración e Informes): grupos [título, tarjetas], buscador y acciones.
+// Tarjeta: [clave, ícono, título, estado, acción (#ruta o función), interruptor {id, on}, etiqueta [clase, texto]]
+function pintarTarjetas(m, titulo, sub, grupos, buscar) {
+  const acciones = {};
+  const tarjeta = ([k, ic, t, est, acc, sw, tag]) => {
+    if (acc) acciones[k] = acc;
+    const bloq = typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2).split('/')[0]));
+    const cuerpo = `${ico(ic)}<span class="cfg-t"><b>${esc(t)}${tag ? ` <span class="tag ${tag[0]}">${tag[1]}</span>` : ''}${bloq ? ' <span class="tag">Plan superior</span>' : ''}</b><small>${esc(est)}</small></span>`;
+    const main = acc ? `<button type="button" class="cfg-main" data-acc="${k}">${cuerpo}${sw ? '' : '<span class="cfg-arrow" aria-hidden="true">›</span>'}</button>` : `<span class="cfg-main">${cuerpo}</span>`;
+    return `<div class="cfg-tile" data-q="${esc((t + ' ' + est).toLowerCase())}">${main}${sw ? `<label class="switch" title="${esc(t)}"><input type="checkbox" id="${sw.id}" ${sw.on ? 'checked' : ''} aria-label="${esc(t)}"><i></i></label>` : ''}</div>`;
+  };
+  m.innerHTML = `<header class="vhead cfg-top"><div><h2>${titulo}</h2><p class="sub">${sub}</p></div><input type="search" id="cfgBuscar" class="cfg-buscar" placeholder="${buscar}" aria-label="${buscar}"></header>
+  ${grupos.filter(Boolean).map(([g, l]) => `<section class="cfg-g"><h3>${g}</h3><div class="cfg-grid">${l.filter(Boolean).map(tarjeta).join('')}</div></section>`).join('')}
+  <p class="cfg-nada muted" hidden>Nada coincide con la búsqueda.</p>`;
+  m.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { const a = acciones[b.dataset.acc]; if (typeof a === 'string') location.hash = a; else a(); });
+  $('cfgBuscar').oninput = () => {
+    const q = $('cfgBuscar').value.trim().toLowerCase();
+    m.querySelectorAll('.cfg-g').forEach(g => { let n = 0; g.querySelectorAll('.cfg-tile').forEach(t => { const ok = !q || t.dataset.q.includes(q); t.hidden = !ok; n += ok; }); g.hidden = !n; });
+    m.querySelector('.cfg-nada').hidden = !!m.querySelector('.cfg-tile:not([hidden])');
+  };
+}
+// Informes: todos en tarjetas, por grupo.
+function vInformes(m) {
+  const d = S.d, cart = cartera(d.documentos, d.aplicaciones).filter(c => c.saldo > 0.009);
+  const porCobrar = r2(cart.reduce((s, c) => s + c.saldo, 0)), vencido = r2(cart.filter(c => c.diasVencida > 0).reduce((s, c) => s + c.saldo, 0));
+  pintarTarjetas(m, 'Informes', 'Escoge un informe. Todos se filtran por fechas y se pueden imprimir.', [
+    ['Contables', [
+      ['esf', 'balanza', 'Estado de situación financiera', 'Activos, pasivos y patrimonio', '#/esf'],
+      ['er', 'tendencia', 'Estado de resultados', 'Ingresos, costos y gastos', '#/er'],
+      ['ercomp', 'columnas', 'Resultados comparativo', 'Meses lado a lado', '#/ercomp'],
+      ['balance', 'lista', 'Balance de prueba', 'Saldos por cuenta y tercero', '#/balance'],
+      ['auxiliar', 'puc', 'Libro auxiliar', 'Movimientos de una cuenta', '#/auxiliar'],
+    ]],
+    ['Impuestos', [
+      ['iva', 'iva', 'IVA del período', 'Formulario 300', '#/iva'],
+      ['retpracticadas', 'ret', 'Retenciones practicadas', 'Formulario 350', '#/retpracticadas'],
+      ['certificados', 'resolucion', 'Certificados de retención', 'Por proveedor y año', '#/certificados'],
+      ['exogena', 'exogena', 'Medios magnéticos', 'Información exógena', '#/exogena'],
+    ]],
+    ['Cartera y pagos', [
+      ['cartera', 'pago', 'Cartera', porCobrar ? `${money(porCobrar)} por cobrar` : 'Sin saldos por cobrar', '#/cartera', null, vencido ? ['warn', 'Vencida'] : null],
+      ['cxp', 'envio', 'Cuentas por pagar', 'Lo que debes a proveedores', '#/cxp'],
+    ]],
+    ['Nómina', [
+      ['nominapasivos', 'nomina', 'Seguridad social y prestaciones', 'Saldos por entidad', '#/nominapasivos'],
+    ]],
+  ], 'Buscar un informe…');
+}
 
 // Configuración: tarjetas por grupo con el estado de cada ajuste; los interruptores se cambian ahí mismo.
 function vEmpresa(m) {
@@ -523,24 +577,8 @@ function vEmpresa(m) {
       ['feActiva', 'envio', 'Botón "Enviar a la DIAN"', 'En facturas y notas electrónicas', null, { id: 'feActiva', on: feActiva() }],
     ]],
   ].filter(Boolean);
-  const acciones = {};
-  const tarjeta = ([k, ic, t, est, acc, sw, tag]) => {
-    if (acc) acciones[k] = acc;
-    const bloq = typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2)));
-    const cuerpo = `${ico(ic)}<span class="cfg-t"><b>${esc(t)}${tag ? ` <span class="tag ${tag[0]}">${tag[1]}</span>` : ''}${bloq ? ' <span class="tag">Plan superior</span>' : ''}</b><small>${esc(est)}</small></span>`;
-    const main = acc ? `<button type="button" class="cfg-main" data-acc="${k}">${cuerpo}${sw ? '' : '<span class="cfg-arrow" aria-hidden="true">›</span>'}</button>` : `<span class="cfg-main">${cuerpo}</span>`;
-    return `<div class="cfg-tile" data-q="${esc((t + ' ' + est).toLowerCase())}">${main}${sw ? `<label class="switch" title="${esc(t)}"><input type="checkbox" id="${sw.id}" ${sw.on ? 'checked' : ''} aria-label="${esc(t)}"><i></i></label>` : ''}</div>`;
-  };
-  m.innerHTML = `<header class="vhead cfg-top"><div><h2>Configuración</h2><p class="sub">${esc(e.nombre)}</p></div><input type="search" id="cfgBuscar" class="cfg-buscar" placeholder="Buscar un ajuste…" aria-label="Buscar un ajuste"></header>
-  ${grupos.map(([g, l]) => `<section class="cfg-g"><h3>${g}</h3><div class="cfg-grid">${l.filter(Boolean).map(tarjeta).join('')}</div></section>`).join('')}
-  <p class="cfg-nada muted" hidden>Ningún ajuste coincide.</p>
-  <div class="row cfg-peligro"><button class="ghost" id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button class="ghost" id="delDemo">Borrar datos de demostración</button>' : ''}</div>`;
-  m.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { const a = acciones[b.dataset.acc]; if (typeof a === 'string') location.hash = a; else a(); });
-  $('cfgBuscar').oninput = () => {
-    const q = $('cfgBuscar').value.trim().toLowerCase();
-    m.querySelectorAll('.cfg-g').forEach(g => { let n = 0; g.querySelectorAll('.cfg-tile').forEach(t => { const ok = !q || t.dataset.q.includes(q); t.hidden = !ok; n += ok; }); g.hidden = !n; });
-    m.querySelector('.cfg-nada').hidden = !!m.querySelector('.cfg-tile:not([hidden])');
-  };
+  pintarTarjetas(m, 'Configuración', esc(e.nombre), grupos, 'Buscar un ajuste…');
+  m.insertAdjacentHTML('beforeend', `<div class="row cfg-peligro"><button class="ghost" id="delEmp">Borrar esta empresa</button>${store.mode === 'local' ? '<button class="ghost" id="delDemo">Borrar datos de demostración</button>' : ''}</div>`);
   const interruptor = (id, clave, msgOn, msgOff, antes) => { if ($(id)) $(id).onchange = async ev => {
     const on = ev.target.checked;
     if (antes && on && !await antes()) { ev.target.checked = false; return; }
