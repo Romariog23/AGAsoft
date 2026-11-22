@@ -20,7 +20,7 @@ export function datosDemo(hoy = hoyLocal()) {
   let n = 0;
   const id = p => `demo-${p}-${++n}`;
   const ahora = new Date().toISOString();
-  const db = { empresas: [], cuentas: [], terceros: [], productos: [], numeraciones: [], documentos: [], items: [], aplicaciones: [], miembros: [], comprobantes: [], compras: [], empleados: [], nominas: [], fe_envios: [] };
+  const db = { empresas: [], cuentas: [], terceros: [], productos: [], numeraciones: [], documentos: [], items: [], aplicaciones: [], miembros: [], comprobantes: [], compras: [], empleados: [], nominas: [], fe_envios: [], bodegas: [] };
   const eid = 'demo-empresa';
   const add = (t, r) => { const row = { id: id(t.slice(0, 3)), empresa_id: eid, creado_en: r.fecha ? `${r.fecha}T${String(10 + (n % 9)).padStart(2, '0')}:00:00.000Z` : ahora, ...r }; db[t].push(row); return row; };
 
@@ -87,7 +87,10 @@ export function datosDemo(hoy = hoyLocal()) {
   for (const [k, nombre, unidad, precio] of [
     ['CEM-50', 'Cemento gris uso general 50 kg', 'BULTO', 32000], ['VAR-38', 'Varilla corrugada 3/8" x 6 m', 'UND', 24500], ['PIN-GL', 'Pintura vinilo blanco tipo 1 galón', 'GAL', 58000],
     ['TAL-750', 'Taladro percutor 1/2" 750 W', 'UND', 289000], ['PVC-4', 'Tubo PVC sanitario 4" x 6 m', 'UND', 71000], ['LED-12', 'Bombillo LED 12 W luz blanca', 'UND', 8900],
-    ['CAB-12', 'Cable eléctrico N.º 12 rollo 100 m', 'ROLLO', 215000], ['INST', 'Servicio de instalación eléctrica', 'SERV', 180000]]) PR[k] = add('productos', { codigo: k, nombre, unidad, precio, iva_pct: 19, activo: true });
+    ['CAB-12', 'Cable eléctrico N.º 12 rollo 100 m', 'ROLLO', 215000], ['INST', 'Servicio de instalación eléctrica', 'SERV', 180000]]) PR[k] = add('productos', { codigo: k, nombre, unidad, precio, iva_pct: 19, activo: true, tipo: k === 'INST' ? 'servicio' : 'producto', cuenta_costo: '', bodega_id: null });
+  // Bodegas: las dos con la cuenta de mercancías (los traslados entre ellas no generan asiento).
+  const BOD = { principal: add('bodegas', { codigo: '01', nombre: 'Bodega principal', cuenta: '14350501', activa: true }), patio: add('bodegas', { codigo: '02', nombre: 'Patio de materiales', cuenta: '14350501', activa: true }) };
+  for (const k of ['CEM-50', 'VAR-38', 'PVC-4']) PR[k].bodega_id = BOD.patio.id;
   const y = meses[0].slice(0, 4);
   const NUM = {
     FV: add('numeraciones', { tipo: 'FV', prefijo: 'FE', resolucion: '18764000000001', fecha_resolucion: `${y}-01-02`, vigencia_desde: sumarDias(inicio, -30), vigencia_hasta: `${Number(y) + 2}-01-02`, desde: 1, hasta: 5000, siguiente: 1, activa: true, electronica: true }),
@@ -130,7 +133,7 @@ export function datosDemo(hoy = hoyLocal()) {
     if (!fecha) return null;
     const t = T[k];
     const ret = { retefuente_pct: t.ret_compra_fuente_pct || 0, reteiva_pct: t.ret_compra_iva_pct || 0, reteica_milaje: t.ret_compra_ica_milaje || 0 };
-    const ls = lineas.map(([cuenta, descripcion, base, iva_pct = 19]) => ({ cuenta, descripcion, base, iva_pct }));
+    const ls = lineas.map(l => !Array.isArray(l) ? l : (([cuenta, descripcion, base, iva_pct = 19]) => ({ cuenta, descripcion, base, iva_pct }))(l));
     return add('compras', { tipo, estado: 'contabilizado', numero: ++NC_[tipo], fecha, vence: extra.cuenta_pago ? null : sumarDias(fecha, t.plazo_dias || 30), tercero_id: t.id, num_proveedor: '', observaciones: '',
       lineas: ls, ...ret, cuenta_retefuente: '', retenciones: {}, cuenta_pago: '', aplicaciones: [], anticipo: 0, ...totalesCompra(ls, ret), ...extra });
   };
@@ -189,7 +192,9 @@ export function datosDemo(hoy = hoyLocal()) {
     if (baseMes) comp('CC', finM, `Costo de ventas ${mes}`, [['61350501', T.p1, baseMes * 0.62, 0], ['14350501', T.p1, 0, baseMes * 0.62]]);
 
     // Compras del mes.
-    const mercancia = compra('FC', dia(i, 3), 'p1', [['14350501', 'Cemento, varilla y tubería', 21500000 + 900000 * k], ['14350501', 'Pinturas y material eléctrico', 6800000 + 300000 * i]], { num_proveedor: `DFN-${4810 + i * 7}` });
+    // Mercancía por productos: entra a la bodega de cada producto (cuenta 14350501).
+    const lp = (cod, cantidad, costo) => { const p = PR[cod], b = p.bodega_id || BOD.principal.id; return { producto_id: p.id, bodega_id: b, cantidad, costo, cuenta: '14350501', descripcion: p.nombre, base: r2(cantidad * costo), iva_pct: 19 }; };
+    const mercancia = compra('FC', dia(i, 3), 'p1', [lp('CEM-50', 700 + 30 * k, 19500), lp('VAR-38', 400 + 15 * k, 18000), lp('PIN-GL', 80 + 3 * i, 41000), lp('CAB-12', 20 + i, 162000)], { num_proveedor: `DFN-${4810 + i * 7}` });
     const arriendo = compra('FC', dia(i, 1), 'p2', [['51200501', `Arriendo local comercial ${mes}`, 3500000]], { num_proveedor: `ARR-${mes.replace('-', '')}` });
     const energia = compra('FC', dia(i, 14), 'p3', [['51350501', `Energía eléctrica ${mes}`, 460000 + 35000 * k]], { num_proveedor: `EL-${77120 + i}`, cuenta_pago: P.bancos });
     const honorarios = compra('DS', dia(i, 26), 'p4', [['51100501', `Honorarios asesoría contable ${mes}`, 1600000, 0]]);

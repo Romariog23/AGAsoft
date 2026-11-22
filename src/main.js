@@ -18,6 +18,7 @@ import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certi
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
+import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto } from './inventario.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -238,7 +239,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
-  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'inventariocfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
 function avisosNav() {
@@ -292,6 +293,7 @@ function route() {
     if (v === 'productos') return vProductos(m);
     if (v === 'numeraciones') return vNumeraciones(m);
     if (v === 'formaspago') return vFormasPago(m);
+    if (v === 'inventariocfg') return vInventarioCfg(m);
     if (v === 'retenciones') return vRetenciones(m);
     if (v === 'tarifasiva') return vTarifasIva(m);
     if (v === 'cierre') return vCierre(m);
@@ -634,6 +636,7 @@ function vEmpresa(m) {
       ['tarifasiva', 'iva', 'Tarifas de IVA', 'Cuenta por tarifa', '#/tarifasiva'],
       ['exogenacfg', 'exogena', 'Medios magnéticos', 'Formatos y conceptos', '#/exogenacfg'],
       ['nominacfg', 'nomina', 'Nómina', 'Valores del año y entidades', '#/nominacfg'],
+      ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
     S.perfil?.es_admin && ['Administrador', [
       ['feHab', 'admin', 'Habilitada ante la DIAN', 'Ya superó el set de pruebas', null, { id: 'feHab', on: feHabilitada() }],
@@ -1595,23 +1598,31 @@ function formProducto(p = {}) {
   dialogo(`<h2>${p.id ? 'Editar producto o servicio' : 'Nuevo producto o servicio'}</h2>
     <div class="grid2">${campo('codigo', 'Código', p.codigo, 'required maxlength="30" class="mono"')}${campo('unidad', 'Unidad', p.unidad || 'UND', 'maxlength="10"')}</div>
     ${campo('nombre', 'Nombre', p.nombre, 'required maxlength="200"')}
-    <div class="grid2">${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}</div>
+    <div class="grid2">${campoSel('tipo', 'Tipo', TIPOS_ITEM, p.tipo || 'producto')}${campo('precio', 'Precio de venta (sin IVA)', p.precio ?? '', 'type="number" min="0" step="0.01" class="mono"')}</div>
+    <div class="grid2">${campoSel('iva_pct', 'Tarifa de IVA', tarifasIva(emp()?.contabilidad).map(t => [String(num(t.tarifa)), t.nombre]), String(num(p.iva_pct ?? 19)))}<div data-inv>${campoSel('bodega_id', 'Bodega donde entra al comprar', bodegas().map(b => [b.id, `${b.codigo} · ${b.nombre}`]), p.bodega_id || '')}</div></div>
     <h3>Contabilización</h3>
     <div class="grid2">${selCuenta('cuenta_ingreso', 'Cuenta en factura y nota débito', /^4[12]/, p.cuenta_ingreso, param().ingresos)}${selCuenta('cuenta_devolucion', 'Cuenta en nota crédito y devolución', /^4/, p.cuenta_devolucion, param().devoluciones)}</div>
-    <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas.</p>
+    <div class="grid2" data-inv>${selCuenta('cuenta_costo', 'Cuenta de costo de ventas', /^6/, p.cuenta_costo, param().costo_ventas)}<div><label>Cuenta de inventario</label><p class="hint">La da la bodega (clase 14). Se configura en <a href="#/inventariocfg">Inventario</a>.</p></div></div>
+    <p class="hint">Si las dejas en "La de la empresa", se usan las de "Cuentas de la contabilización automática" en el plan de cuentas. Los servicios no llevan inventario.</p>
     ${p.id ? check('activo', 'Activo (aparece al facturar)', p.activo !== false) : ''}
     ${pie()}`, async fd => {
     const codigo = String(fd.get('codigo')).trim(), nombre = String(fd.get('nombre')).trim();
     if (!codigo || !nombre) throw new Error('Escribe el código y el nombre.');
     if (S.d.productos.some(x => x.id !== p.id && x.codigo.toLowerCase() === codigo.toLowerCase())) throw new Error('Ya existe un producto con ese código.');
-    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true };
-    await store.save('productos', p.id ? { ...row, id: p.id } : row); await cargarEmpresa(); toast('Guardado.'); route();
+    const tipo = fd.get('tipo') === 'servicio' ? 'servicio' : 'producto';
+    const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true,
+      tipo, cuenta_costo: tipo === 'producto' ? fd.get('cuenta_costo') || '' : '', bodega_id: tipo === 'producto' ? fd.get('bodega_id') || null : null };
+    try { await store.save('productos', p.id ? { ...row, id: p.id } : row); }
+    catch (e) { throw /tipo|cuenta_costo|bodega_id/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : e; }
+    await cargarEmpresa(); toast('Guardado.'); route();
   });
+  const verInv = () => $('dlgForm').querySelectorAll('[data-inv]').forEach(x => x.hidden = $('f_tipo').value === 'servicio');
+  $('f_tipo').onchange = verInv; verInv();
 }
 function vProductos(m) {
   m.innerHTML = `<header class="vhead"><h2>Productos y servicios</h2><div class="row"><button id="imp">Importar CSV</button><button class="primary" id="nuevo">Nuevo</button></div></header>
-    <section class="panel">${S.d.productos.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Unidad</th><th class="r">Precio</th><th class="r">IVA</th><th></th></tr></thead><tbody>
-    ${[...S.d.productos].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(p => `<tr class="${p.activo === false ? 'muted' : ''}"><td class="mono">${esc(p.codigo)}</td><td>${esc(p.nombre)}${p.activo === false ? ' <span class="tag">Inactivo</span>' : ''}</td><td>${esc(p.unidad)}</td><td class="r mono">${money(p.precio)}</td><td class="r mono">${num(p.iva_pct)}%</td><td class="r"><button class="ghost sm" data-ed="${p.id}">Editar</button></td></tr>`).join('')}
+    <section class="panel">${S.d.productos.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Unidad</th><th class="r">Precio</th><th class="r">IVA</th><th></th></tr></thead><tbody>
+    ${[...S.d.productos].sort((a, b) => a.codigo.localeCompare(b.codigo)).map(p => `<tr class="${p.activo === false ? 'muted' : ''}"><td class="mono">${esc(p.codigo)}</td><td>${esc(p.nombre)}${p.activo === false ? ' <span class="tag">Inactivo</span>' : ''}</td><td>${esInventariable(p) ? 'Producto' : '<span class="muted">Servicio</span>'}</td><td>${esc(p.unidad)}</td><td class="r mono">${money(p.precio)}</td><td class="r mono">${num(p.iva_pct)}%</td><td class="r"><button class="ghost sm" data-ed="${p.id}">Editar</button></td></tr>`).join('')}
     </tbody></table></div>` : '<p class="muted">Todavía no hay productos ni servicios.</p>'}</section>`;
   $('nuevo').onclick = () => formProducto();
   $('imp').onclick = () => importarCSV('productos');
@@ -1844,6 +1855,45 @@ function vPuc(m) {
   pintar();
 }
 /* ---------- Formas de pago (ventas y compras) ---------- */
+// Inventario: bodegas de la empresa (si no hay, la principal sin crear) y la que se crea al primer uso.
+const bodegas = () => bodegasDe(S.d?.bodegas, emp()?.contabilidad);
+const bodegaDe = id => bodegas().find(b => b.id === (id || '')) || bodegas()[0];
+async function asegurarBodega() {
+  if ((S.d.bodegas || []).length) return null;
+  const b = bodegas()[0];
+  try { const g = await store.save('bodegas', { empresa_id: S.eid, codigo: b.codigo, nombre: b.nombre, cuenta: b.cuenta, activa: true }); await cargarEmpresa(); return g; }
+  catch (e) { throw /bodegas/.test(e.message) && /exist|schema|relation/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : e; }
+}
+function vInventarioCfg(m) {
+  const e = emp(), I = cfgInventario(e.contabilidad), reales = S.d.bodegas || [];
+  const usada = id => compras().some(c => (c.lineas || []).some(l => l.bodega_id === id)) || S.d.productos.some(p => p.bodega_id === id);
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/config">← Configuración</a><h2>Inventario</h2><p class="sub">Método de costeo y bodegas. Los productos son inventariables; los servicios no.</p></div></header>
+  <section class="panel stack"><h3>Método de costeo</h3>
+    <div class="grid2">${campoSel('inv_metodo', 'Método', METODOS, I.metodo)}${campoSel('inv_neg', 'Vender sin existencias', [['avisar', 'Avisar y dejar facturar'], ['bloquear', 'No dejar facturar']], I.negativo)}</div>
+    <p class="hint"><b>Promedio ponderado:</b> cada compra recalcula el costo unitario y las salidas usan ese promedio (el más usado en Colombia). <b>PEPS:</b> las salidas consumen primero las compras más antiguas. UEPS no se ofrece porque las NIIF no lo permiten. El costo es uno por producto para todas las bodegas.</p>
+  </section>
+  <section class="panel stack"><header class="vhead"><h3>Bodegas</h3><button class="primary" id="nuevaB">Nueva bodega</button></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Cuenta de inventario</th><th></th></tr></thead><tbody>
+    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r">${b.id ? `<button class="sm ghost" data-eb="${b.id}">Editar</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="hint">Cada bodega lleva una cuenta auxiliar de la clase 14. Las bodegas solo trasladan cantidades: un traslado entre bodegas con cuentas distintas se contabiliza entre esas cuentas 14; si comparten la cuenta, no hay asiento.</p>
+  </section>`;
+  const guardarCfg = async () => { try { await guardarContab('inventario', { ...(e.contabilidad?.inventario || {}), metodo: $('f_inv_metodo').value, negativo: $('f_inv_neg').value }); toast('Inventario guardado.'); } catch (er) { fail(er); } };
+  $('f_inv_metodo').onchange = guardarCfg; $('f_inv_neg').onchange = guardarCfg;
+  const formB = (b = {}) => dialogo(`<h2>${b.id ? 'Editar bodega' : 'Nueva bodega'}</h2>
+    <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
+    <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><input id="f_cuenta" name="cuenta" list="ctas14" class="mono" value="${esc(b.cuenta || param().inventario)}" autocomplete="off" required><datalist id="ctas14">${optsLista(cuentasAux().filter(c => /^14/.test(c.codigo)))}</datalist>
+      <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
+    ${b.id ? check('activa', 'Activa', b.activa !== false) : ''}${pie()}`, async fd => {
+    const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true };
+    const errs = erroresBodega({ ...row, id: b.id }, reales, S.d.cuentas); if (errs.length) throw new Error(errs.join(' '));
+    if (b.id && b.cuenta !== row.cuenta && usada(b.id) && !await confirmar('Cambiar la cuenta de la bodega', 'Las compras ya registradas conservan la cuenta con que se contabilizaron. Solo las nuevas usarán la cuenta nueva.', 'Cambiar')) return false;
+    try { await store.save('bodegas', b.id ? { ...row, id: b.id } : row); } catch (er) { throw /bodegas/.test(er.message) && /exist|schema|relation/i.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : er; }
+    await cargarEmpresa(); toast('Bodega guardada.'); route();
+  });
+  $('nuevaB').onclick = async () => { try { if (!reales.length) await asegurarBodega(); formB(); } catch (er) { fail(er); } };
+  m.querySelectorAll('[data-eb]').forEach(x => x.onclick = () => formB(reales.find(b => b.id === x.dataset.eb)));
+}
 function vFormasPago(m) {
   const P = param(), todas = formasPago(emp()?.contabilidad, P);
   const fila = f => `<tr><td><b>${esc(f.nombre)}</b></td><td>${f.credito ? '<span class="tag">Crédito</span>' : '<span class="tag ok">Contado</span>'}</td>
@@ -3519,6 +3569,9 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
   const pagado = !esCE && id && compras().some(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
   const RET_C = { retefuente: ['krfC', 'krf'], reteiva: ['kriC', 'kri'], reteica: ['kricaC', 'krica'] };
+  const prodsInv = S.d.productos.filter(p => p.activo !== false && esInventariable(p));
+  const optsBod = sel => bodegas().map(b => `<option value="${b.id}" ${b.id === (sel || '') ? 'selected' : ''}>${esc(b.codigo)} · ${esc(b.nombre)}</option>`).join('');
+  const prodPorId = id => S.d.productos.find(p => p.id === id);
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/compras/${tipo}">← ${T.plural}</a><h2>${id ? `Editar ${esc(nomCompra(c))}` : T.nuevo}</h2>
     <p class="sub">${esCE ? 'Pago a un proveedor, a un empleado o a una entidad de seguridad social: escoge lo que se paga o registra un anticipo.' : tipo === 'DS' ? 'Compra a una persona no obligada a facturar. Se contabiliza al guardar.' : 'Factura electrónica que te envió el proveedor. Se contabiliza al guardar.'}</p></div></header>
   <form id="ke" class="stack" novalidate>
@@ -3534,9 +3587,10 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     </section>
     ${esCE ? `<section class="panel stack"><h3>Lo que paga</h3><div id="aplK"></div>
       <div class="grid2"><div><label for="kant">Anticipo o pago sin factura</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"></div></div></section>` :
-    `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><button type="button" id="addK">+ Agregar línea</button></div>
+    `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><div class="row">${prodsInv.length ? '<button type="button" id="addP">+ Producto</button>' : ''}<button type="button" id="addK">+ Cuenta</button></div></div>
       <datalist id="ctasK">${optsLista(cuentasAux().filter(x => CLASES_COMPRA.some(p => x.codigo.startsWith(p))))}</datalist>
-      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta (gasto, costo, inventario o activo)</th><th>Descripción</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Producto o cuenta</th><th>Descripción</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th><th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
+      ${prodsInv.length ? '<p class="hint">Con <b>+ Producto</b> la compra entra al inventario de la bodega escogida y se contabiliza en su cuenta 14. Con <b>+ Cuenta</b> va a un gasto, costo o activo, como antes.</p>' : ''}
       ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
@@ -3568,18 +3622,28 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       $('ktot').innerHTML = `<dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(c.base)}</dd>${c.iva ? `<dt>IVA</dt><dd class="mono">${money(c.iva)}</dd>` : ''}<dt class="strong">Total</dt><dd class="mono strong">${money(c.total)}</dd>
         ${c.retefuente ? `<dt>Retefuente</dt><dd class="mono">−${money(c.retefuente)}</dd>` : ''}${c.reteiva ? `<dt>ReteIVA</dt><dd class="mono">−${money(c.reteiva)}</dd>` : ''}${c.reteica ? `<dt>ReteICA</dt><dd class="mono">−${money(c.reteica)}</dd>` : ''}
         <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd></dl>`;
-      c.lineas.forEach((l, i) => { const x = m.querySelector(`[data-kt="${i}"]`); if (x) x.textContent = money(r2(num(l.base) * (1 + num(l.iva_pct) / 100))); });
+      c.lineas.forEach((l, i) => { const x = m.querySelector(`[data-kt="${i}"]`); if (x) x.textContent = money(r2(num(l.base) * (1 + num(l.iva_pct) / 100))); const b = m.querySelector(`[data-kb="${i}"]`); if (b) b.textContent = money(l.base); });
     }
     $('kas').innerHTML = tablaAsiento(asientoCompra({ ...c, id: c.id || 'nuevo', numero: c.numero || siguienteCompra(tipo), estado: 'contabilizado', aplicaciones: (c.aplicaciones || []).filter(a => num(a.valor)).map(refAplicacion) }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad)));
   };
   const pintarLineas = () => {
-    $('kl').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
+    $('kl').innerHTML = c.lineas.map((l, i) => esLineaProducto(l) ? `<tr data-i="${i}" class="lin-prod">
+      <td data-l="Producto"><select data-k="producto_id" class="w-cod" aria-label="Producto">${prodsInv.concat(prodsInv.some(p => p.id === l.producto_id) ? [] : [prodPorId(l.producto_id)].filter(Boolean)).map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select>
+        <select data-k="bodega_id" class="sm-sel" aria-label="Bodega">${optsBod(l.bodega_id)}</select><small class="hint">${esc(l.cuenta)} · ${esc(nomCta(l.cuenta))}</small></td>
+      <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
+      <td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${num(l.cantidad) || ''}" aria-label="Cantidad"><small class="hint">${esc(prodPorId(l.producto_id)?.unidad || '')}</small></td>
+      <td data-l="Costo unitario"><input data-k="costo" type="number" min="0" step="any" class="r mono w-val" value="${num(l.costo) || ''}" aria-label="Costo unitario"></td>
+      <td class="r mono" data-l="Valor" data-kb="${i}">${money(l.base)}</td>
+      <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
+      <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>` : `<tr data-i="${i}">
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="Código o nombre" aria-label="Cuenta"><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
+      <td class="c-na"></td><td class="c-na"></td>
       <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA"></td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
       <td class="r mono c-tot" data-l="Total" data-kt="${i}"></td>
-      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin líneas.</td></tr>';
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Sin líneas.</td></tr>';
     resumen();
   };
   const pintarApl = () => {
@@ -3607,13 +3671,27 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   } else {
     $('kl').addEventListener('input', ev => {
       const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
-      const l = c.lineas[Number(tr.dataset.i)]; l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
+      if (el.tagName === 'SELECT') return;
+      const i = Number(tr.dataset.i), l = c.lineas[i]; l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
       if (el.dataset.k === 'cuenta') m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = l.cuenta ? nomCta(l.cuenta) : '';
+      if (esLineaProducto(l)) c.lineas[i] = lineaProducto(l, bodegaDe(l.bodega_id));
       resumen();
     });
-    $('kl').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (tr && el.tagName === 'SELECT') { c.lineas[Number(tr.dataset.i)].iva_pct = el.value; resumen(); } });
+    $('kl').addEventListener('change', ev => {
+      const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return;
+      const i = Number(tr.dataset.i), l = c.lineas[i];
+      if (el.dataset.k === 'producto_id') { const p = prodPorId(el.value); Object.assign(l, { producto_id: el.value, descripcion: p?.nombre || '', iva_pct: String(num(p?.iva_pct)), bodega_id: p?.bodega_id || l.bodega_id || bodegas()[0].id }); c.lineas[i] = lineaProducto(l, bodegaDe(l.bodega_id)); return pintarLineas(); }
+      if (el.dataset.k === 'bodega_id') { c.lineas[i] = lineaProducto({ ...l, bodega_id: el.value }, bodegaDe(el.value)); return pintarLineas(); }
+      l.iva_pct = el.value; resumen();
+    });
     $('kl').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintarLineas(); });
-    $('addK').onclick = () => { const u = c.lineas.at(-1) || {}; c.lineas.push({ cuenta: u.cuenta || '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
+    if ($('addP')) $('addP').onclick = () => {
+      const p = prodsInv[0], u = [...c.lineas].reverse().find(esLineaProducto);
+      c.lineas = c.lineas.filter(l => esLineaProducto(l) || String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base));
+      c.lineas.push(lineaProducto({ producto_id: p.id, descripcion: p.nombre, iva_pct: String(num(p.iva_pct)), cantidad: '', costo: '', bodega_id: p.bodega_id || u?.bodega_id || bodegas()[0].id }, bodegaDe(p.bodega_id || u?.bodega_id)));
+      pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=producto_id]`)?.focus();
+    };
+    $('addK').onclick = () => { const u = [...c.lineas].reverse().find(l => !esLineaProducto(l)) || {}; c.lineas.push({ cuenta: u.cuenta || '', descripcion: '', base: '', iva_pct: u.iva_pct || '0' }); pintarLineas(); $('kl').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
     ligarRet('compra', RET_C, () => r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
     $('prv').onchange = () => {
       // Al escoger el proveedor se proponen sus retenciones y su plazo.
@@ -3629,7 +3707,9 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   $('newPrv').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('prv'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.onchange(); }, 'proveedor');
   $('ke').onsubmit = async ev => {
     ev.preventDefault(); leer();
-    if (!esCE) c.lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base)).map(l => ({ cuenta: String(l.cuenta).trim(), descripcion: String(l.descripcion || '').trim(), base: r2(num(l.base)), iva_pct: num(l.iva_pct) }));
+    if (!esCE) c.lineas = c.lineas.filter(l => esLineaProducto(l) || String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base)).map(l => esLineaProducto(l)
+      ? (({ producto_id, bodega_id, cantidad, costo, cuenta, base }) => ({ producto_id, bodega_id: bodega_id || '', cantidad, costo, cuenta, descripcion: String(l.descripcion || '').trim(), base, iva_pct: num(l.iva_pct) }))(lineaProducto(l, bodegaDe(l.bodega_id)))
+      : { cuenta: String(l.cuenta).trim(), descripcion: String(l.descripcion || '').trim(), base: r2(num(l.base)), iva_pct: num(l.iva_pct) });
     else c.aplicaciones = c.aplicaciones.filter(a => num(a.valor) > 0).map(a => refAplicacion({ ...(a.cuenta ? { cuenta: a.cuenta } : { compra_id: a.compra_id }), valor: r2(num(a.valor)) }));
     if (esCE) {
       const lab = porPagarLaboral(movs().filter(mv => mv.doc_id !== c.id), c.tercero_id);
@@ -3638,10 +3718,12 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         if (s && a.valor > s.saldo + 0.009) { $('kErr').textContent = `El pago a ${a.ref} supera su saldo (${money(s.saldo)}).`; $('kErr').hidden = false; return; }
       }
     }
-    const errs = erroresCompra({ ...c, tipo }, S.d.cuentas);
+    const errs = erroresCompra({ ...c, tipo }, S.d.cuentas, S.d.productos);
     if (errs.length) { $('kErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>'); $('kErr').hidden = false; if (!esCE) pintarLineas(); return; }
     $('kErr').hidden = true; $('kSave').disabled = true;
     try {
+      // La bodega principal se crea la primera vez que se usa.
+      if (!esCE && c.lineas.some(l => esLineaProducto(l) && !l.bodega_id)) { const b = await asegurarBodega(); const id0 = b?.id || bodegas()[0].id; c.lineas.forEach(l => { if (esLineaProducto(l) && !l.bodega_id) l.bodega_id = id0; }); }
       const t = esCE ? { base: 0, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: totalEgreso(c), neto: totalEgreso(c) } : totalesCompra(c.lineas, c);
       const row = { empresa_id: S.eid, tipo, fecha: c.fecha, vence: esCE ? null : (c.vence || null), tercero_id: c.tercero_id, num_proveedor: c.num_proveedor || '', observaciones: c.observaciones || '',
         lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '', retenciones: esCE ? {} : (c.retenciones || {}),
@@ -3670,7 +3752,7 @@ function hojaCompra(c, imprimir) {
         ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
         <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`
     : `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Descripción</th><th class="r">Valor</th><th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
-        ${(c.lineas || []).map(l => { const iva = r2(num(l.base) * num(l.iva_pct) / 100); return `<tr><td class="mono">${esc(l.cuenta)}</td><td>${esc(l.descripcion)}</td><td class="r mono">${money(l.base)}</td><td class="r mono">${iva ? money(iva) : ''}</td><td class="r mono">${money(num(l.base) + iva)}</td></tr>`; }).join('')}</tbody></table></div>
+        ${(c.lineas || []).map(l => { const iva = r2(num(l.base) * num(l.iva_pct) / 100), p = esLineaProducto(l) && S.d.productos.find(x => x.id === l.producto_id); return `<tr><td class="mono">${esc(l.cuenta)}</td><td>${p ? `<span class="mono">${esc(p.codigo)}</span> ` : ''}${esc(l.descripcion)}${p ? `<br><small class="muted">${cantTxt(l.cantidad, fmtEmp())} ${esc(p.unidad)} × ${money(l.costo)} · ${esc(bodegaDe(l.bodega_id)?.nombre || '')}</small>` : ''}</td><td class="r mono">${money(l.base)}</td><td class="r mono">${iva ? money(iva) : ''}</td><td class="r mono">${money(num(l.base) + iva)}</td></tr>`; }).join('')}</tbody></table></div>
       <dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(c.base)}</dd>${num(c.iva) ? `<dt>IVA</dt><dd class="mono">${money(c.iva)}</dd>` : ''}<dt class="strong">Total</dt><dd class="mono strong">${money(c.total)}</dd>
         ${num(c.retefuente) ? `<dt>Retefuente ${num(c.retefuente_pct)}%</dt><dd class="mono">−${money(c.retefuente)}</dd>` : ''}${num(c.reteiva) ? `<dt>ReteIVA ${num(c.reteiva_pct)}%</dt><dd class="mono">−${money(c.reteiva)}</dd>` : ''}${num(c.reteica) ? `<dt>ReteICA ${num(c.reteica_milaje)}‰</dt><dd class="mono">−${money(c.reteica)}</dd>` : ''}
         <dt class="strong">Neto a pagar</dt><dd class="mono big">${money(c.neto)}</dd>${s ? `<dt>Pagado</dt><dd class="mono">${money(s.pagado)}</dd><dt class="strong">Saldo</dt><dd class="mono strong">${money(s.saldo)}</dd>` : ''}</dl>`}
