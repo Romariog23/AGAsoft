@@ -75,3 +75,12 @@ test('nómina: cada empleado con su distribución', () => {
   assert.equal(suma(ms, m => m.cc1 === 'm1'), 700000); assert.equal(suma(ms, m => m.cc1 === 'm2'), 300000);
   assert.ok(ms.filter(m => m.cuenta.startsWith('2')).every(m => !m.cc1));
 });
+import { estadoResultados } from '../src/contab.js';
+import { planInicial } from '../src/puc.js';
+test('estado de resultados por centro: centros + sin centro = total', () => {
+  const ms = movimientos({ ...S, cc: res });
+  const plan = planInicial(), er = f => estadoResultados(ms.filter(f), plan, '2026-01-01', '2026-12-31').secciones.at(-1).valor;
+  const total = er(() => true), partes = ['m1', 'm2'].map(id => er(m => m.cc1 === id)).concat([er(m => !m.cc1)]);
+  assert.equal(Math.round(partes.reduce((a, v) => a + v, 0) * 100) / 100, total);
+  assert.ok(total !== 0);
+});
