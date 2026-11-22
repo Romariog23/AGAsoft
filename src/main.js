@@ -13,6 +13,7 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
+import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -205,10 +206,12 @@ const MENU = [
   ['-', 'Ventas'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera'],
   ['-', 'Compras y gastos'], ['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar'],
   ['-', 'Nómina'], ['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina'],
-  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['esf', 'Situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'], ['cierre', 'Cierre contable'],
+  ['-', 'Contabilidad'], ['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable'],
+  ['-', 'Informes'], ['#', 'Contables'], ['esf', 'Estado de situación financiera'], ['er', 'Estado de resultados'], ['ercomp', 'Estado de resultados comparativo'], ['balance', 'Balance de prueba'], ['auxiliar', 'Libro auxiliar'],
+  ['#', 'Impuestos'], ['iva', 'IVA del período'], ['retpracticadas', 'Retenciones practicadas'], ['certificados', 'Certificados de retención'], ['exogena', 'Medios magnéticos'],
   ['-', 'Datos'], ['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios'],
   ['-', 'Importar plantillas'], ['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'],
-  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogena', 'Medios magnéticos'], ['exogenacfg', 'Configurar medios magnéticos'],
+  ['-', 'Impuestos'], ['retenciones', 'Conceptos de retención'], ['tarifasiva', 'Tarifas de IVA'], ['exogenacfg', 'Configurar medios magnéticos'],
   ['-', 'Configuración'], ['config', 'Empresa y facturación'], ['disenofactura', 'Diseño de la factura'], ['habilitacion', 'Factura electrónica (DIAN)'], ['numeraciones', 'Numeraciones'], ['formaspago', 'Formas de pago'], ['puc', 'Plan de cuentas PUC y NIIF'], ['usuarios', 'Usuarios'], ['miplan', 'Mi plan'],
 ];
 function renderNav(actual) {
@@ -218,7 +221,7 @@ function renderNav(actual) {
   const grupos = []; let g = null;
   for (const [k, t] of items) { if (k === '-') grupos.push(g = { t, l: [] }); else if (g) g.l.push([k, t]); else grupos.push({ l: [[k, t]] }); }
   $('nav').innerHTML = grupos.map(x => {
-    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
+    const links = x.l.map(([k, t]) => k === '#' ? `<span class="nav-sub" style="display:block;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 14px 2px">${t}</span>` : `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}>${t}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : ' <span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
     if (!x.t) return links;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t);
     return `<details class="nav-g" data-g="${x.t}" ${open ? 'open' : ''}><summary>${x.t}</summary>${links}</details>`;
@@ -287,6 +290,9 @@ function route() {
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
     if (v === 'ercomp') return vErComp(m);
+    if (v === 'iva') return vIva(m);
+    if (v === 'retpracticadas') return vRetPracticadas(m);
+    if (v === 'certificados') return vCertificados(m, q.get('t'));
     vInicio(m);
   } catch (e) { fail(e); }
 }
@@ -2652,6 +2658,113 @@ function vEr(m) {
   };
   filtrosInf(pintar);
   pintar();
+}
+
+/* ---------- Informes de impuestos ---------- */
+// Período escogido (año, tipo y número). Se recuerda en el navegador.
+const PER = (() => { const h = hoy(); let tipo = 'bimestral'; try { tipo = localStorage.getItem('agasoft-periodo-iva') || tipo; } catch (_) {} if (!PERIODOS_IVA[tipo]) tipo = 'bimestral'; return { anio: +h.slice(0, 4), tipo, n: periodoDe(h, tipo), mes: +h.slice(5, 7) }; })();
+const NOM_PER = { bimestral: ['Ene-Feb', 'Mar-Abr', 'May-Jun', 'Jul-Ago', 'Sep-Oct', 'Nov-Dic'], cuatrimestral: ['Ene-Abr', 'May-Ago', 'Sep-Dic'] };
+function selPeriodo(id, tipos, onChange) {
+  const anios = [...new Set([PER.anio, +hoy().slice(0, 4), +hoy().slice(0, 4) - 1, +hoy().slice(0, 4) - 2])].sort((a, b) => b - a);
+  const mensual = tipos.length === 1 && tipos[0] === 'mensual';
+  setTimeout(() => {
+    const box = $(id); if (!box) return;
+    box.querySelectorAll('select').forEach(sl => sl.onchange = () => {
+      const k = sl.name; PER[k] = +sl.value || sl.value;
+      if (k === 'tipo') { PER.n = 1; try { localStorage.setItem('agasoft-periodo-iva', PER.tipo); } catch (_) {} box.outerHTML = selPeriodo(id, tipos, onChange); }
+      onChange();
+    });
+  });
+  return `<div class="row filters noprint" id="${id}"><div><label for="${id}a">Año</label><select id="${id}a" name="anio">${anios.map(a => `<option ${a === PER.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+    ${mensual ? `<div><label for="${id}m">Mes</label><select id="${id}m" name="mes">${MESES_C.map((x, i) => `<option value="${i + 1}" ${i + 1 === PER.mes ? 'selected' : ''}>${x}</option>`).join('')}</select></div>`
+    : `<div><label for="${id}t">Periodicidad</label><select id="${id}t" name="tipo">${opts([['bimestral', 'Bimestral'], ['cuatrimestral', 'Cuatrimestral']], PER.tipo)}</select></div>
+      <div><label for="${id}n">Período</label><select id="${id}n" name="n">${NOM_PER[PER.tipo].map((x, i) => `<option value="${i + 1}" ${i + 1 === PER.n ? 'selected' : ''}>${i + 1} · ${x}</option>`).join('')}</select></div>`}</div>`;
+}
+const rangoPer = mensual => mensual ? periodo(PER.anio, 'mensual', PER.mes) : periodo(PER.anio, PER.tipo, PER.n);
+const pct = v => `${String(v).replace('.', ',')} %`;
+const botonImprimir = (titulo, html) => { $('print').innerHTML = html(); const t = document.title; document.title = `${titulo} - ${emp().nombre}`; window.print(); document.title = t; };
+
+function vIva(m) {
+  m.innerHTML = `<header class="vhead noprint"><div><h2>IVA del período</h2><p class="sub">Lo que va en el formulario 300: IVA generado en ventas, IVA descontable en compras y el saldo a pagar o a favor.</p></div><button id="imp">Imprimir</button></header>
+    ${selPeriodo('pIva', ['bimestral', 'cuatrimestral'], () => pintar())}<section class="panel" id="out"></section>`;
+  const tabla = (filas, titulo) => `<h4>${titulo}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tarifa</th><th class="r">Base</th><th class="r">IVA</th></tr></thead><tbody>
+    ${filas.map(x => `<tr><td>${x.tarifa ? pct(x.tarifa) : 'Excluidos, exentos o 0 %'}</td><td class="r mono">${money(x.base)}</td><td class="r mono">${money(x.iva)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Sin movimientos en el período.</td></tr>'}
+    ${filas.length ? `<tr class="strong"><td>Total</td><td class="r mono">${money(filas.reduce((s, x) => s + x.base, 0))}</td><td class="r mono">${money(filas.reduce((s, x) => s + x.iva, 0))}</td></tr>` : ''}</tbody></table></div>`;
+  const html = () => {
+    const { desde, hasta } = rangoPer(false), r = informeIva(S.d, desde, hasta);
+    // Cruce con la contabilidad: movimiento neto de las cuentas 2408 en el período.
+    const cont = r2(movs().filter(x => x.cuenta.startsWith('2408') && x.fecha >= desde && x.fecha <= hasta && x.tipo !== 'CI').reduce((s, x) => s + x.credito - x.debito, 0));
+    const neto = r2(r.generado - r.descontable);
+    return cabInforme('IVA del período', `${PER.tipo === 'bimestral' ? 'Bimestre' : 'Cuatrimestre'} ${PER.n} de ${PER.anio}<br>Del ${fFecha(desde)} al ${fFecha(hasta)}`) + `
+      ${tabla(r.ventas, `Ventas (${r.nVentas} facturas y notas)`)}
+      <p class="rep-small">Las notas crédito restan. Solo cuentan facturas y notas guardadas (no borradores ni anuladas).</p>
+      ${tabla(r.compras, `Compras (${r.nCompras} facturas de proveedor y documentos soporte)`)}
+      <div class="inf">
+        <div class="inf-l plain"><span>IVA generado</span><span class="mono">${money(r.generado)}</span></div>
+        <div class="inf-l plain"><span>(menos) IVA descontable</span><span class="mono">${money(r.descontable)}</span></div>
+        <div class="inf-l plain"><span>(menos) Retenciones de IVA que le practicaron</span><span class="mono">${money(r.reteivaQueLePracticaron)}</span></div>
+        <div class="inf-l tot big"><span>${r.aFavor ? 'Saldo a favor' : 'Saldo a pagar'}</span><span class="mono">${money(r.aFavor || r.aPagar)}</span></div>
+      </div>
+      ${Math.abs(cont - neto) < 1 ? '<p class="okmsg">Cuadra con la contabilidad (cuentas 2408).</p>' : `<p class="hint">En la contabilidad, las cuentas 2408 suman ${money(cont)} en el período y aquí el IVA generado menos el descontable da ${money(neto)}. La diferencia suele venir de comprobantes contables o ajustes hechos a mano en esas cuentas: revísalos en el <a href="#/auxiliar">libro auxiliar</a>.</p>`}
+      <p class="rep-small">Informe de apoyo para diligenciar el formulario 300. Verifica las cifras antes de presentarlo.</p>`;
+  };
+  const pintar = () => { $('out').innerHTML = html(); };
+  $('imp').onclick = () => botonImprimir('IVA del período', html);
+  pintar();
+}
+
+function vRetPracticadas(m) {
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Retenciones practicadas</h2><p class="sub">Lo que va en el formulario 350: las retenciones que la empresa practicó en el mes, por concepto.</p></div><button id="imp">Imprimir</button></header>
+    ${selPeriodo('pRet', ['mensual'], () => pintar())}<section class="panel" id="out"></section>`;
+  const P = param(), cts = { retefuente: P.retefuente_pagar.slice(0, 4), reteiva: P.reteiva_pagar.slice(0, 4), reteica: P.reteica_pagar.slice(0, 4) };
+  const html = () => {
+    const { desde, hasta } = rangoPer(true), r = informeRetenciones(S.d.compras, movs(), desde, hasta, cts);
+    const bloque = ([k, nombre]) => { const gs = r.grupos.filter(g => g.tipo === k); if (!gs.length) return '';
+      return `<h4>${nombre}</h4><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base</th><th class="r">Retenido</th></tr></thead><tbody>
+        ${gs.map(g => `<tr><td>${esc(g.concepto)}${g.n > 1 ? ` <span class="hint">(${g.n})</span>` : ''}</td><td class="r mono">${g.tarifa == null ? '' : k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${g.base == null ? '' : money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}
+        <tr class="strong"><td colspan="3">Total ${nombre.toLowerCase()}</td><td class="r mono">${money(r[k])}</td></tr></tbody></table></div>`; };
+    return cabInforme('Retenciones practicadas', `${MESES_C[PER.mes - 1]} de ${PER.anio}`) + (r.grupos.length ? TIPOS_RETENCION.map(bloque).join('') + `
+      <div class="inf"><div class="inf-l tot big"><span>Total retenciones del mes</span><span class="mono">${money(r.total)}</span></div></div>
+      <p class="rep-small">La retención de ICA se declara en el municipio, no en el formulario 350. Las filas sin tarifa vienen de la nómina o de comprobantes contables registrados en las cuentas ${cts.retefuente}, ${cts.reteiva} y ${cts.reteica}.</p>`
+      : '<p class="muted">No hubo retenciones practicadas en este mes.</p>') + '<p class="rep-small">Informe de apoyo para diligenciar el formulario 350. Verifica las cifras antes de presentarlo.</p>';
+  };
+  const pintar = () => { $('out').innerHTML = html(); };
+  $('imp').onclick = () => botonImprimir('Retenciones practicadas', html);
+  pintar();
+}
+
+let certAnio = null;
+function vCertificados(m, tid) {
+  certAnio = certAnio || (+hoy().slice(0, 4) - (+hoy().slice(5, 7) <= 3 ? 1 : 0));
+  const anios = [0, 1, 2].map(i => +hoy().slice(0, 4) - i);
+  const desde = `${certAnio}-01-01`, hasta = `${certAnio}-12-31`;
+  const ids = tercerosConRetencion(S.d.compras, desde, hasta), lista = ids.map(terc).filter(Boolean).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Certificados de retención</h2><p class="sub">El certificado de las retenciones que la empresa le practicó a cada proveedor en el año. Se imprime o se guarda en PDF para enviarlo.</p></div></header>
+    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+    <section class="panel stack noprint">${lista.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th><th>Documento</th><th class="r">Retefuente</th><th class="r">ReteIVA</th><th class="r">ReteICA</th><th></th></tr></thead><tbody>
+      ${lista.map(t => { const c = certificado(S.d.compras, t.id, desde, hasta), tot = k => r2(c.porTipo[k].reduce((s, g) => s + g.valor, 0));
+        return `<tr><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
+          <td class="r nowrap"><button class="sm" data-ver="${t.id}">Ver</button> <button class="sm" data-pdf="${t.id}">Imprimir / PDF</button></td></tr>`; }).join('')}</tbody></table></div>`
+      : '<p class="muted">No hay retenciones practicadas en ese año.</p>'}</section>
+    <section class="panel" id="cert" ${tid ? '' : 'hidden'}></section>`;
+  $('cA').onchange = () => { certAnio = +$('cA').value; vCertificados(m, ''); };
+  const hoja = id => {
+    const t = terc(id), c = certificado(S.d.compras, id, desde, hasta), e = emp();
+    const tabla = ([k, nombre]) => { const gs = c.porTipo[k]; if (!gs.length) return '';
+      return `<h4>${nombre}</h4><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Tarifa</th><th class="r">Base sometida</th><th class="r">Valor retenido</th></tr></thead><tbody>
+        ${gs.map(g => `<tr><td>${esc(g.concepto)}</td><td class="r mono">${k === 'reteica' ? `${String(g.tarifa).replace('.', ',')} ‰` : pct(g.tarifa)}</td><td class="r mono">${money(g.base)}</td><td class="r mono">${money(g.valor)}</td></tr>`).join('')}</tbody></table>`; };
+    const cuales = TIPOS_RETENCION.filter(([k]) => c.porTipo[k].length).map(([, n]) => n.toLowerCase());
+    return `<header class="rep-head inf-head"><div><h2>${esc(e.nombre)}</h2><p>NIT ${fmtNit(e.nit)}-${e.dv}</p>${e.direccion ? `<p>${esc(e.direccion)}${e.ciudad ? ' · ' + esc(e.ciudad) : ''}</p>` : ''}</div><div class="rep-num"><span>CERTIFICADO DE RETENCIONES</span><b class="inf-per">Año gravable ${certAnio}</b></div></header>
+      <p>${esc(e.nombre)}, NIT ${fmtNit(e.nit)}-${e.dv}, certifica que durante el año gravable ${certAnio} practicó ${cuales.join(', ').replace(/, ([^,]*)$/, ' y $1')} a:</p>
+      <dl class="kv"><dt>Nombre o razón social</dt><dd><b>${esc(t?.nombre || '')}</b></dd><dt>Documento</dt><dd class="mono">${esc(docId(t))}</dd><dt>Período</dt><dd>Del ${fFecha(desde)} al ${fFecha(hasta)}</dd></dl>
+      ${TIPOS_RETENCION.map(tabla).join('')}
+      <div class="inf"><div class="inf-l tot big"><span>Total retenido</span><span class="mono">${money(c.total)}</span></div></div>
+      <p class="rep-small">Los valores retenidos fueron consignados oportunamente a favor de la DIAN${c.porTipo.reteica.length ? ' y del municipio correspondiente' : ''}. Expedido el ${fFecha(hoy())}. Este certificado no requiere firma autógrafa (artículo 10 del Decreto 836 de 1991).</p>`;
+  };
+  const ver = id => { $('cert').hidden = false; $('cert').innerHTML = hoja(id); $('cert').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  m.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => ver(b.dataset.ver));
+  m.querySelectorAll('[data-pdf]').forEach(b => b.onclick = () => botonImprimir(`Certificado de retenciones ${certAnio} - ${terc(b.dataset.pdf)?.nombre || ''}`, () => hoja(b.dataset.pdf)));
+  if (tid && ids.includes(tid)) ver(tid);
 }
 
 /* ---------- Estado de resultados comparativo (columnas por mes) ---------- */

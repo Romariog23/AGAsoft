@@ -5,7 +5,7 @@ export const MODULOS = {
   nomina: { nombre: 'Nómina', rutas: ['nomina', 'nominanueva', 'nominaeditar', 'nominadoc', 'nominacfg', 'nominapasivos', 'nominapagos', 'nominapago', 'empleados'] },
   exogena: { nombre: 'Medios magnéticos', rutas: ['exogena', 'exogenacfg'] },
   importar: { nombre: 'Importar plantillas', rutas: ['importar'] },
-  informes: { nombre: 'Informes de ventas y cartera', rutas: ['auxiliar'] },
+  informes: { nombre: 'Informes de ventas, cartera y retenciones', rutas: ['auxiliar', 'retpracticadas', 'certificados'] },
   avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp'] },
   consulta: { nombre: 'Usuarios de solo consulta', rutas: [] },
 };
@@ -43,7 +43,7 @@ export function incluye(p) {
   else if (p.max_documentos_mes != null) l.push(`${p.max_documentos_mes.toLocaleString('es-CO')} documentos al mes`);
   const u = p.max_usuarios == null ? null : p.max_usuarios + 1;
   l.push(u == null ? 'Usuarios ilimitados' : `${u} usuario${u === 1 ? '' : 's'}`);
-  l.push(m('avanzados') ? 'Informes avanzados y exportar a Excel' : m('informes') ? 'Informes de ventas y cartera' : 'Informes básicos');
+  l.push(m('avanzados') ? 'Informes avanzados y exportar a Excel' : m('informes') ? 'Informes de cartera, retenciones (350) y certificados' : 'Informes básicos e IVA del período (300)');
   if (m('nomina') && p.max_empleados !== 0) l.push(p.max_empleados == null ? 'Nómina sin límite de empleados' : `Nómina hasta ${p.max_empleados} empleados`);
   if (m('exogena')) l.push('Medios magnéticos');
   if (m('importar')) l.push('Importar plantillas de Excel');
