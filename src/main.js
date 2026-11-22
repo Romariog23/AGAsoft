@@ -19,7 +19,7 @@ import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnua
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
-import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, movimientosInv, costear, existencias, asientoInventario } from './inventario.js';
+import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
 
@@ -219,7 +219,7 @@ const MENU = [
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['existencias', 'Existencias'], ['ajustesinv', 'Ajustes de inventario'], ['inventariocfg', 'Bodegas y método']] },
+  { t: 'Inventario', i: 'inventario', l: [['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
   { t: 'Datos', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores'], ['productos', 'Productos y servicios']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
   { k: 'config', t: 'Configuración', i: 'config' },
@@ -277,7 +277,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -303,6 +303,12 @@ function route() {
     if (v === 'ajusteinvnuevo') return vAjusteInvEditor(m, {});
     if (v === 'ajusteinveditar') return vAjusteInvEditor(m, { id: arg });
     if (v === 'ajusteinv') return vAjusteInv(m, arg);
+    if (v === 'traslados') return vTraslados(m);
+    if (v === 'trasladonuevo') return vTrasladoEditor(m, {});
+    if (v === 'trasladoeditar') return vTrasladoEditor(m, { id: arg });
+    if (v === 'traslado') return vTraslado(m, arg);
+    if (v === 'kardex') return vKardex(m, q);
+    if (v === 'costoproducto') return vCostoProducto(m);
     if (v === 'retenciones') return vRetenciones(m);
     if (v === 'tarifasiva') return vTarifasIva(m);
     if (v === 'cierre') return vCierre(m);
@@ -1905,13 +1911,14 @@ function vInventarioCfg(m) {
   </section>
   <section class="panel stack"><header class="vhead"><h3>Bodegas</h3><button class="primary" id="nuevaB">Nueva bodega</button></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Nombre</th><th>Cuenta de inventario</th><th></th></tr></thead><tbody>
-    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r">${b.id ? `<button class="sm ghost" data-eb="${b.id}">Editar</button>` : ''}</td></tr>`).join('')}
+    ${(reales.length ? [...reales].sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))) : bodegas()).map(b => `<tr class="${b.activa === false ? 'muted' : ''}"><td class="mono">${esc(b.codigo)}</td><td>${esc(b.nombre)}${b.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${b.id ? '' : ' <span class="tag">Se crea al primer uso</span>'}</td><td class="mono">${esc(b.cuenta)} <span class="muted">${esc(nomCta(b.cuenta))}</span></td><td class="r"><button class="sm ghost" data-eb="${b.id || '__principal'}">Editar</button></td></tr>`).join('')}
     </tbody></table></div>
     <p class="hint">Cada bodega lleva una cuenta auxiliar de la clase 14. Las bodegas solo trasladan cantidades: un traslado entre bodegas con cuentas distintas se contabiliza entre esas cuentas 14; si comparten la cuenta, no hay asiento.</p>
   </section>`;
   const guardarCfg = async () => { try { await guardarContab('inventario', { ...(e.contabilidad?.inventario || {}), metodo: $('f_inv_metodo').value, negativo: $('f_inv_neg').value }); toast('Inventario guardado.'); } catch (er) { fail(er); } };
   $('f_inv_metodo').onchange = guardarCfg; $('f_inv_neg').onchange = guardarCfg;
-  const formB = (b = {}) => dialogo(`<h2>${b.id ? 'Editar bodega' : 'Nueva bodega'}</h2>
+  // La bodega principal que aún no existe (se crea al primer uso) también se edita: al guardar se crea con la cuenta escogida.
+  const formB = (b = {}, principal = false) => dialogo(`<h2>${b.id || principal ? 'Editar bodega' : 'Nueva bodega'}</h2>
     <div class="grid2">${campo('codigo', 'Código', b.codigo || String(reales.length + (reales.length ? 1 : 2)).padStart(2, '0'), 'required maxlength="10" class="mono"')}${campo('nombre', 'Nombre', b.nombre, 'required maxlength="80"')}</div>
     <div><label for="f_cuenta">Cuenta de inventario (clase 14)</label><input id="f_cuenta" name="cuenta" list="ctas14" class="mono" value="${esc(b.cuenta || param().inventario)}" autocomplete="off" required><datalist id="ctas14">${optsLista(cuentasAux().filter(c => /^14/.test(c.codigo)))}</datalist>
       <p class="hint">Si necesitas una cuenta nueva (por ejemplo 14350502 Mercancías bodega norte), créala primero en el plan de cuentas.</p></div>
@@ -1923,7 +1930,7 @@ function vInventarioCfg(m) {
     await cargarEmpresa(); toast('Bodega guardada.'); route();
   });
   $('nuevaB').onclick = async () => { try { if (!reales.length) await asegurarBodega(); formB(); } catch (er) { fail(er); } };
-  m.querySelectorAll('[data-eb]').forEach(x => x.onclick = () => formB(reales.find(b => b.id === x.dataset.eb)));
+  m.querySelectorAll('[data-eb]').forEach(x => x.onclick = () => x.dataset.eb === '__principal' ? formB({ ...bodegas()[0], id: undefined }, true) : formB(reales.find(b => b.id === x.dataset.eb)));
 }
 /* ---------- Inventario: existencias y ajustes ---------- */
 const invDocs = () => S.d?.inventario_docs || [];
@@ -1953,7 +1960,7 @@ function vExistencias(m) {
   <section class="kpis"><div class="kpi"><span>Valor del inventario</span><b class="mono">${money(total)}</b></div><div class="kpi"><span>Saldo contable cuentas ${ctas.join(', ')}</span><b class="mono">${money(saldo14)}</b></div>
     <div class="kpi ${Math.abs(dif) > 1 ? 'warn' : ''}"><span>Diferencia</span><b class="mono">${money(dif)}</b><small class="muted">${Math.abs(dif) > 1 ? 'Hay movimientos manuales en la 14 o inventario sin cantidades' : 'Cuadra con la contabilidad'}</small></div></section>
   <section class="panel">${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Producto</th><th>Unidad</th>${varias ? bs.map(b => `<th class="r">${esc(b.nombre)}</th>`).join('') : ''}<th class="r">Cantidad</th><th class="r">Costo promedio</th><th class="r">Valor</th></tr></thead><tbody>
-    ${filas.map(({ p, e }) => `<tr><td class="mono">${esc(p.codigo)}</td><td>${esc(p.nombre)}</td><td>${esc(p.unidad)}</td>${varias ? bs.map(b => `<td class="r mono">${cantTxt(e.bodegas[b.id] || 0, fmtEmp())}</td>`).join('') : ''}<td class="r mono ${e.cantidad < 0 ? 'neg' : ''}">${cantTxt(e.cantidad, fmtEmp())}${e.cantidad < 0 ? ' <span class="tag bad">Negativo</span>' : ''}</td><td class="r mono">${money(e.promedio)}</td><td class="r mono">${money(e.valor)}</td></tr>`).join('')}
+    ${filas.map(({ p, e }) => `<tr class="click" data-go="#/kardex?producto=${p.id}" title="Ver kardex"><td class="mono">${esc(p.codigo)}</td><td>${esc(p.nombre)}</td><td>${esc(p.unidad)}</td>${varias ? bs.map(b => `<td class="r mono">${cantTxt(e.bodegas[b.id] || 0, fmtEmp())}</td>`).join('') : ''}<td class="r mono ${e.cantidad < 0 ? 'neg' : ''}">${cantTxt(e.cantidad, fmtEmp())}${e.cantidad < 0 ? ' <span class="tag bad">Negativo</span>' : ''}</td><td class="r mono">${money(e.promedio)}</td><td class="r mono">${money(e.valor)}</td></tr>`).join('')}
     </tbody><tfoot><tr><td colspan="${3 + (varias ? bs.length : 0) + 2}"><b>Total</b></td><td class="r mono"><b>${money(total)}</b></td></tr></tfoot></table></div>`
     : '<p class="muted">Todavía no hay movimientos de inventario. Registra el inventario inicial con un <a href="#/ajusteinvnuevo">ajuste</a> o compra productos en una factura de proveedor.</p>'}</section>
   <p class="hint">Entradas: compras por producto, ajustes y notas crédito de devolución. Salidas: facturas de venta y ajustes. Las facturas de venta toman la bodega del producto.</p>`;
@@ -2085,6 +2092,176 @@ function vAjusteInv(m, id) {
   if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomInv(a))}</h2><p>Deja de sumar en el inventario y en la contabilidad. El número no se vuelve a usar.</p><div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
     const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
     await store.save('inventario_docs', { id: a.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() }); await cargarEmpresa(); toast('Ajuste anulado.'); route();
+  });
+}
+/* ---------- Inventario: traslados entre bodegas ---------- */
+function vTraslados(m) {
+  const l = [...invDocs()].filter(x => x.tipo === 'TR').sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
+  const cant = a => (a.lineas || []).reduce((s2, x) => s2 + num(x.cantidad), 0);
+  m.innerHTML = `<header class="vhead"><div><h2>Traslados entre bodegas</h2><p class="sub">Mueven cantidades de una bodega a otra al costo del momento. Si las dos bodegas usan la misma cuenta 14 no hay asiento; si son distintas, se contabiliza entre esas cuentas.</p></div><a class="btn primary" href="#/trasladonuevo">Nuevo traslado</a></header>
+  <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Fecha</th><th>De</th><th>A</th><th class="r">Productos</th><th class="r">Unidades</th></tr></thead><tbody>
+    ${l.map(a => { const b0 = a.lineas?.[0] || {}; return `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/traslado/${a.id}"><td class="mono"><a href="#/traslado/${a.id}">TR ${a.numero}</a>${a.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}</td><td>${fFecha(a.fecha)}</td><td>${esc(bodegaDe(b0.bodega_id)?.nombre || '')}</td><td>${esc(bodegaDe(b0.bodega_destino)?.nombre || '')}</td><td class="r">${(a.lineas || []).length}</td><td class="r mono">${cantTxt(cant(a), fmtEmp())}</td></tr>`; }).join('')}
+    </tbody></table></div>` : `<p class="muted">Todavía no hay traslados.${bodegas().length < 2 ? ' Primero crea otra bodega en <a href="#/inventariocfg">Bodegas y método</a>.' : ''}</p>`}</section>`;
+  m.querySelectorAll('[data-go]').forEach(r => r.onclick = ev => { if (!ev.target.closest('a')) location.hash = r.dataset.go; });
+}
+function vTrasladoEditor(m, { id }) {
+  const prods = S.d.productos.filter(p => p.activo !== false && esInventariable(p)), bs = bodegas();
+  if (bs.length < 2) { m.innerHTML = `<header class="vhead"><h2>Nuevo traslado</h2></header><section class="panel"><p class="muted">Para trasladar necesitas al menos dos bodegas. Créalas en <a href="#/inventariocfg">Bodegas y método</a>.</p></section>`; return; }
+  let t;
+  if (id) { const x = invDocById(id); if (!x || x.estado === 'anulado') { location.replace('#/traslado/' + id); return; } t = JSON.parse(JSON.stringify(x)); }
+  else t = { empresa_id: S.eid, tipo: 'TR', fecha: hoy(), tercero_id: '', observaciones: '', lineas: [{ producto_id: '', cantidad: '' }] };
+  let origen = t.lineas[0]?.bodega_id || bs[0].id, destino = t.lineas[0]?.bodega_destino || bs[1].id;
+  const optB = sel => bs.map(b => `<option value="${b.id}" ${b.id === sel ? 'selected' : ''}>${esc(b.codigo)} · ${esc(b.nombre)} (${esc(b.cuenta)})</option>`).join('');
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/traslados">← Traslados</a><h2>${id ? `Editar TR ${t.numero}` : 'Nuevo traslado entre bodegas'}</h2><p class="sub">Las cantidades salen de una bodega y entran a la otra al costo del momento. La existencia total y el costo no cambian.</p></div></header>
+  <form id="tr" class="stack" novalidate>
+    <section class="panel grid-doc">
+      <div><label for="trF">Fecha</label><input id="trF" type="date" value="${t.fecha}" required></div>
+      <div><label>Número</label><p class="mono">${id ? t.numero : `${siguienteInv('TR')} (al guardar)`}</p></div>
+      <div><label for="trO">Sale de</label><select id="trO">${optB(origen)}</select></div>
+      <div><label for="trD">Entra a</label><select id="trD">${optB(destino)}</select></div>
+      <div class="span2"><label for="trT">Tercero</label><select id="trT"><option value="">Escoge el tercero (por ejemplo, la misma empresa o el responsable de la bodega)…</option>${[...S.d.terceros].sort((x, y) => x.nombre.localeCompare(y.nombre)).map(x => `<option value="${x.id}" ${x.id === t.tercero_id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
+    </section>
+    <section class="panel stack"><div class="vhead"><h3>Productos</h3><button type="button" id="trAdd">+ Agregar producto</button></div>
+      <datalist id="prodsTR">${prods.map(p => `<option value="${esc(p.codigo)} · ${esc(p.nombre)}">`).join('')}</datalist>
+      <div class="tbl-wrap"><table class="tbl items"><thead><tr><th>Producto</th><th class="r">Disponible en origen</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor</th><th></th></tr></thead><tbody id="trL"></tbody></table></div></section>
+    <section class="panel grid-doc"><div class="span2"><label for="trO2">Observaciones</label><textarea id="trO2" rows="2" maxlength="1000">${esc(t.observaciones)}</textarea></div></section>
+    <section class="panel stack"><h3>Contabilización</h3><div id="trAs"></div></section>
+    <div class="err" id="trErr" hidden></div>
+    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/traslado/' + id : '#/traslados'}">Cancelar</a><button type="submit" class="primary" id="trSave">Guardar</button></div>
+  </form>`;
+  const prodTxt = pid => { const p = S.d.productos.find(x => x.id === pid); return p ? `${p.codigo} · ${p.nombre}` : ''; };
+  const buscar = txt => { txt = String(txt || '').trim(); const cod = txt.split(' · ')[0].trim().toLowerCase(); return txt ? prods.find(x => x.codigo.toLowerCase() === cod) || prods.find(x => x.nombre.toLowerCase().includes(txt.toLowerCase())) : null; };
+  const borr = () => ({ ...t, id: t.id || 'nuevo', numero: t.numero || siguienteInv('TR'), estado: 'contabilizado', lineas: t.lineas.map(l => ({ ...l, bodega_id: origen, bodega_destino: destino })) });
+  const resumen = () => {
+    t.fecha = $('trF').value; t.tercero_id = $('trT').value; origen = $('trO').value; destino = $('trD').value; t.observaciones = $('trO2').value.trim();
+    const b = borr(), todos = invCosteado(b), ms = todos.filter(x => x.doc_id === b.id);
+    // Disponible en la bodega de origen antes de este traslado.
+    const ex = existencias(invCosteado({ ...b, estado: 'anulado' }), t.fecha, bs[0].id);
+    t.lineas.forEach((l, i) => {
+      const mv = ms.find(x => x.linea === i && x.cantidad > 0), e = ex.find(x => x.producto_id === l.producto_id);
+      const d = m.querySelector(`[data-td="${i}"]`), c = m.querySelector(`[data-tc="${i}"]`), v = m.querySelector(`[data-tv="${i}"]`);
+      if (d) d.textContent = l.producto_id ? cantTxt(e?.bodegas?.[origen] || 0, fmtEmp()) : '';
+      if (c) c.textContent = mv ? money(mv.costo) : ''; if (v) v.textContent = mv ? money(mv.total) : '';
+    });
+    const a = asientoInventario(ms, { productos: S.d.productos, bodegas: S.d.bodegas, param: param() });
+    $('trAs').innerHTML = origen === destino ? '<p class="muted">Escoge dos bodegas distintas.</p>' : a.length ? tablaAsiento(a) : `<p class="muted">Las dos bodegas usan la cuenta ${esc(bodegaDe(origen)?.cuenta || '')}: el traslado solo mueve cantidades, sin asiento.</p>`;
+  };
+  const pintar = () => {
+    $('trL').innerHTML = t.lineas.map((l, i) => `<tr data-i="${i}"><td data-l="Producto"><input data-k="producto" list="prodsTR" class="w-cod" autocomplete="off" value="${esc(prodTxt(l.producto_id))}" placeholder="Código o nombre" aria-label="Producto"></td>
+      <td class="r mono" data-l="Disponible" data-td="${i}"></td><td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${num(l.cantidad) || ''}" aria-label="Cantidad"></td>
+      <td class="r mono" data-l="Costo" data-tc="${i}"></td><td class="r mono" data-l="Valor" data-tv="${i}"></td><td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin productos.</td></tr>';
+    resumen();
+  };
+  $('trL').addEventListener('input', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.dataset.k !== 'cantidad') return; t.lineas[Number(tr.dataset.i)].cantidad = el.value; resumen(); });
+  $('trL').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.dataset.k !== 'producto') return; t.lineas[Number(tr.dataset.i)].producto_id = buscar(el.value)?.id || ''; pintar(); });
+  $('trL').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (b) { t.lineas.splice(Number(b.dataset.del), 1); pintar(); } });
+  $('trAdd').onclick = () => { t.lineas.push({ producto_id: '', cantidad: '' }); pintar(); $('trL').querySelector(`tr[data-i="${t.lineas.length - 1}"] [data-k=producto]`)?.focus(); };
+  $('tr').addEventListener('change', ev => { if (!ev.target.closest('#trL')) resumen(); });
+  $('tr').onsubmit = async ev => {
+    ev.preventDefault(); resumen();
+    const ls = t.lineas.filter(l => l.producto_id || num(l.cantidad)).map(l => ({ producto_id: l.producto_id, bodega_id: origen, bodega_destino: destino, cantidad: Math.abs(num(l.cantidad)) }));
+    const errs = [];
+    if (!t.fecha) errs.push('Escribe la fecha.');
+    if (origen === destino) errs.push('La bodega de origen y la de destino deben ser distintas.');
+    if (!t.tercero_id) errs.push('Escoge el tercero: toda línea contable lleva tercero.');
+    if (!ls.length) errs.push('Agrega al menos un producto.');
+    ls.forEach((l, i) => { if (!l.producto_id) errs.push(`Línea ${i + 1}: escoge el producto.`); if (!(l.cantidad > 0)) errs.push(`Línea ${i + 1}: la cantidad debe ser mayor que cero.`); });
+    if (!errs.length && cfgInventario(emp()?.contabilidad).negativo === 'bloquear') {
+      const ex = existencias(invCosteado({ ...borr(), estado: 'anulado' }), t.fecha, bs[0].id), pedido = {};
+      for (const l of ls) pedido[l.producto_id] = (pedido[l.producto_id] || 0) + l.cantidad;
+      for (const [pid, q] of Object.entries(pedido)) { const d = ex.find(x => x.producto_id === pid)?.bodegas?.[origen] || 0; if (q > d + 1e-9) errs.push(`${prodTxt(pid)}: solo hay ${cantTxt(d, fmtEmp())} en ${bodegaDe(origen)?.nombre}.`); }
+    }
+    if (errs.length) { $('trErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>'); $('trErr').hidden = false; return; }
+    $('trErr').hidden = true; $('trSave').disabled = true;
+    try {
+      // La bodega principal se crea si todavía es la virtual (sin id).
+      if (!origen || !destino) { const b = await asegurarBodega(); if (b) { if (!origen) origen = b.id; if (!destino) destino = b.id; ls.forEach(l => { l.bodega_id = origen; l.bodega_destino = destino; }); } }
+      const row = { empresa_id: S.eid, tipo: 'TR', fecha: t.fecha, tercero_id: t.tercero_id, concepto: 'traslado', cuenta_contra: '', lineas: ls, observaciones: t.observaciones };
+      let g;
+      try { g = await store.save('inventario_docs', id ? { ...row, id } : { ...row, numero: siguienteInv('TR'), estado: 'contabilizado' }); } catch (e) { throw faltaSqlInv(e); }
+      await cargarEmpresa(); toast('Traslado guardado.'); location.hash = '#/traslado/' + g.id;
+    } catch (e) { $('trErr').textContent = e.message; $('trErr').hidden = false; }
+    finally { $('trSave').disabled = false; }
+  };
+  pintar();
+}
+function hojaTraslado(t, ms) {
+  const l0 = t.lineas?.[0] || {};
+  return `${cabInforme(nomInv(t), fFecha(t.fecha))}
+    <p><b>Sale de:</b> ${esc(bodegaDe(l0.bodega_id)?.nombre || '')} · <b>Entra a:</b> ${esc(bodegaDe(l0.bodega_destino)?.nombre || '')} · <b>Tercero:</b> ${esc(terc(t.tercero_id)?.nombre || '')}</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Producto</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor</th></tr></thead><tbody>
+    ${(t.lineas || []).map((l, i) => { const p = S.d.productos.find(x => x.id === l.producto_id), mv = ms.find(x => x.linea === i && x.cantidad > 0); return `<tr><td><span class="mono">${esc(p?.codigo || '')}</span> ${esc(p?.nombre || '')}</td><td class="r mono">${cantTxt(l.cantidad, fmtEmp())} ${esc(p?.unidad || '')}</td><td class="r mono">${mv ? money(mv.costo) : ''}</td><td class="r mono">${mv ? money(mv.total) : ''}</td></tr>`; }).join('')}
+    </tbody></table></div>${t.observaciones ? `<p><b>Observaciones:</b> ${esc(t.observaciones)}</p>` : ''}`;
+}
+function vTraslado(m, id) {
+  const t = invDocById(id); if (!t) { m.innerHTML = '<p>No se encontró el traslado.</p>'; return; }
+  const anulado = t.estado === 'anulado', ms = invCosteado({ ...t, estado: 'contabilizado' }).filter(x => x.doc_id === id);
+  const a = asientoInventario(ms, { productos: S.d.productos, bodegas: S.d.bodegas, param: param() });
+  const asi = a.length ? tablaAsiento(a) : '<p class="muted">Las dos bodegas usan la misma cuenta 14: solo se movieron cantidades, sin asiento.</p>';
+  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/traslados">← Traslados</a><h2>${esc(nomInv(t))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
+    <div class="row"><button id="eliminar">Eliminar</button>${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/trasladoeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <section class="panel stack">${hojaTraslado(t, ms)}</section>
+    <section class="panel stack noprint"><h3>Contabilización</h3>${asi}${anulado ? `<p class="hint">Anulado${t.anulado_motivo ? `: ${esc(t.anulado_motivo)}` : ''}. No mueve cantidades.</p>` : ''}</section>`;
+  $('imprimir').onclick = () => { $('print').innerHTML = hojaTraslado(t, ms) + `<h3>Contabilización</h3>${asi}<div class="firmas"><span>Entregó</span><span>Recibió</span></div>`; window.print(); };
+  $('eliminar').onclick = async () => {
+    if (!await confirmar(`Eliminar ${esc(nomInv(t))}`, 'Se borra el traslado y las cantidades vuelven a la bodega de origen. Esto no se puede deshacer.', 'Eliminar')) return;
+    try { await store.remove('inventario_docs', t.id); await cargarEmpresa(); toast('Traslado eliminado.'); location.hash = '#/traslados'; } catch (e) { fail(faltaSqlInv(e)); }
+  };
+  if ($('anular')) $('anular').onclick = () => dialogo(`<h2>Anular ${esc(nomInv(t))}</h2><p>Las cantidades vuelven a la bodega de origen. El número no se vuelve a usar.</p><div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
+    const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
+    await store.save('inventario_docs', { id: t.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() }); await cargarEmpresa(); toast('Traslado anulado.'); route();
+  });
+}
+/* ---------- Inventario: kardex y costo de ventas por producto ---------- */
+const ORIGEN_INV = { compra: 'Compra', ajuste: 'Ajuste', venta: 'Venta', devolucion: 'Devolución', traslado: 'Traslado' };
+const kxOpc = { producto: '', bodega: '' };
+function linkInv(x) {
+  const href = x.origen === 'compra' ? '#/compra/' + x.doc_id : x.origen === 'ajuste' ? '#/ajusteinv/' + x.doc_id : x.origen === 'traslado' ? '#/traslado/' + x.doc_id : '#/doc/' + x.doc_id;
+  return `<a href="${href}" class="mono">${esc(x.ref)}</a>`;
+}
+function vKardex(m, q) {
+  const prods = [...S.d.productos].filter(esInventariable).sort((a, b) => a.codigo.localeCompare(b.codigo)), bs = bodegas();
+  if (q?.get('producto')) kxOpc.producto = q.get('producto');
+  if (!prods.some(p => p.id === kxOpc.producto)) kxOpc.producto = prods[0]?.id || '';
+  m.innerHTML = `<header class="vhead noprint"><div><h2>Kardex</h2><p class="sub">Entradas, salidas y saldo de un producto, con su costo (${esc(METODOS.find(x => x[0] === cfgInventario(emp()?.contabilidad).metodo)[1].toLowerCase())}).</p></div><div class="row"><button id="csv">Descargar CSV</button><button id="imp">Imprimir</button></div></header>
+    <div class="row filters noprint"><div class="grow"><label for="kxP">Producto</label><select id="kxP">${prods.map(p => `<option value="${p.id}" ${p.id === kxOpc.producto ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select></div>
+      ${bs.length > 1 ? `<div><label for="kxB">Bodega</label><select id="kxB"><option value="">Todas</option>${bs.map(b => `<option value="${b.id}" ${b.id === kxOpc.bodega ? 'selected' : ''}>${esc(b.nombre)}</option>`).join('')}</select></div>` : ''}</div>
+    ${filtroFechas('fk', true, () => pintar())}<section class="panel" id="out"></section>`;
+  let k;
+  const html = () => {
+    const p = prods.find(x => x.id === kxOpc.producto);
+    if (!p) return '<p class="muted">No hay productos inventariables.</p>';
+    const conB = kxOpc.bodega !== '' && bs.length > 1;
+    k = kardex(invCosteado(), p.id, { desde: F.desde, hasta: F.hasta, bodega: conB ? kxOpc.bodega : null, bodegaDef: bs[0].id });
+    const cq = v => cantTxt(v, fmtEmp());
+    return cabInforme('Kardex', `${esc(p.codigo)} · ${esc(p.nombre)}${conB ? `<br>${esc(bodegaDe(kxOpc.bodega)?.nombre || '')}` : ''}<br><small>${fFecha(F.desde)} a ${fFecha(F.hasta)}</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Movimiento</th><th>Tercero</th>${bs.length > 1 && !conB ? '<th>Bodega</th>' : ''}<th class="r">Entrada</th><th class="r">Salida</th><th class="r">Costo unitario</th><th class="r">Valor</th><th class="r">Saldo</th>${conB ? '' : '<th class="r">Valor saldo</th>'}</tr></thead><tbody>
+      <tr class="muted"><td colspan="${bs.length > 1 && !conB ? 9 : 8}">Saldo anterior</td><td class="r mono">${cq(k.inicial.cantidad)}</td>${conB ? '' : `<td class="r mono">${money(k.inicial.valor)}</td>`}</tr>
+      ${k.filas.map(x => `<tr><td class="nowrap">${fFecha(x.fecha)}</td><td>${linkInv(x)}</td><td>${ORIGEN_INV[x.origen] || x.origen}</td><td>${esc(terc(x.tercero_id)?.nombre || '')}</td>${bs.length > 1 && !conB ? `<td>${esc(bodegaDe(x.bodega_id || bs[0].id)?.nombre || '')}</td>` : ''}<td class="r mono">${x.entrada ? cq(x.entrada) : ''}</td><td class="r mono">${x.salida ? cq(x.salida) : ''}</td><td class="r mono">${money(x.costo)}</td><td class="r mono">${money(x.total)}</td><td class="r mono ${(conB ? x.saldoBodega : x.saldo) < 0 ? 'neg' : ''}">${cq(conB ? x.saldoBodega : x.saldo)}</td>${conB ? '' : `<td class="r mono">${money(x.valor)}</td>`}</tr>`).join('') || `<tr><td colspan="11" class="muted">Sin movimientos en el período.</td></tr>`}
+      <tr class="strong"><td colspan="${bs.length > 1 && !conB ? 9 : 8}">Saldo final</td><td class="r mono">${cq(k.final.cantidad)}</td>${conB ? '' : `<td class="r mono">${money(k.final.valor)}</td>`}</tr></tbody></table></div>
+      ${conB ? '<p class="hint">Por bodega se muestra el saldo en cantidades: el costo es uno por producto para todas las bodegas.</p>' : ''}`;
+  };
+  const pintar = () => { $('out').innerHTML = html(); };
+  $('kxP').onchange = () => { kxOpc.producto = $('kxP').value; pintar(); };
+  if ($('kxB')) $('kxB').onchange = () => { kxOpc.bodega = $('kxB').value; pintar(); };
+  $('imp').onclick = () => botonImprimir('Kardex', html);
+  $('csv').onclick = () => {
+    if (!k) return; const p = prods.find(x => x.id === kxOpc.producto), n = v => String(r2(v)).replace('.', ',');
+    const filas = [['Fecha', 'Documento', 'Movimiento', 'Tercero', 'Bodega', 'Entrada', 'Salida', 'Costo unitario', 'Valor', 'Saldo', 'Valor saldo'],
+      ...k.filas.map(x => [x.fecha, x.ref, ORIGEN_INV[x.origen] || x.origen, terc(x.tercero_id)?.nombre || '', bodegaDe(x.bodega_id || bs[0].id)?.nombre || '', n(x.entrada), n(x.salida), n(x.costo), n(x.total), n(kxOpc.bodega ? x.saldoBodega : x.saldo), n(x.valor)])];
+    descargar(`kardex-${p?.codigo || ''}-${emp().nit}-${F.desde}-${F.hasta}.csv`, csvTxt(filas));
+  };
+  pintar();
+}
+function vCostoProducto(m) {
+  informeTabla(m, 'Costo de ventas por producto', 'Lo vendido de cada producto (menos devoluciones), su costo y la utilidad bruta.', 'costo-ventas-producto', (desde, hasta) => {
+    const ls = costoPorProducto(invCosteado(), S.d.items, desde, hasta).map(x => ({ ...x, p: S.d.productos.find(p => p.id === x.producto_id) })).sort((a, b) => b.costo - a.costo);
+    const t = ls.reduce((s2, x) => ({ venta: s2.venta + x.venta, costo: s2.costo + x.costo }), { venta: 0, costo: 0 }), ut = r2(t.venta - t.costo);
+    const pc = v => `${String(r2(v)).replace('.', ',')} %`;
+    return { head: [['Código'], ['Producto'], ['Cantidad', 'r'], ['Ventas', 'r'], ['Costo', 'r'], ['Costo unitario', 'r'], ['Utilidad bruta', 'r'], ['Margen', 'r']],
+      filas: ls.map(x => ({ go: `#/kardex?producto=${x.producto_id}`, c: [`<span class="mono">${esc(x.p?.codigo || '')}</span>`, esc(x.p?.nombre || ''), `<span class="mono">${cantTxt(x.cantidad, fmtEmp())}</span>`, mon(x.venta), mon(x.costo), mon(x.cantidad ? x.costo / x.cantidad : 0), mon(x.utilidad), `<span class="mono">${pc(x.margen)}</span>`] })),
+      csv: ls.map(x => [x.p?.codigo || '', x.p?.nombre || '', nCsv(x.cantidad), nCsv(x.venta), nCsv(x.costo), nCsv(x.cantidad ? x.costo / x.cantidad : 0), nCsv(x.utilidad), nCsv(x.margen)]),
+      pie: ['<b>Total</b>', '', '', mon(t.venta), mon(t.costo), '', mon(ut), `<span class="mono">${t.venta ? pc(ut / t.venta * 100) : ''}</span>`],
+      nota: 'Ventas antes de IVA, con descuentos. El costo es el de la salida de inventario de cada factura (y la reversión en las notas crédito de devolución).' };
   });
 }
 /* ---------- Centros de costo ---------- */
