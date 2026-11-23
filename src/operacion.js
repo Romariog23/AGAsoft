@@ -88,7 +88,9 @@ export function cfgTipo(t) {
     editar_pagadas: !!c.editar_pagadas, continuidad: c.continuidad || null, pendiente: c.pendiente || null, tarifa_por: c.tarifa_por || ['tercero'],
     constantes: c.constantes || [], reglas: c.reglas || [], salidas: { pago: 'ninguno', cobro: 'ninguno', ...(c.salidas || {}) },
     // Proyecto (cotización) al registrar: obligatorio si el tipo factura, salvo que la empresa diga otra cosa.
-    proyecto: c.proyecto || ((c.salidas || {}).cobro === 'fv' ? 'obligatorio' : 'opcional') };
+    proyecto: c.proyecto || ((c.salidas || {}).cobro === 'fv' ? 'obligatorio' : 'opcional'),
+    // Personas a las que no se les aplica el recargo dominical y festivo (se marca por operador).
+    sin_recargo: c.sin_recargo || [] };
 }
 export const MODOS_PROYECTO = [['obligatorio', 'Obligatorio'], ['opcional', 'Opcional'], ['no', 'No se pide']];
 
@@ -184,7 +186,7 @@ export function calcular(r, tipo, tarifas, uso = 'pago') {
   let base = 0;
   if (t && modo === 'unidad') { try { base = r2(evaluar(cfg.formulas.valor, vv)); } catch (_) { base = 0; } }
   else if (t && modo === 'registro') base = r2(tarifa);
-  const recargos = uso !== 'pago' ? [] : cfg.reglas.filter(g => aplicaDia(g.cuando, dia) && (!g.terceros?.length || g.terceros.includes(r.tercero_id)) && pagadas > 0)
+  const recargos = uso !== 'pago' ? [] : cfg.reglas.filter(g => aplicaDia(g.cuando, dia) && (!g.terceros?.length || g.terceros.includes(r.tercero_id)) && !cfg.sin_recargo.includes(r.tercero_id) && pagadas > 0)
     .map(g => { let x = 0; try { x = r2(evaluar(g.formula, vv)); } catch (_) { x = 0; } return { nombre: g.nombre, valor: x }; }).filter(x => x.valor);
   if (uso === 'pago' && pagadas > 0) for (const a of ajustesPara(r, tarifas)) recargos.push({ nombre: a.nota || 'Ajuste adicional', valor: r2(pagadas * n(a.valor)), producto_id: a.producto_id || null });
   const valor = r2(base + recargos.reduce((s, x) => s + x.valor, 0));
@@ -491,4 +493,27 @@ export function acumuladoMaquinas(registros, tipo, { desde, hasta } = {}) {
     const ult = [...l].reverse().find(x => x.fin != null);
     return { elemento, ultimo: ult ? ult.fin : null, fecha: ult ? ult.r.fecha : l[l.length - 1].r.fecha, total, periodo, recibos: l.length, recibosPeriodo: recibosPer, saltos };
   });
+}
+
+/* ---------- Maquinaria: configuración fija ---------- */
+// Operación quedó hecha para horas máquina: recibo = operador + proyecto (cotización) + máquina + horómetro.
+// Horas = final − inicial, valor = horas × valor hora del operador, recargo dominical y festivo por operador,
+// programación por documento soporte y cobro por factura con la cotización. Conserva las listas, constantes y
+// datos que ya existan (las claves de la plantilla), y pone fijo lo demás.
+export function configMaquinaria(actual) {
+  const base = PLANTILLAS.maquinaria.config, c = { ...JSON.parse(JSON.stringify(base)), ...(actual || {}) };
+  const listas = [...(c.listas || [])];
+  for (const l of base.listas) if (!listas.some(x => x.k === l.k)) listas.push(JSON.parse(JSON.stringify(l)));
+  const campos = [
+    { k: 'equipo', nombre: 'Máquina', tipo: 'elemento', lista: 'equipos', obligatorio: true },
+    { k: 'obra', nombre: 'Obra', tipo: 'elemento', lista: 'obras' },
+    { k: 'recibo', nombre: 'N.º de recibo', tipo: 'texto' },
+    { k: 'horometro', nombre: 'Horómetro', tipo: 'lectura', obligatorio: true },
+  ];
+  const constantes = [...(c.constantes || [])]; if (!constantes.some(x => x.k === 'salario_base')) constantes.push({ ...base.constantes[0] });
+  const recargo = (c.reglas || []).find(g => g.cuando === 'dominical_festivo') || base.reglas[0];
+  return { ...c, persona: 'Operador', unidad: 'h', listas, campos, constantes, reglas: [{ ...recargo, nombre: recargo.nombre || 'Recargo dominical y festivo', terceros: [] }],
+    formulas: { cantidad: 'horometro', valor: 'pagadas * tarifa' }, editar_pagadas: false, continuidad: { lectura: 'horometro', por: 'equipo' }, pendiente: null,
+    tarifa_por: ['tercero'], proyecto: 'obligatorio', sin_recargo: c.sin_recargo || [],
+    salidas: { ...(c.salidas || {}), pago: 'ds', cobro: 'fv', cobrar: 'cantidad', titulo: (c.salidas || {}).titulo || 'Horas adicionales' } };
 }

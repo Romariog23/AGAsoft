@@ -21,7 +21,8 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
-import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, vOpPorCerrar, vOpMaquinas, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -264,7 +265,7 @@ function renderNav(actual) {
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Tipos de operación'], ...(tiposOp().length ? [['opporcerrar', 'Horas por cerrar']] : []), ...tiposOp().filter(t => t.activo !== false).map(t => ['opregistros/' + t.id, t.nombre])] }; }
+    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['opporcerrar', 'Horas por cerrar']] }; }
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -285,7 +286,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes', 'opfacturar', 'opmaquinas'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v === 'cotizacion' ? 'cotizaciones' : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg'].includes(v) ? 'oprecibos' : v === 'opcortes' || v === 'opcorte' ? 'opprogramar' : v === 'cotizacion' ? 'cotizaciones' : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -296,12 +297,15 @@ function route() {
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
     if (v === 'operacion') return vOperacion(m);
-    if (v === 'opcfg') return operacionActiva() ? vOpCfg(m, arg, q) : vOperacion(m);
-    if (v === 'opmaquinas') return operacionActiva() ? vOpMaquinas(m, arg, q) : vOperacion(m);
-    if (v === 'opregistros') return operacionActiva() ? vOpRegistros(m, arg, q) : vOperacion(m);
-    if (v === 'opcortes') return operacionActiva() ? vOpCortes(m, arg) : vOperacion(m);
+    if (v === 'opcfg' || v === 'opregistros') { location.hash = '#/oprecibos'; return; }
+    if (v === 'oprecibos') return operacionActiva() ? vRecibos(m, q) : vOperacion(m);
+    if (v === 'opproyectos') return operacionActiva() ? vProyectos(m) : vOperacion(m);
+    if (v === 'opoperadores') return operacionActiva() ? vOperadores(m) : vOperacion(m);
+    if (v === 'opmaquinas') return operacionActiva() ? vMaquinas(m, q) : vOperacion(m);
+    if (v === 'opprogramar') return operacionActiva() ? vProgramar(m, q) : vOperacion(m);
+    if (v === 'opcortes') { location.hash = '#/opprogramar'; return; }
     if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
-    if (v === 'opfacturar') return operacionActiva() ? vOpFacturar(m, arg, q) : vOperacion(m);
+    if (v === 'opfacturar') return operacionActiva() ? vOpFacturar(m, arg || tipoMaq()?.id, q) : vOperacion(m);
     if (v === 'opporcerrar') return operacionActiva() ? vOpPorCerrar(m) : vOperacion(m);
     if (v === 'cotizaciones') return vCotizaciones(m);
     if (v === 'cotizacion') return vCotizacion(m, arg);
@@ -676,7 +680,7 @@ function vEmpresa(m) {
       ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
     ['Módulos opcionales', [
-      ['operacion', 'capas', 'Operación', operacionActiva() ? `${tiposOp().length} tipo${tiposOp().length === 1 ? '' : 's'} de operación` : 'Horas máquina, viajes y otros registros sin contabilidad', '#/operacion', { id: 'opOn', on: operacionActiva() }],
+      ['operacion', 'capas', 'Operación', operacionActiva() ? 'Recibos, proyectos, operadores y máquinas' : 'Horas máquina por recibo, proyectos y documentos soporte', '#/operacion', { id: 'opOn', on: operacionActiva() }],
     ]],
     S.perfil?.es_admin && ['Administrador', [
       ['feHab', 'admin', 'Habilitada ante la DIAN', 'Ya superó el set de pruebas', null, { id: 'feHab', on: feHabilitada() }],
@@ -4679,4 +4683,4 @@ async function vCalendario(m) {
 const ctxOp = { S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
   cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
   bodegaVenta: pid => { const p = S.d.productos.find(x => x.id === pid); return p && esInventariable(p) && conInv() ? bodegaVentaDe(p, bodegas()) : null; } };
-iniciarOperacion(ctxOp); iniciarCotizaciones(ctxOp);
+iniciarOperacion(ctxOp); iniciarMaquinaria(ctxOp); iniciarCotizaciones(ctxOp);

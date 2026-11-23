@@ -2,6 +2,7 @@
 // (obra, equipo…), las horas registradas se facturan desde Operación con ese precio. Tabla: supabase/038_cotizaciones.sql.
 import { cfgTipo, avanceCotizacion, ESTADOS_COT, erroresCotizacion, totalLineaCot, COBRO_LINEA, cobroDeLinea } from './operacion.js';
 import { operacionActiva, tiposOp } from './operacion-ui.js';
+import { tipoMaq } from './maquinaria-ui.js';
 import { totales, enLetras } from './calc.js';
 
 let X = null; // mismo contexto que Operación (main.js)
@@ -45,8 +46,8 @@ export function vCotizacion(m, id) {
   c.criterios = c.criterios || {}; c.lineas = (c.lineas || []).map(l => ({ ...nuevaLinea(), ...l, criterios: l.criterios || {} }));
   const opOn = operacionActiva() && tiposOp().length;
   // La cotización es el proyecto: si hay un solo tipo de operación abierto, la nueva queda amarrada a él de una.
-  const abiertos = opOn ? tiposOp().filter(t => t.activo !== false) : [];
-  if (!prev && abiertos.length === 1) c.op_tipo_id = abiertos[0].id;
+  const tm = opOn ? tipoMaq() : null;
+  if (!prev && tm) c.op_tipo_id = tm.id;
   c.nuevos = {}; // elementos por crear al guardar (p. ej. la obra nueva del proyecto)
   const clientes = [...X.S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   const prods = (X.S.d.productos || []).filter(p => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -74,7 +75,7 @@ export function vCotizacion(m, id) {
       X.toast(`Se adicionaron ${q.toLocaleString('es-CO')} a la cotización N.º ${prev.numero}.`); X.route();
     }); };
   const pintar = () => {
-    const t = tipoById(c.op_tipo_id), cel = camposEl(t), libres = cel.filter(f => !c.criterios[f.k]);
+    const t = tipoById(c.op_tipo_id), celT = camposEl(t), cel = celT.filter(f => f.k === 'obra'), libres = celT.filter(f => f.k !== 'obra' && !c.criterios[f.k]);
     m.innerHTML = `<header class="vhead"><div><a class="back" href="#/cotizaciones">← Cotizaciones</a><h2>${prev ? `Cotización N.º ${prev.numero}` : 'Nueva cotización'}</h2>${prev ? `<p class="sub"><span class="tag ${ESTADO_TAG[prev.estado] || ''}">${nomEstado(prev.estado)}</span></p>` : ''}</div>
       <div class="row">${prev ? `<button class="ghost" id="cqDel">Eliminar</button><button id="cqImp">Imprimir</button>${t && operacionActiva() && cfgTipo(t).salidas.cobro === 'fv' ? `<a class="btn" href="#/opfacturar/${t.id}?cot=${prev.id}">Facturar horas</a>` : ''}` : ''}<button class="primary" id="cqSave">Guardar</button></div></header>
     <p class="err" id="cqErr" hidden></p>
@@ -83,10 +84,10 @@ export function vCotizacion(m, id) {
       <div><label for="cqF">Fecha</label><input id="cqF" type="date" value="${c.fecha || ''}"></div>
       <div><label for="cqV">Válida hasta</label><input id="cqV" type="date" value="${c.vence || ''}"></div>
       <div><label for="cqE">Estado</label><select id="cqE">${X.opts(ESTADOS_COT, c.estado)}</select></div></div></section>
-    ${opOn ? `<section class="panel stack"><h3>Proyecto en Operación</h3><p class="hint">Esta cotización es el proyecto: aparece de una para escogerla en los recibos y sus horas se facturan con estos precios. Si la obra no existe, escoge "+ Crear obra…" y escribe el nombre. Deja "Todas" para lo que no aplique.</p>
-      <div class="cq-grid"><div><label for="cqT">Tipo de operación</label><select id="cqT"><option value="">No se amarra</option>${tiposOp().map(x => `<option value="${x.id}" ${x.id === c.op_tipo_id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
-      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}<option value="__nueva" ${c.nuevos[f.k] != null ? 'selected' : ''}>+ Crear ${esc(f.nombre.toLowerCase())}…</option></select>${c.nuevos[f.k] != null ? `<input id="cqN_${f.k}" data-nuevo="${f.k}" value="${esc(c.nuevos[f.k])}" placeholder="Nombre (ej.: CORTEVA)" maxlength="80" style="margin-top:6px">` : ''}</div>`).join('')}</div>
-      ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por ${esc(cfgTipo(t).unidad || 'unidad')} (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
+    ${opOn ? `<section class="panel stack"><h3>Proyecto de horas máquina</h3><label class="check"><input type="checkbox" id="cqT" ${c.op_tipo_id ? 'checked' : ''}> Esta cotización es un proyecto de Operación</label>${t ? `<p class="hint">Aparece de una para escogerla en los recibos y sus horas se facturan con estos precios. Si la obra no existe, escoge "+ Crear obra…" y escribe el nombre.</p>` : ''}
+      <div class="cq-grid">
+      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Sin ${esc(f.nombre.toLowerCase())}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}<option value="__nueva" ${c.nuevos[f.k] != null ? 'selected' : ''}>+ Crear ${esc(f.nombre.toLowerCase())}…</option></select>${c.nuevos[f.k] != null ? `<input id="cqN_${f.k}" data-nuevo="${f.k}" value="${esc(c.nuevos[f.k])}" placeholder="Nombre (ej.: CORTEVA)" maxlength="80" style="margin-top:6px">` : ''}</div>`).join('')}</div>
+      ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por hora (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
       <p class="hint">Se suma a la tarifa de programación de cada operador, solo en los registros de este proyecto. Sale como línea aparte en el volante y el documento soporte. No cambia lo que se le cobra al cliente.</p>` : ''}</section>` : ''}
     <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro desde Operación</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
       ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select></td>
@@ -105,7 +106,7 @@ export function vCotizacion(m, id) {
     X.$('cqF').onchange = e => { c.fecha = e.target.value; }; X.$('cqV').onchange = e => { c.vence = e.target.value; }; X.$('cqE').onchange = e => { c.estado = e.target.value; };
     X.$('cqO').oninput = e => { c.observaciones = e.target.value; }; X.$('cqK').oninput = e => { c.condiciones = e.target.value; };
     if (X.$('cqA')) X.$('cqA').oninput = e => { c.ajuste_op = X.num(e.target.value); };
-    if (X.$('cqT')) X.$('cqT').onchange = e => { c.op_tipo_id = e.target.value || null; c.criterios = {}; c.lineas.forEach(l => { l.criterios = {}; }); pintar(); };
+    if (X.$('cqT')) X.$('cqT').onchange = e => { c.op_tipo_id = e.target.checked ? (tipoById(prev?.op_tipo_id) || tipoMaq())?.id || null : null; c.criterios = {}; c.lineas.forEach(l => { l.criterios = {}; }); pintar(); };
     m.querySelectorAll('[data-nuevo]').forEach(i => i.oninput = () => { c.nuevos[i.dataset.nuevo] = i.value; });
     m.querySelectorAll('[data-crit]').forEach(s => s.onchange = () => {
       if (s.value === '__nueva') { c.nuevos[s.dataset.crit] = ''; delete c.criterios[s.dataset.crit]; pintar(); X.$('cqN_' + s.dataset.crit)?.focus(); return; }
