@@ -74,6 +74,8 @@ export function movimientosInv(S) {
   const inv = id => esInventariable(prods[id]);
   for (const c of S.compras || []) {
     if (c.estado === 'anulado' || c.tipo === 'CE') continue;
+    // Nota de ajuste al documento soporte: los productos salen (devolución al proveedor) al costo con que entraron.
+    if (c.tipo === 'NA') { (c.lineas || []).forEach((l, i) => { if (esLineaProducto(l) && inv(l.producto_id) && num(l.cantidad)) out.push({ fecha: c.fecha, orden: 3, origen: 'devcompra', doc_id: c.id, tipo: c.tipo, ref: `${c.tipo} ${c.numero}`, linea: i, tercero_id: c.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: -Math.abs(num(l.cantidad)), costo: num(l.costo), dist: primeraDist(l.cc, prods[l.producto_id]?.cc, c.cc) }); }); continue; }
     (c.lineas || []).forEach((l, i) => { if (esLineaProducto(l) && inv(l.producto_id)) out.push({ fecha: c.fecha, orden: 0, origen: 'compra', doc_id: c.id, tipo: c.tipo, ref: `${c.tipo} ${c.numero}`, linea: i, tercero_id: c.tercero_id, producto_id: l.producto_id, bodega_id: l.bodega_id || '', cantidad: num(l.cantidad), costo: num(l.costo), dist: primeraDist(l.cc, prods[l.producto_id]?.cc, c.cc) }); });
   }
   // Traslados: sale de una bodega y entra a otra la misma cantidad, al costo del momento (no cambia el costo ni la existencia total).
@@ -116,6 +118,14 @@ export function costear(movs, metodo = 'promedio') {
       const c = r4(s.cant > 1e-9 && s.valor > 0 ? s.valor / s.cant : s.ultimo);
       Object.assign(m, { costo: c, total: r2(Math.sign(m.cantidad) * q * c), saldo: s.cant, valor: s.valor, promedio: s.cant > 1e-9 ? r4(s.valor / s.cant) : s.ultimo });
       out.push(m); continue;
+    }
+    if (m.origen === 'devcompra') {
+      // Devolución al proveedor: sale al costo de la compra (así cuadra con la nota de ajuste, que acredita la 14 por ese valor).
+      const c = r4(m.costo), tot = r2(q * c);
+      s.cant = r4(s.cant - q); s.valor = r2(s.valor - tot);
+      let falta = q; while (falta > 1e-9 && s.capas.length) { const k = s.capas[s.capas.length - 1], u = Math.min(falta, k.q); k.q = r4(k.q - u); falta = r4(falta - u); if (k.q <= 1e-9) s.capas.pop(); }
+      if (Math.abs(s.cant) < 1e-9) { s.cant = 0; if (Math.abs(s.valor) < 1) s.valor = 0; }
+      Object.assign(m, { costo: c, total: -tot }); out.push({ ...m, saldo: s.cant, valor: s.valor, promedio: s.cant > 1e-9 ? r4(s.valor / s.cant) : s.ultimo }); continue;
     }
     if (m.cantidad > 0) {
       // Entrada: compra o ajuste a su costo; devolución al costo con que salió en su factura (o al costo actual).
@@ -176,7 +186,7 @@ export function asientoInventario(costeados, { productos, bodegas, param }) {
     x.debito = r2(x.debito + debito); x.credito = r2(x.credito + credito);
   };
   for (const m of costeados) {
-    if (m.origen === 'compra' || !m.total) continue;
+    if (m.origen === 'compra' || m.origen === 'devcompra' || !m.total) continue;
     if (m.origen === 'traslado') {
       // Entre bodegas con la misma cuenta 14 no hay asiento; con cuentas distintas, de la 14 de origen a la de destino.
       if (cta14(m.bodega_id) === cta14(m.bodega_par)) continue;

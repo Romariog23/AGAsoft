@@ -56,6 +56,75 @@ function jsonFE({ doc, items, tercero, ref, numeroRef, unidades }) {
   return body;
 }
 
+/* ---------- Documento soporte (DS) y nota de ajuste (NA) ---------- */
+const referenciaDS = c => `${c.tipo}-${c.numero}`;
+// Medio de pago del documento soporte: a crédito sin cuenta; de contado según la cuenta (caja = efectivo, si no transferencia).
+const medioDS = cuenta => /^1105/.test(String(cuenta || '')) ? '10' : '47';
+// c: la compra (DS o NA) con sus totales; tercero: el proveedor; productos y unidades para código y unidad de cada línea.
+// numeroRef: número con que la DIAN validó el documento soporte que ajusta la nota.
+function jsonDS({ c, tercero, productos, unidades, nomCuenta, numeroRef }) {
+  const prods = Object.fromEntries((productos || []).map(p => [p.id, p]));
+  const juridica = (tercero.tipo_persona || (tercero.tipo_id === '31' ? 'juridica' : 'natural')) === 'juridica';
+  const contado = !!String(c.cuenta_pago || '').trim();
+  const total = r2((c.lineas || []).reduce((s, l) => s + r2(num(l.base)) + r2(r2(num(l.base)) * num(l.iva_pct) / 100), 0));
+  const ret = [];
+  if (num(c.retefuente_pct)) ret.push({ code: '06', rate: num(c.retefuente_pct).toFixed(2) });
+  if (num(c.reteiva_pct)) ret.push({ code: '05', rate: num(c.reteiva_pct).toFixed(2) });
+  if (num(c.reteica_milaje)) ret.push({ code: '07', rate: (num(c.reteica_milaje) / 10).toFixed(2) });
+  const body = {
+    reference_code: referenciaDS(c),
+    observation: String(c.observaciones || '').slice(0, 500),
+    payment_details: [{ payment_form: contado ? '1' : '2', payment_method_code: contado ? medioDS(c.cuenta_pago) : '10', amount: dinero(total), ...(!contado ? { due_date: c.vence || c.fecha } : {}) }],
+    provider: {
+      identification_document_code: tercero.tipo_id || '13',
+      identification: soloDigitos(tercero.numero) || String(tercero.numero),
+      ...(tercero.tipo_id === '31' && tercero.dv != null && tercero.dv !== '' ? { dv: String(tercero.dv) } : {}),
+      legal_organization_code: juridica ? '1' : '2',
+      names: tercero.nombre,
+      ...(juridica ? { company: tercero.nombre } : {}),
+      address: tercero.direccion || '',
+      country_code: 'CO',
+      email: tercero.correo || '',
+      phone: soloDigitos(tercero.telefono),
+      _municipio: { ciudad: tercero.ciudad || '', departamento: tercero.departamento || '' },
+    },
+    items: (c.lineas || []).map(l => {
+      const p = l.producto_id ? prods[l.producto_id] : null, base = r2(num(l.base));
+      // Con cantidad y costo (producto o línea por cuenta con costo unitario) van tal cual; si no, una unidad por el valor.
+      const q = num(l.cantidad) && num(l.costo) ? num(l.cantidad) : 1, precio = q === 1 ? base : num(l.costo);
+      return {
+        code_reference: p?.codigo || l.cuenta || 'SIN-COD',
+        name: String(l.descripcion || p?.nombre || nomCuenta?.(l.cuenta) || 'Ítem').slice(0, 300),
+        quantity: q.toFixed(2),
+        discount_rate: '0.00',
+        price: dinero(precio),
+        unit_measure_code: codigoDian(unidades, p?.unidad || 'UND'),
+        standard_code: '999',
+        ...(ret.length ? { withholding_taxes: ret } : {}),
+        taxes: [{ code: '01', rate: num(l.iva_pct).toFixed(2) }],
+        ...(c.tipo === 'DS' ? { period: { generation_mode: '1', start_date: c.fecha } } : {}),
+      };
+    }),
+  };
+  if (c.tipo === 'NA') Object.assign(body, { support_document_number: numeroRef || '', correction_concept_code: String(c.concepto || '5') });
+  return body;
+}
+// Lo que falta para enviar un documento soporte o nota de ajuste.
+function erroresDS({ c, tercero, ref, numeroRef }) {
+  const out = [];
+  if (!['DS', 'NA'].includes(c.tipo)) out.push('Solo se envían documentos soporte y notas de ajuste.');
+  if (!c.electronica) out.push('El documento no es electrónico.');
+  if (c.estado === 'anulado') out.push('El documento está anulado.');
+  if (!tercero) out.push('El documento no tiene proveedor.');
+  else {
+    if (!tercero.ciudad) out.push('Al proveedor le falta el municipio.');
+    if (!tercero.direccion) out.push('Al proveedor le falta la dirección.');
+  }
+  if ((c.lineas || []).some(l => num(l.cantidad) && num(l.costo) && Math.abs(r2(num(l.cantidad) * num(l.costo)) - r2(num(l.base))) > 0.01)) out.push('Hay una línea cuyo valor no es cantidad × costo unitario.');
+  if (c.tipo === 'NA') { if (!ref) out.push('La nota no tiene el documento soporte que ajusta.'); else if (!numeroRef) out.push('El documento soporte todavía no está validado por la DIAN (envíalo primero).'); }
+  return out;
+}
+
 // Lo que falta para poder enviar el documento a la DIAN (lista vacía si está listo).
 function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
   const out = [];
@@ -74,8 +143,9 @@ function erroresFE({ doc, tercero, numeracion, ref, cufeRef }) {
 
 // Lee la respuesta de Factus (en data o dentro de data.credit_note / debit_note / bill): aceptado solo si viene validado y con CUFE.
 function leerRespuestaFE(r) {
-  const d0 = r?.data || {}, de = [d0.credit_note, d0.debit_note, d0.bill].find(v => v && typeof v === 'object') || {};
+  const d0 = r?.data || {}, de = [d0.credit_note, d0.debit_note, d0.bill, d0.support_document, d0.adjustment_note].find(v => v && typeof v === 'object') || {};
   const d = { ...d0, ...de, links: { ...(d0.links || {}), ...(de.links || {}) } };
+  d.cufe = d.cufe || d.cude || d.cuds || d.cune || '';
   const valido = (de.is_validated === true || d0.is_validated === true) && !!d.cufe;
   const errores = [];
   const add = x => { if (x == null) return; if (Array.isArray(x)) x.forEach(add); else if (typeof x === 'object') Object.values(x).forEach(add); else errores.push(String(x)); };
@@ -98,4 +168,4 @@ function qrSvg(texto, tam = 132) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${k} ${k}" width="${tam}" height="${tam}" shape-rendering="crispEdges" role="img" aria-label="Código QR de la DIAN"><rect width="${k}" height="${k}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
 }
 
-export { contenidoQR, qrSvg, jsonFE, erroresFE, leerRespuestaFE, referenciaFE, TIPOS_FE };
+export { jsonDS, erroresDS, referenciaDS, contenidoQR, qrSvg, jsonFE, erroresFE, leerRespuestaFE, referenciaFE, TIPOS_FE };

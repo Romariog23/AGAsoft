@@ -1,10 +1,10 @@
 import './style.css';
 import { UNIDADES_DEF, CODIGOS_DIAN, unidadesDe, erroresUnidad } from './unidades.js';
-import { jsonFE, erroresFE, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
+import { jsonFE, erroresFE, jsonDS, erroresDS, TIPOS_FE, contenidoQR, qrSvg } from './fe.js';
 import { crearStore, numeracionPara, motivoNoEliminar, envioValidado } from './store.js';
 import { r2, num, parseNit, dvOf, fmtNit, linea, totales, cartera, acreditado, enLetras, TIPOS, CONCEPTOS_NC, CONCEPTOS_ND, TIPOS_ID, SIGLA_ID, FORMAS_PAGO, MEDIOS_PAGO } from './calc.js';
 import { datosEjemplo } from './ejemplo.js';
-import { TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
+import { TIPOS_COMPRA, CONCEPTOS_NA, ajustableDS, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra } from './compras.js';
 import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
@@ -219,7 +219,7 @@ const MENU = [
   { k: 'inicio', t: 'Inicio', i: 'inicio' },
   { k: 'calendario', t: 'Calendario', i: 'calendario' },
   { t: 'Ventas', i: 'ventas', l: [['cotizaciones', 'Cotizaciones'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
-  { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
+  { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/NA', 'Notas de ajuste al DS'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
@@ -1503,6 +1503,23 @@ const facturaNormal = () => emp()?.contabilidad?.factura_normal === true;
 const feHabilitada = () => emp()?.contabilidad?.fe_habilitada === true;
 const envios = docId => (S.d?.fe_envios || []).filter(e => e.documento_id === docId).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
 const envioAceptado = docId => envios(docId).find(e => e.estado === 'aceptado');
+// Documento soporte y nota de ajuste: sus envíos van con compra_id.
+const enviosCompra = cid => (S.d?.fe_envios || []).filter(e => e.compra_id === cid).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
+const compraValidada = cid => enviosCompra(cid).some(e => e.estado === 'aceptado');
+const numeroDianCompra = cid => enviosCompra(cid).find(e => e.estado === 'aceptado')?.respuesta?.data?.number || '';
+function datosDS(c) {
+  const ref = c.ref_id ? compraById(c.ref_id) : null;
+  return { c, tercero: terc(c.tercero_id), productos: S.d.productos, unidades: unidades(), nomCuenta: nomCta, ref, numeroRef: ref ? numeroDianCompra(ref.id) : '' };
+}
+function panelDianCompra(c) {
+  const l = enviosCompra(c.id), ok = l.find(e => e.estado === 'aceptado'), falta = ok ? [] : erroresDS(datosDS(c));
+  return `<section class="panel stack noprint"><header class="vhead"><h3>DIAN</h3>${ok ? '<span class="tag ok">Validado</span>' : `<button class="primary" id="dsEnviar">Enviar a la DIAN</button>`}</header>
+    ${ok ? `<dl class="kv"><dt>CUDS</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviado</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.respuesta?.data?.number ? `<dt>Número DIAN</dt><dd class="mono">${esc(ok.respuesta.data.number)}</dd>` : ''}${ok.pdf ? `<dt>Consulta</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver en Factus</a></dd>` : ''}</dl>
+      <p class="hint">Validado por la DIAN: ya no se edita, no se anula ni se elimina.${c.tipo === 'DS' ? ' Para corregirlo usa una nota de ajuste.' : ''}</p>`
+      : `<p class="muted">${l.length ? 'La DIAN no ha validado este documento. Revisa los errores y vuelve a enviarlo.' : 'Todavía no se ha enviado a la DIAN.'}</p>${falta.length ? `<ul class="err">${falta.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`}
+    ${l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazado'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
+  </section>`;
+}
 function datosFE(d) {
   const ref = d.ref_id ? docById(d.ref_id) : null;
   return { doc: d, items: S.d.items.filter(i => i.documento_id === d.id).sort((a, b) => a.orden - b.orden), tercero: terc(d.tercero_id), unidades: unidades(),
@@ -2299,10 +2316,10 @@ function vTraslado(m, id) {
   });
 }
 /* ---------- Inventario: kardex y costo de ventas por producto ---------- */
-const ORIGEN_INV = { compra: 'Compra', ajuste: 'Ajuste', venta: 'Venta', devolucion: 'Devolución', traslado: 'Traslado' };
+const ORIGEN_INV = { compra: 'Compra', ajuste: 'Ajuste', venta: 'Venta', devolucion: 'Devolución', traslado: 'Traslado', devcompra: 'Devolución a proveedor' };
 const kxOpc = { producto: '', bodega: '' };
 function linkInv(x) {
-  const href = x.origen === 'compra' ? '#/compra/' + x.doc_id : x.origen === 'ajuste' ? '#/ajusteinv/' + x.doc_id : x.origen === 'traslado' ? '#/traslado/' + x.doc_id : '#/doc/' + x.doc_id;
+  const href = x.origen === 'compra' || x.origen === 'devcompra' ? '#/compra/' + x.doc_id : x.origen === 'ajuste' ? '#/ajusteinv/' + x.doc_id : x.origen === 'traslado' ? '#/traslado/' + x.doc_id : '#/doc/' + x.doc_id;
   return `<a href="${href}" class="mono">${esc(x.ref)}</a>`;
 }
 function vKardex(m, q) {
@@ -4112,7 +4129,7 @@ function hojaComp(c, ms, imprimir) {
 /* ---------- Compras y gastos ---------- */
 const compras = () => S.d?.compras || [];
 const compraById = id => compras().find(c => c.id === id);
-const nomCompra = c => `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero}`;
+const nomCompra = c => c?.tipo ? `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero ?? ''}`.trim() : '';
 const siguienteCompra = tipo => Math.max(0, ...compras().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
 // A quién se le puede pagar con un egreso: proveedores, empleados y quien tenga saldos de nómina por pagar.
 const tercerosEgreso = incluir => { const lab = new Set(movs().filter(mv => /^(2370|2380|2505|2510|2515|2520|2525)/.test(mv.cuenta)).map(mv => mv.tercero_id)); return [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || esEmpleado(t.id) || lab.has(t.id) || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre)); };
@@ -4126,9 +4143,10 @@ function vCompras(m, tipo) {
   const T = TIPOS_COMPRA[tipo]; if (!T) { location.replace('#/compras/FC'); return; }
   let q = '', anulados = false;
   const saldos = Object.fromEntries(cxp().map(x => [x.compra.id, x]));
-  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2><a class="btn primary" href="#/compranueva?tipo=${tipo}">${T.nuevo}</a></header>
+  m.innerHTML = `<header class="vhead"><h2>${T.plural}</h2>${tipo === 'NA' ? '' : `<a class="btn primary" href="#/compranueva?tipo=${tipo}">${T.nuevo}</a>`}</header>
     <div class="row filters"><input id="q" type="search" placeholder="Buscar por número o proveedor"><label class="check"><input type="checkbox" id="anu"> Ver anulados</label></div>
-    ${tipo === 'DS' ? '<p class="hint">Para compras a personas no obligadas a facturar. La transmisión a la DIAN se hará cuando se conecte el proveedor tecnológico.</p>' : ''}
+    ${tipo === 'DS' ? `<p class="hint">Para compras a personas no obligadas a facturar.${feActiva() ? ' Se envía a la DIAN desde el documento (botón Enviar a la DIAN). Ya validado, se corrige con una nota de ajuste.' : ' Se envía a la DIAN cuando la empresa tenga la facturación electrónica conectada.'}</p>` : ''}
+    ${tipo === 'NA' ? '<p class="hint">Corrigen un documento soporte electrónico ya validado por la DIAN: devolución, anulación, descuento o ajuste de precio. Se crean desde el documento soporte (botón Nota de ajuste).</p>' : ''}
     <section class="panel" id="lst"></section>`;
   const pintar = () => {
     const l = compras().filter(c => c.tipo === tipo && (anulados || c.estado !== 'anulado') && (!q || `${c.numero} ${c.num_proveedor} ${terc(c.tercero_id)?.nombre} ${terc(c.tercero_id)?.numero}`.toLowerCase().includes(q)))
@@ -4148,13 +4166,18 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   let c;
   if (id) {
     const x = compraById(id); if (!x) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
-    if (x.estado === 'anulado') { location.replace('#/compra/' + id); return; }
+    if (x.estado === 'anulado' || compraValidada(id)) { location.replace('#/compra/' + id); return; }
     c = JSON.parse(JSON.stringify(x)); tipo = x.tipo;
+  } else if (tipo === 'NA') {
+    // La nota de ajuste nace de un documento soporte electrónico validado: copia el proveedor, las líneas y las retenciones.
+    const ds = ref && compraById(ref);
+    if (!ds || ds.tipo !== 'DS' || !compraValidada(ds.id)) { m.innerHTML = '<section class="panel"><p class="muted">La nota de ajuste se crea desde un documento soporte electrónico ya validado por la DIAN: ábrelo y usa el botón <b>Nota de ajuste</b>.</p><a class="btn" href="#/compras/DS">Ver documentos soporte</a></section>'; return; }
+    c = { ...JSON.parse(JSON.stringify(ds)), id: undefined, numero: undefined, tipo: 'NA', fecha: hoy(), ref_id: ds.id, concepto: '2', electronica: true, observaciones: '', aplicaciones: [], anticipo: 0 };
   } else {
     if (!TIPOS_COMPRA[tipo]) tipo = 'FC';
     const f = ref && compraById(ref), t = terc(f?.tercero_id || tercero);
     c = { empresa_id: S.eid, tipo, fecha: hoy(), vence: '', tercero_id: t?.id || '', num_proveedor: '', observaciones: '',
-      lineas: [{ cuenta: '', descripcion: '', base: '', iva_pct: '0' }], retefuente_pct: num(t?.ret_compra_fuente_pct), reteiva_pct: num(t?.ret_compra_iva_pct), reteica_milaje: num(t?.ret_compra_ica_milaje), cuenta_retefuente: '',
+      electronica: tipo === 'DS' && feActiva(), lineas: [{ cuenta: '', descripcion: '', base: '', iva_pct: '0' }], retefuente_pct: num(t?.ret_compra_fuente_pct), reteiva_pct: num(t?.ret_compra_iva_pct), reteica_milaje: num(t?.ret_compra_ica_milaje), cuenta_retefuente: '',
       cuenta_pago: param().bancos, aplicaciones: f ? [{ compra_id: f.id, valor: Math.max(0, cxp().find(x => x.compra.id === f.id)?.saldo || 0) }] : [], anticipo: 0 };
   }
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
@@ -4165,7 +4188,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   const optsBod = sel => bodegas().map(b => `<option value="${b.id}" ${b.id === (sel || '') ? 'selected' : ''}>${esc(b.codigo)} · ${esc(b.nombre)}</option>`).join('');
   const prodPorId = id => S.d.productos.find(p => p.id === id);
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/compras/${tipo}">← ${T.plural}</a><h2>${id ? `Editar ${esc(nomCompra(c))}` : T.nuevo}</h2>
-    <p class="sub">${esCE ? 'Pago a un proveedor, a un empleado o a una entidad de seguridad social: escoge lo que se paga o registra un anticipo.' : tipo === 'DS' ? 'Compra a una persona no obligada a facturar. Se contabiliza al guardar.' : 'Factura electrónica que te envió el proveedor. Se contabiliza al guardar.'}</p></div></header>
+    <p class="sub">${esCE ? 'Pago a un proveedor, a un empleado o a una entidad de seguridad social: escoge lo que se paga o registra un anticipo.' : tipo === 'DS' ? 'Compra a una persona no obligada a facturar. Se contabiliza al guardar.' : tipo === 'NA' ? 'Corrige el documento soporte: ajusta las líneas al valor que se devuelve, descuenta o anula. Se contabiliza al revés del documento soporte y luego se envía a la DIAN.' : 'Factura electrónica que te envió el proveedor. Se contabiliza al guardar.'}</p></div></header>
   <form id="ke" class="stack" novalidate>
     <section class="panel grid-doc">
       <div class="span2"><label for="prv">${esCE ? 'Pagado a' : 'Proveedor'}</label><div class="row nowrap"><select id="prv" required><option value="">${esCE ? 'Escoge el proveedor, el empleado o la entidad…' : 'Escoge el proveedor…'}</option>${(esCE ? tercerosEgreso(c.tercero_id) : proveedores(c.tercero_id)).map(t => `<option value="${t.id}" ${t.id === c.tercero_id ? 'selected' : ''}>${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`).join('')}</select>
@@ -4174,7 +4197,10 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       ${esCE ? `<div><label for="kp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kp">${optsContado(fCompra(), id ? c.cuenta_pago : '')}</select></div>` :
         `<div><label for="kfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kfp">${fCompra().map(f => `<option value="${f.id}" ${f.id === formaDe(fCompra(), !c.cuenta_pago, c.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
-        ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}`}
+        ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}
+        ${tipo === 'DS' ? `<div><label for="kel">Clase</label><select id="kel"><option value="1" ${c.electronica ? 'selected' : ''}>Electrónico (se envía a la DIAN)</option><option value="0" ${c.electronica ? '' : 'selected'}>Interno (no se envía)</option></select></div>` : ''}
+        ${tipo === 'NA' ? `<div><label>Documento soporte que ajusta</label><p class="mono">${esc(nomCompra(compraById(c.ref_id) || {}))} · ${esc(numeroDianCompra(c.ref_id) || '')}</p></div>
+          <div class="span2"><label for="kcon">Concepto (DIAN)</label><select id="kcon">${CONCEPTOS_NA.map(([k, t]) => `<option value="${k}" ${String(c.concepto) === k ? 'selected' : ''}>${k} · ${esc(t)}</option>`).join('')}</select></div>` : ''}`}
       <div><label>Número interno</label><p class="mono">${id ? c.numero : `${siguienteCompra(tipo)} (al guardar)`}</p></div>
     </section>
     ${panelCC(esCE ? 'Sin centro propio, cada pago sigue el centro de la factura que paga.' : undefined)}
@@ -4201,6 +4227,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
     else {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
+      if ($('kel')) c.electronica = $('kel').value === '1'; if ($('kcon')) c.concepto = $('kcon').value;
       if ($('kfp')) { const f = fCompra().find(x => x.id === $('kfp').value) || fCompra()[0]; c.cuenta_pago = f.credito ? '' : f.cuenta; }
       c.retenciones = leerRet('compra', RET_C, r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
       Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value) });
@@ -4325,6 +4352,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       }
     }
     const errs = erroresCompra({ ...c, tipo }, S.d.cuentas, S.d.productos);
+    if (tipo === 'NA') { const ds = compraById(c.ref_id), disp = ds ? ajustableDS(ds, compras(), c.id) : 0; if (num(c.total) > disp + 0.001) errs.push(`La nota de ajuste (${money(c.total)}) supera lo que queda por ajustar del documento soporte (${money(disp)}).`); }
     if (ccCfg().activo) {
       errs.push(...erroresDist(c.cc, ccCfg(), centros(), 'Centro de costo general'), ...(esCE ? [] : c.lineas).flatMap((l, i) => erroresDist(l.cc, ccCfg(), centros(), `Línea ${i + 1}`)));
       if (!errs.length) { const f = errSinCentro(asientoTmp()); if (f) errs.push(f); }
@@ -4339,7 +4367,10 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '', retenciones: esCE ? {} : (c.retenciones || {}),
         cuenta_pago: c.cuenta_pago || '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t,
         // El centro general solo se envía si la empresa usa centros de costo (requiere 035_centros_documentos.sql).
-        ...(ccCfg().activo || tieneDist(c.cc) ? { cc: normDist(c.cc) } : {}) };
+        ...(ccCfg().activo || tieneDist(c.cc) ? { cc: normDist(c.cc) } : {}),
+        // Documento soporte electrónico y nota de ajuste (requiere 040_documento_soporte_electronico.sql).
+        ...(tipo === 'DS' && (c.electronica || 'electronica' in (compraById(id) || {})) ? { electronica: !!c.electronica } : {}),
+        ...(tipo === 'NA' ? { electronica: true, ref_id: c.ref_id, concepto: String(c.concepto) } : {}) };
       let g;
       if (id) g = await store.save('compras', { ...row, id });
       else {
@@ -4349,7 +4380,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       // El proveedor queda marcado como tal.
       const t2 = terc(c.tercero_id); if (t2 && !t2.es_proveedor && !esEmpleado(t2.id)) { try { await store.save('terceros', { id: t2.id, es_proveedor: true }); } catch (_) {} }
       await cargarEmpresa(); toast('Guardado y contabilizado.'); location.hash = '#/compra/' + g.id;
-    } catch (e) { $('kErr').textContent = /'cc'|column.*\bcc\b|\bcc\b.*column/i.test(e.message) ? 'Falta correr en Supabase el archivo supabase/035_centros_documentos.sql (centros de costo en documentos).' : /compras|es_proveedor/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear la tabla de compras en Supabase (archivo supabase/006_compras.sql).' : e.message; $('kErr').hidden = false; }
+    } catch (e) { $('kErr').textContent = /electronica|ref_id|concepto|compras_tipo_check/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/040_documento_soporte_electronico.sql (documento soporte electrónico).' : /'cc'|column.*\bcc\b|\bcc\b.*column/i.test(e.message) ? 'Falta correr en Supabase el archivo supabase/035_centros_documentos.sql (centros de costo en documentos).' : /compras|es_proveedor/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear la tabla de compras en Supabase (archivo supabase/006_compras.sql).' : e.message; $('kErr').hidden = false; }
     finally { $('kSave').disabled = false; }
   };
 }
@@ -4359,7 +4390,7 @@ function hojaCompra(c, imprimir) {
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === c.id);
   return `${cabInforme(T.nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
-    <div>${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), false, c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
+    <div>${c.tipo === 'NA' ? `<b>Ajusta:</b> ${esc(nomCompra(compraById(c.ref_id) || {}))}${numeroDianCompra(c.ref_id) ? ` <span class="mono">(${esc(numeroDianCompra(c.ref_id))})</span>` : ''}<br><b>Concepto:</b> ${esc(CONCEPTOS_NA.find(x => x[0] === String(c.concepto))?.[1] || '')}<br>` : ''}${c.electronica && numeroDianCompra(c.id) ? `<b>Número DIAN:</b> <span class="mono">${esc(numeroDianCompra(c.id))}</span><br>` : ''}${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), false, c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
     ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
         ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
         <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`
@@ -4376,14 +4407,30 @@ function vCompra(m, id) {
   const anulado = c.estado === 'anulado', T = TIPOS_COMPRA[c.tipo];
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === id);
   const pagos = compras().filter(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
+  const validada = c.electronica && compraValidada(id), notasNA = compras().filter(n => n.tipo === 'NA' && n.ref_id === id);
   m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/compras/${c.tipo}">← ${T.plural}</a><h2>${esc(nomCompra(c))} ${anulado ? '<span class="tag bad">Anulado</span>' : ''}</h2></div>
-    <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}<button id="eliminar">Eliminar</button>${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
+    <div class="row">${!anulado && s && s.saldo > 0.009 ? `<a class="btn" href="#/compranueva?tipo=CE&ref=${id}">Pagar</a>` : ''}${c.tipo === 'DS' && validada ? `<a class="btn" href="#/compranueva?tipo=NA&ref=${id}">Nota de ajuste</a>` : ''}${validada ? '' : `<button id="eliminar">Eliminar</button>${anulado ? '' : `<button id="anular">Anular</button><a class="btn" href="#/compraeditar/${id}">Editar</a>`}`}<button class="primary" id="imprimir">Imprimir o PDF</button></div></header>
     <section class="panel stack">${hojaCompra(c)}</section>
+    ${c.electronica && !anulado && (feActiva() || enviosCompra(id).length) ? panelDianCompra(c) : ''}
+    ${notasNA.length ? `<section class="panel stack noprint"><h3>Notas de ajuste</h3><div class="tbl-wrap"><table class="tbl"><tbody>${notasNA.map(n => `<tr class="click" data-go="#/compra/${n.id}"><td>${fFecha(n.fecha)}</td><td><a href="#/compra/${n.id}">Nota de ajuste ${n.numero}</a></td><td>${esc(CONCEPTOS_NA.find(x => x[0] === String(n.concepto))?.[1] || '')}</td><td class="r mono">${money(n.total)}</td><td>${compraValidada(n.id) ? '<span class="tag ok">Validada</span>' : '<span class="tag">Sin enviar</span>'}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
     <section class="panel stack noprint"><h3>Contabilización</h3>${tablaAsiento(asientoCompra({ ...c, estado: 'contabilizado' }, emp()?.contabilidad, tarifasIva(emp()?.contabilidad), { compras: compras(), productos: S.d.productos }))}${anulado ? `<p class="hint">Anulado${c.anulado_motivo ? `: ${esc(c.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}</section>
     ${pagos.length ? `<section class="panel stack noprint"><h3>Pagos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${pagos.map(e => `<tr class="click" data-go="#/compra/${e.id}"><td>${fFecha(e.fecha)}</td><td><a href="#/compra/${e.id}">Egreso ${e.numero}</a></td><td class="r mono">${money(e.aplicaciones.find(a => a.compra_id === id).valor)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
   $('imprimir').onclick = () => { $('print').innerHTML = hojaCompra(c, true); const t = document.title; document.title = `${nomCompra(c)} - ${emp().nombre}`; window.print(); document.title = t; };
-  $('eliminar').onclick = async () => {
+  if ($('dsEnviar')) $('dsEnviar').onclick = async () => {
+    const x = datosDS(c), errs = erroresDS(x);
+    if (errs.length) return fail(new Error(errs.join(' ')));
+    if (!await confirmar(`Enviar ${esc(nomCompra(c))} a la DIAN`, 'Se envía a la DIAN por Factus. Si la DIAN lo valida, queda con su código (CUDS) y ya no se puede modificar, anular ni eliminar: se corrige con una nota de ajuste.', 'Enviar')) return;
+    const b = $('dsEnviar'); b.disabled = true; b.textContent = 'Enviando…';
+    try {
+      const r = await store.fe('enviar_compra', { compra_id: c.id, tipo: c.tipo, body: jsonDS(x) });
+      await cargarEmpresa(); route();
+      if (r.error_guardar) fail(new Error(r.error_guardar));
+      else if (r.estado === 'aceptado') toast(`${nomCompra(c)} validado por la DIAN.${(r.avisos || []).length ? ' ' + r.avisos.join(' ') : ''}`); else fail(new Error(`La DIAN no validó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
+    } catch (e) { fail(e); b.disabled = false; b.textContent = 'Enviar a la DIAN'; }
+  };
+  if ($('eliminar')) $('eliminar').onclick = async () => {
     if (pagos.length) return toast('Este documento tiene pagos. Elimina o anula primero el comprobante de egreso.', true);
+    if (notasNA.length) return toast('Este documento soporte tiene notas de ajuste. Elimina primero las notas.', true);
     if (!await confirmar(`Eliminar ${esc(nomCompra(c))}`, `Se borra el documento con su contabilización${c.tipo === 'CE' ? ' y las facturas que pagaba vuelven a quedar pendientes' : ''}. Si es el último número, ese número se vuelve a usar. Esto no se puede deshacer.`, 'Eliminar')) return;
     try { await store.remove('compras', c.id); await cargarEmpresa(); if (compraById(c.id)) throw new Error('No se pudo eliminar. Falta correr en Supabase el archivo supabase/028_eliminar_documentos.sql.'); toast(`${nomCompra(c)} eliminado.`); location.hash = '#/compras/' + c.tipo; } catch (e) { fail(e); }
   };
