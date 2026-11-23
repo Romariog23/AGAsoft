@@ -824,7 +824,7 @@ const WIDGET_HTML = {
     const n = [...nominas()].filter(x => x.estado === 'contabilizado').sort((a, b) => b.hasta.localeCompare(a.hasta))[0], ms = movs(), h = hoy();
     const tot = re => r2(pasivosNomina(ms, h, re).reduce((s, x) => s + x.total, 0));
     if (!n && !empleados().length) return wPanel('Nómina', '<p class="muted">Todavía no hay empleados. <a href="#/empleados">Créalos</a> para liquidar la nómina.</p>');
-    return wPanel('Nómina', `<div class="w-list">${n ? `<div class="w-row"><span class="w-n">Última nómina: <a href="#/nominadoc/${n.id}">NE ${n.numero}</a><small class="hint"> · ${esc(nomPeriodo(n))}</small></span><b class="mono">${money(n.neto)}</b></div>` : ''}
+    return wPanel('Nómina', `<div class="w-list">${n ? `<div class="w-row"><span class="w-n">Última nómina: <a href="#/nominadoc/${n.id}">${numNE(n.numero)}</a><small class="hint"> · ${esc(nomPeriodo(n))}</small></span><b class="mono">${money(n.neto)}</b></div>` : ''}
       <div class="w-row"><span class="w-n">Seguridad social y parafiscales por pagar</span><b class="mono">${money(tot(CUENTAS_SS))}</b></div>
       <div class="w-row"><span class="w-n">Prestaciones sociales por pagar</span><b class="mono">${money(tot(CUENTAS_PREST))}</b></div></div>`, ['#/nominapasivos', 'Ver detalle']);
   },
@@ -1865,6 +1865,24 @@ function formNumDian(t) {
     toast('Numeración guardada.'); route();
   });
 }
+// Consecutivos internos: [nombre, tipo, documentos de ese tipo].
+const CONSECUTIVOS = () => [
+  ['Factura de proveedor', 'FC', compras().filter(c => c.tipo === 'FC')], ['Documento soporte (número interno)', 'DS', compras().filter(c => c.tipo === 'DS')],
+  ['Nota de ajuste al documento soporte (número interno)', 'NA', compras().filter(c => c.tipo === 'NA')], ['Comprobante de egreso', 'CE', compras().filter(c => c.tipo === 'CE')],
+  ['Liquidación de nómina', 'NE', nominas()], ...Object.entries(TIPOS_COMP).filter(([k]) => k !== 'CI').map(([k, v]) => [v.nombre, k, comps().filter(c => c.tipo === k)]),
+  ...Object.entries(TIPOS_INV).map(([k, v]) => [v.nombre, k, invDocs().filter(x => x.tipo === k)]),
+];
+function formNumInterno([nombre, k, lista]) {
+  const n = numInt(k), minimo = Math.max(0, ...lista.map(x => Number(x.numero) || 0)) + 1;
+  dialogo(`<h2>${esc(nombre)}</h2><p class="hint">Documento interno: no va a la DIAN. El prefijo se muestra en pantalla y al imprimir (por ejemplo ${esc(n.prefijo || 'CE-')}${minimo}).</p>
+    <div class="grid2">${campo('prefijo', 'Prefijo', n.prefijo || '', 'maxlength="8" class="mono" placeholder="Sin prefijo"')}${campo('siguiente', 'Siguiente número', sigInt(k, lista), `type="number" min="${minimo}" step="1" class="mono"`)}</div>
+    ${lista.length ? `<p class="hint">Ya hay documentos hasta el ${minimo - 1}: el siguiente no puede ser menor que ${minimo}.</p>` : ''}${pie()}`, async fd => {
+    const prefijo = String(fd.get('prefijo') || '').trim().toUpperCase(), siguiente = Math.round(num(fd.get('siguiente')));
+    if (!/^[A-Z0-9-]{0,8}$/.test(prefijo)) throw new Error('El prefijo lleva máximo 8 letras, números o guiones.');
+    if (!(siguiente >= minimo)) throw new Error(`El siguiente número debe ser ${minimo} o mayor.`);
+    await guardarContab('num_internos', { ...(emp()?.contabilidad?.num_internos || {}), [k]: { prefijo, siguiente } }); toast('Consecutivo guardado.'); route();
+  });
+}
 function vNumeraciones(m) {
   const l = [...S.d.numeraciones].sort((a, b) => Object.keys(TIPOS).indexOf(a.tipo) - Object.keys(TIPOS).indexOf(b.tipo) || (b.activa - a.activa));
   const fila = n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${!n.activa ? '<span class="tag">Inactiva</span>' : n.electronica && !feHabilitada() ? '<span class="tag warn" title="Falta superar el set de pruebas de la DIAN">Sin habilitar DIAN</span>' : '<span class="tag ok">Activa</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
@@ -1876,9 +1894,7 @@ function vNumeraciones(m) {
       <td>${t.resolucion && (n.vigencia_hasta || r?.vence) ? `hasta ${fFecha(String(n.vigencia_hasta || r.vence).slice(0, 10))}` : '—'}</td><td class="r"><button class="ghost sm" data-dian="${t.k}">Editar</button></td></tr>`; };
   const tabla = (filas, vacio = '') => filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>${filas.join('')}</tbody></table></div>` : `<p class="muted">${vacio}</p>`;
   const conRes = l.filter(n => n.tipo === 'FV' && n.electronica), notasV = l.filter(n => ['NC', 'ND'].includes(n.tipo)), internas = l.filter(n => (n.tipo === 'FV' && !n.electronica) || n.tipo === 'RC');
-  const sig = (lista, tipo) => Math.max(0, ...lista.filter(x => !tipo || x.tipo === tipo).map(x => Number(x.numero) || 0)) + 1;
-  const consecutivos = [['Factura de proveedor', 'FC', sig(compras(), 'FC')], ['Documento soporte (normal o electrónico, número interno)', 'DS', sig(compras(), 'DS')], ['Nota de ajuste al documento soporte (número interno)', 'NA', sig(compras(), 'NA')], ['Comprobante de egreso', 'CE', sig(compras(), 'CE')],
-    ['Liquidación de nómina', 'NE', sig(nominas())], ...Object.entries(TIPOS_COMP).filter(([k]) => k !== 'CI').map(([k, v]) => [v.nombre, k, sig(comps(), k)])];
+  const consecutivos = CONSECUTIVOS();
   m.innerHTML = `<header class="vhead"><h2>Numeraciones</h2><button class="primary" id="nuevo">Nueva numeración</button></header>
     <p class="sub">Los documentos electrónicos usan la numeración que la DIAN autoriza y que Factus tiene asociada: el prefijo de aquí debe ser el mismo de Factus.</p>
     <section class="panel stack"><header class="vhead"><h3>Electrónicos con resolución DIAN</h3><span class="tag el">Resolución DIAN</span></header>
@@ -1888,10 +1904,11 @@ function vNumeraciones(m) {
       <p class="hint">Notas y nómina electrónica: la DIAN no pide resolución, basta el prefijo. El consecutivo oficial lo lleva Factus.</p>
       ${tabla([...notasV.map(fila), ...NUM_DIAN.slice(1).map(filaDian)])}</section>
     <section class="panel stack"><header class="vhead"><h3>Documentos internos</h3><button id="nuevaN">Nueva numeración de factura normal</button></header>
-      <p class="hint">No van a la DIAN. La factura normal y el recibo de caja llevan prefijo propio; los demás, un consecutivo automático por tipo.</p>
+      <p class="hint">No van a la DIAN. A cada uno le puedes poner prefijo y el número con que sigue (por ejemplo, si vienes de otro programa).</p>
       ${tabla(internas.map(fila), 'No hay numeraciones de factura normal ni de recibos.')}
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Consecutivo automático</th><th>Tipo</th><th class="r">Siguiente</th></tr></thead><tbody>
-        ${consecutivos.map(([n, k, v]) => `<tr><td>${esc(n)}</td><td class="mono">${k}</td><td class="r mono">${v}</td></tr>`).join('')}</tbody></table></div></section>`;
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Consecutivo interno</th><th>Tipo</th><th>Prefijo</th><th class="r">Siguiente</th><th></th></tr></thead><tbody>
+        ${consecutivos.map(([n, k, l]) => `<tr><td>${esc(n)}</td><td class="mono">${k}</td><td class="mono">${esc(preInt(k)) || '—'}</td><td class="r mono">${sigInt(k, l)}</td><td class="r"><button class="ghost sm" data-int="${k}">Editar</button></td></tr>`).join('')}</tbody></table></div></section>`;
+  m.querySelectorAll('[data-int]').forEach(b => b.onclick = () => formNumInterno(consecutivos.find(c => c[1] === b.dataset.int)));
   m.querySelectorAll('[data-dian]').forEach(b => b.onclick = () => formNumDian(NUM_DIAN.find(t => t.k === b.dataset.dian)));
   $('nuevo').onclick = () => formNumeracion();
   $('nuevaN').onclick = () => formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
@@ -2073,8 +2090,13 @@ function invCosteado(borrador) {
   const docs = borrador ? invDocs().filter(x => x.id !== borrador.id).concat([borrador]) : invDocs();
   return costear(movimientosInv({ ...S.d, inventario_docs: docs }), cfgInventario(emp()?.contabilidad).metodo);
 }
-const nomInv = a => `${TIPOS_INV[a.tipo]?.nombre || a.tipo} ${a.numero}`;
-const siguienteInv = tipo => Math.max(0, ...invDocs().filter(x => x.tipo === tipo).map(x => Number(x.numero) || 0)) + 1;
+const nomInv = a => `${TIPOS_INV[a.tipo]?.nombre || a.tipo} ${preInt(a.tipo)}${a.numero}`;
+// Consecutivos internos: cada empresa puede ponerles prefijo (solo se muestra) y el número con que empiezan.
+const numInt = k => emp()?.contabilidad?.num_internos?.[k] || {};
+const preInt = k => numInt(k).prefijo || '';
+const sigInt = (k, lista) => Math.max(Math.max(0, ...lista.map(x => Number(x.numero) || 0)) + 1, Math.round(num(numInt(k).siguiente)) || 1);
+const numNE = n => preInt('NE') ? `${preInt('NE')}${n}` : `NE ${n}`;
+const siguienteInv = tipo => sigInt(tipo, invDocs().filter(x => x.tipo === tipo));
 const faltaSqlInv = e => /inventario_docs/.test(e.message) && /exist|schema|relation/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/033_inventario_docs.sql.') : e;
 
 function vExistencias(m) {
@@ -2106,7 +2128,7 @@ function vAjustesInv(m) {
   const ms = invCosteado(), val = id => r2(ms.filter(x => x.doc_id === id).reduce((s2, x) => s2 + x.total, 0));
   m.innerHTML = `<header class="vhead"><div><h2>Ajustes de inventario</h2><p class="sub">Inventario inicial, conteo físico, faltantes y sobrantes. Cada ajuste se contabiliza contra la cuenta que escojas.</p></div><a class="btn primary" href="#/ajusteinvnuevo">Nuevo ajuste</a></header>
   <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Fecha</th><th>Concepto</th><th>Tercero</th><th class="r">Valor</th><th></th></tr></thead><tbody>
-    ${l.map(a => `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/ajusteinv/${a.id}"><td class="mono"><a href="#/ajusteinv/${a.id}">AI ${a.numero}</a></td><td>${fFecha(a.fecha)}</td><td>${esc(CONCEPTOS_AI.find(c => c[0] === a.concepto)?.[1] || a.concepto)}</td><td>${esc(terc(a.tercero_id)?.nombre || '')}</td><td class="r mono">${a.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : money(val(a.id))}</td><td></td></tr>`).join('')}
+    ${l.map(a => `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/ajusteinv/${a.id}"><td class="mono"><a href="#/ajusteinv/${a.id}">AI ${preInt('AI')}${a.numero}</a></td><td>${fFecha(a.fecha)}</td><td>${esc(CONCEPTOS_AI.find(c => c[0] === a.concepto)?.[1] || a.concepto)}</td><td>${esc(terc(a.tercero_id)?.nombre || '')}</td><td class="r mono">${a.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : money(val(a.id))}</td><td></td></tr>`).join('')}
     </tbody></table></div>` : '<p class="muted">Todavía no hay ajustes. Empieza por el <b>inventario inicial</b>: las cantidades y el costo de cada producto el día que empiezas a usar AGAsoft.</p>'}</section>`;
   m.querySelectorAll('[data-go]').forEach(r => r.onclick = ev => { if (!ev.target.closest('a')) location.hash = r.dataset.go; });
 }
@@ -2261,7 +2283,7 @@ function vTraslados(m) {
   const cant = a => (a.lineas || []).reduce((s2, x) => s2 + num(x.cantidad), 0);
   m.innerHTML = `<header class="vhead"><div><h2>Traslados entre bodegas</h2><p class="sub">Mueven cantidades de una bodega a otra al costo del momento. Si las dos bodegas usan la misma cuenta 14 no hay asiento; si son distintas, se contabiliza entre esas cuentas.</p></div><a class="btn primary" href="#/trasladonuevo">Nuevo traslado</a></header>
   <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Fecha</th><th>De</th><th>A</th><th class="r">Productos</th><th class="r">Unidades</th></tr></thead><tbody>
-    ${l.map(a => { const b0 = a.lineas?.[0] || {}; return `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/traslado/${a.id}"><td class="mono"><a href="#/traslado/${a.id}">TR ${a.numero}</a>${a.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}</td><td>${fFecha(a.fecha)}</td><td>${esc(bodegaDe(b0.bodega_id)?.nombre || '')}</td><td>${esc(bodegaDe(b0.bodega_destino)?.nombre || '')}</td><td class="r">${(a.lineas || []).length}</td><td class="r mono">${cantTxt(cant(a), fmtEmp())}</td></tr>`; }).join('')}
+    ${l.map(a => { const b0 = a.lineas?.[0] || {}; return `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/traslado/${a.id}"><td class="mono"><a href="#/traslado/${a.id}">TR ${preInt('TR')}${a.numero}</a>${a.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}</td><td>${fFecha(a.fecha)}</td><td>${esc(bodegaDe(b0.bodega_id)?.nombre || '')}</td><td>${esc(bodegaDe(b0.bodega_destino)?.nombre || '')}</td><td class="r">${(a.lineas || []).length}</td><td class="r mono">${cantTxt(cant(a), fmtEmp())}</td></tr>`; }).join('')}
     </tbody></table></div>` : `<p class="muted">Todavía no hay traslados.${bodegas().length < 2 ? ' Primero crea otra bodega en <a href="#/inventariocfg">Bodegas y método</a>.' : ''}</p>`}</section>`;
   m.querySelectorAll('[data-go]').forEach(r => r.onclick = ev => { if (!ev.target.closest('a')) location.hash = r.dataset.go; });
 }
@@ -2607,7 +2629,7 @@ const empById = id => empleados().find(e => e.id === id);
 const nominaById = id => nominas().find(n => n.id === id);
 const esEmpleado = tid => empleados().some(e => e.tercero_id === tid);
 const pNom = () => paramNomina(emp()?.contabilidad);
-const siguienteNomina = () => Math.max(0, ...nominas().map(n => Number(n.numero) || 0)) + 1;
+const siguienteNomina = () => sigInt('NE', nominas());
 const nomArea = a => (AREAS.find(x => x[0] === a) || AREAS[0])[1];
 const faltaTablaNomina = e => /pensionado/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/020_pensionado.sql.' : /borrador|nominas_estado_check|row-level security/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/021_nomina_borrador.sql.' : /empleados|nominas/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear las tablas de nómina en Supabase (archivo supabase/019_nomina.sql).' : e.message;
 // El tercero de la propia empresa (mismo NIT), si está creado.
@@ -2742,7 +2764,7 @@ function vNominas(m) {
   const pintar = () => {
     const l = nominas().filter(n => anuladas || n.estado !== 'anulado').sort((a, b) => b.hasta.localeCompare(a.hasta) || b.numero - a.numero);
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Periodo</th><th class="r">Empleados</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto a pagar</th><th></th></tr></thead><tbody>
-      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono nowrap"><a href="#/nominadoc/${n.id}">NE ${n.numero}</a>${n.estado === 'borrador' ? ' <span class="tag">Borrador</span>' : ''}</td><td class="nowrap">${nomPeriodo(n)}</td><td class="r">${(n.lineas || []).length}</td>
+      ${l.map(n => `<tr class="click ${n.estado === 'anulado' ? 'muted' : ''}" data-go="#/nominadoc/${n.id}"><td class="mono nowrap"><a href="#/nominadoc/${n.id}">${numNE(n.numero)}</a>${n.estado === 'borrador' ? ' <span class="tag">Borrador</span>' : ''}</td><td class="nowrap">${nomPeriodo(n)}</td><td class="r">${(n.lineas || []).length}</td>
         <td class="r mono">${money(n.devengado)}</td><td class="r mono">${money(n.deducciones)}</td><td class="r mono"><b>${money(n.neto)}</b></td><td>${n.estado === 'anulado' ? '<span class="tag bad">Anulada</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
       : `<p class="muted">${empleados().length ? 'Todavía no hay nóminas liquidadas.' : 'Primero crea los empleados en Nómina › Empleados.'}</p>`;
   };
@@ -2790,7 +2812,7 @@ function vNominaEditor(m, id) {
   const lista = () => empleados().filter(e => (x && (x.lineas || []).some(l => l.empleado_id === e.id)) || (e.activo !== false && (!e.fecha_ingreso || e.fecha_ingreso <= n.hasta) && (!e.fecha_retiro || e.fecha_retiro >= n.desde)))
     .sort((a, b) => (terc(a.tercero_id)?.nombre || '').localeCompare(terc(b.tercero_id)?.nombre || ''));
   const COLS = [['dias', 'Días'], ...NOVEDADES.map(c => [c.k, c.nombre])];
-  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>${x ? `Editar nómina NE ${x.numero}` : 'Liquidar nómina'}</h2>
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>${x ? `Editar nómina ${numNE(x.numero)}` : 'Liquidar nómina'}</h2>
     <p class="sub">Escribe las novedades del periodo. Salario, auxilio, seguridad social, aportes y provisiones se calculan solos.</p></div></header>
   <form id="nf" class="stack" novalidate>
     <section class="panel grid-doc">
@@ -2800,7 +2822,7 @@ function vNominaEditor(m, id) {
       <input id="nd" type="hidden" value="${n.desde}"><input id="nh" type="hidden" value="${n.hasta}">
       <p class="hint span2" id="nPer"></p>
       <div><label for="nfe">Fecha de contabilización</label><input id="nfe" type="date" value="${n.fecha}" required></div>
-      <div><label>Número</label><p class="mono">${x ? 'NE ' + x.numero : `NE ${siguienteNomina()} (al guardar)`}</p></div>
+      <div><label>Número</label><p class="mono">${x ? numNE(x.numero) : `${numNE(siguienteNomina())} (al guardar)`}</p></div>
     </section>
     <section class="panel stack"><h3>Empleados</h3><div id="nl"></div><p class="aviso" id="nWarn" hidden></p></section>
     <section class="panel grid-doc"><div class="span2 c-obs"><label for="nob">Observaciones</label><textarea id="nob" rows="2" maxlength="1000">${esc(n.observaciones || '')}</textarea></div><div class="span2 totbox" id="ntot"></div></section>
@@ -2934,7 +2956,7 @@ function hojaDesprendible(n, l) {
   const t = terc(l.tercero_id), e = empById(l.empleado_id) || {};
   const dev = (l.items || []).filter(i => i.tipo === 'dev'), ded = (l.items || []).filter(i => i.tipo === 'ded');
   const filas = Math.max(dev.length, ded.length);
-  return `<article class="desprendible">${cabInforme('Desprendible de nómina', `NE ${n.numero}<br><small>${nomPeriodo(n)}</small>`)}
+  return `<article class="desprendible">${cabInforme('Desprendible de nómina', `${numNE(n.numero)}<br><small>${nomPeriodo(n)}</small>`)}
     <div class="grid2"><div><b>${esc(t?.nombre || '')}</b><br><span class="muted">${esc(docId(t))}</span><br>${esc(e.cargo || '')}</div>
       <div><b>Salario:</b> ${money(e.salario)}<br><b>Días liquidados:</b> ${l.dias}${e.banco ? `<br><b>Pago a:</b> ${esc(e.banco)} ${esc(e.cuenta_bancaria || '')}` : ''}</div></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Devengados</th><th class="r">Valor</th><th>Deducciones</th><th class="r">Valor</th></tr></thead><tbody>
@@ -2947,7 +2969,7 @@ function vNominaDoc(m, id) {
   const n = nominaById(id); if (!n) { m.innerHTML = '<p>No se encontró la nómina.</p>'; return; }
   const anulada = n.estado === 'anulado', borr = n.estado === 'borrador';
   const tot = k => money((n.lineas || []).reduce((s, l) => s + num(l[k]), 0));
-  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina NE ${n.numero} ${anulada ? '<span class="tag bad">Anulada</span>' : borr ? '<span class="tag">Borrador</span>' : ''}</h2>
+  m.innerHTML = `<header class="vhead noprint"><div><a class="back" href="#/nomina">← Liquidaciones de nómina</a><h2>Nómina ${numNE(n.numero)} ${anulada ? '<span class="tag bad">Anulada</span>' : borr ? '<span class="tag">Borrador</span>' : ''}</h2>
       <p class="sub">${nomPeriodo(n)} · ${fFecha(n.desde)} a ${fFecha(n.hasta)} · ${borr ? `sin contabilizar (fecha ${fFecha(n.fecha)})` : `contabilizada el ${fFecha(n.fecha)}`}</p></div>
     <div class="row">${borr ? `<button id="eliminar">Eliminar</button><a class="btn" href="#/nominaeditar/${id}">Editar</a><button id="imprimir">Imprimir desprendibles</button><button class="primary" id="contab">Contabilizar</button>`
       : `${anulada ? '' : `<button id="anular">Anular</button><a class="btn" href="#/nominaeditar/${id}">Editar</a><a class="btn" href="#/nominapago?modo=salarios">Pagar salarios</a>`}<button class="primary" id="imprimir">Imprimir desprendibles</button>`}</div></header>
@@ -2959,7 +2981,7 @@ function vNominaDoc(m, id) {
     <section class="panel stack"><h3>${borr ? 'Contabilización (así quedará al contabilizar)' : 'Contabilización'}</h3><div id="nAs"></div>${anulada ? `<p class="hint">Anulada${n.anulado_motivo ? `: ${esc(n.anulado_motivo)}` : ''}. No suma en los informes.</p>` : ''}
       <p class="hint">El neto de los empleados se paga con un <a href="#/nominapago?modo=salarios">pago de nómina</a> (todos en un solo comprobante). La seguridad social, los parafiscales y las prestaciones quedan en <a href="#/nominapasivos">Seguridad social y prestaciones</a>, donde se ajustan y se pagan.</p></section>`;
   vistaAsientoNomina($('nAs'), { ...n, estado: 'contabilizado' });
-  const imprimirN = ls => { $('print').innerHTML = ls.map(l => hojaDesprendible(n, l)).join(''); const t = document.title; document.title = `Nómina NE ${n.numero} - ${emp().nombre}`; window.print(); document.title = t; };
+  const imprimirN = ls => { $('print').innerHTML = ls.map(l => hojaDesprendible(n, l)).join(''); const t = document.title; document.title = `Nómina ${numNE(n.numero)} - ${emp().nombre}`; window.print(); document.title = t; };
   $('imprimir').onclick = () => imprimirN(n.lineas || []);
   m.querySelectorAll('[data-dp]').forEach(b => b.onclick = () => imprimirN([n.lineas[Number(b.dataset.dp)]]));
   if ($('contab')) $('contab').onclick = async () => {
@@ -2967,7 +2989,7 @@ function vNominaDoc(m, id) {
     try { await store.save('nominas', { id: n.id, estado: 'contabilizado' }); await cargarEmpresa(); toast('Nómina contabilizada.'); route(); }
     catch (e) { toast(faltaTablaNomina(e), true); $('contab').disabled = false; }
   };
-  if ($('eliminar')) $('eliminar').onclick = () => dialogo(`<h2>Eliminar borrador NE ${n.numero}</h2><p>El borrador se borra del todo. Como no estaba contabilizado, no afecta la contabilidad.</p>${pie('Eliminar')}`, async () => {
+  if ($('eliminar')) $('eliminar').onclick = () => dialogo(`<h2>Eliminar borrador ${numNE(n.numero)}</h2><p>El borrador se borra del todo. Como no estaba contabilizado, no afecta la contabilidad.</p>${pie('Eliminar')}`, async () => {
     try { await store.remove('nominas', n.id); } catch (e) { throw new Error(faltaTablaNomina(e)); }
     await cargarEmpresa();
     // Sin el permiso de borrar (021), Supabase no borra ni avisa: se revisa que ya no esté.
@@ -2977,7 +2999,7 @@ function vNominaDoc(m, id) {
   if ($('anular')) $('anular').onclick = () => {
     const pagada = compras().some(c => c.tipo === 'CE' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.aplicaciones || []).some(a => a.cuenta && (n.lineas || []).some(l => l.tercero_id === c.tercero_id)))
       || comps().some(c => c.tipo === 'PN' && c.estado !== 'anulado' && c.fecha >= n.fecha && (c.lineas || []).some(x => (n.lineas || []).some(l => l.tercero_id === x.tercero_id)));
-    dialogo(`<h2>Anular nómina NE ${n.numero}</h2><p>Sus movimientos dejan de sumar en los informes. El número no se vuelve a usar.${pagada ? ' <b>Hay egresos que pagaron saldos de nómina a estos empleados después de esta fecha: revísalos.</b>' : ''}</p>
+    dialogo(`<h2>Anular nómina ${numNE(n.numero)}</h2><p>Sus movimientos dejan de sumar en los informes. El número no se vuelve a usar.${pagada ? ' <b>Hay egresos que pagaron saldos de nómina a estos empleados después de esta fecha: revísalos.</b>' : ''}</p>
       <div><label for="f_mot">Motivo</label><input id="f_mot" name="motivo" required maxlength="200"></div>${pie('Anular')}`, async fd => {
       const mot = String(fd.get('motivo')).trim(); if (!mot) throw new Error('Escribe el motivo.');
       await store.save('nominas', { id: n.id, estado: 'anulado', anulado_motivo: mot, anulado_en: new Date().toISOString() });
@@ -3169,7 +3191,7 @@ function vNominaPagos(m) {
   const pintar = () => {
     const l = comps().filter(c => c.tipo === 'PN' && (anulados || c.estado !== 'anulado')).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Descripción</th><th class="r">Pagado</th><th></th></tr></thead><tbody>
-      ${l.map(c => `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/comp/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="nowrap"><a href="#/comp/${c.id}">Pago de nómina ${c.numero}</a></td><td>${esc(c.descripcion)}</td><td class="r mono">${money(pagadoPN(c))}</td><td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
+      ${l.map(c => `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/comp/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="nowrap"><a href="#/comp/${c.id}">Pago de nómina ${preInt(c.tipo)}${c.numero}</a></td><td>${esc(c.descripcion)}</td><td class="r mono">${money(pagadoPN(c))}</td><td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Todavía no hay pagos de nómina. Después de contabilizar la nómina, paga aquí los salarios, la PILA y las prestaciones.</p>';
   };
   $('anu').onchange = () => { anulados = $('anu').checked; pintar(); };
@@ -4123,9 +4145,9 @@ void dvOf;
 /* ---------- Comprobantes contables (notas de contabilidad y saldos iniciales) ---------- */
 const comps = () => S.d?.comprobantes || [];
 const compById = id => comps().find(c => c.id === id);
-const nomComp = c => `${TIPOS_COMP[c.tipo].nombre} ${c.numero}`;
+const nomComp = c => `${TIPOS_COMP[c.tipo].nombre} ${preInt(c.tipo)}${c.numero}`;
 const valorComp = c => r2((c.lineas || []).reduce((s, l) => s + num(l.debito), 0));
-const siguienteComp = tipo => Math.max(0, ...comps().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
+const siguienteComp = tipo => sigInt(tipo, comps().filter(c => c.tipo === tipo));
 // Cuentas auxiliares: las de 8 dígitos, las únicas que reciben movimientos.
 // Cuentas que se usan en compras y gastos: inventarios, activos fijos e intangibles, diferidos, gastos y costos.
 const CLASES_COMPRA = ['14', '15', '16', '17', '18', '5', '6', '7'];
@@ -4314,7 +4336,7 @@ function vComp(m, id) {
   });
 }
 function hojaComp(c, ms, imprimir) {
-  return `${cabInforme(TIPOS_COMP[c.tipo].nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
+  return `${cabInforme(TIPOS_COMP[c.tipo].nombre, `No. ${preInt(c.tipo)}${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     ${c.descripcion ? `<p><b>Descripción:</b> ${esc(c.descripcion)}</p>` : ''}${imprimir && c.estado === 'anulado' ? '<p><b>ANULADO</b></p>' : ''}
     ${tablaAsiento(ms)}${imprimir ? '<div class="firmas"><span>Elaboró</span><span>Aprobó</span></div><p class="rep-small">Elaborado con AGAsoft.</p>' : ''}`;
 }
@@ -4322,8 +4344,8 @@ function hojaComp(c, ms, imprimir) {
 /* ---------- Compras y gastos ---------- */
 const compras = () => S.d?.compras || [];
 const compraById = id => compras().find(c => c.id === id);
-const nomCompra = c => c?.tipo ? `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero ?? ''}`.trim() : '';
-const siguienteCompra = tipo => Math.max(0, ...compras().filter(c => c.tipo === tipo).map(c => Number(c.numero) || 0)) + 1;
+const nomCompra = c => c?.tipo ? `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero != null ? preInt(c.tipo) + c.numero : ''}`.trim() : '';
+const siguienteCompra = tipo => sigInt(tipo, compras().filter(c => c.tipo === tipo));
 // A quién se le puede pagar con un egreso: proveedores, empleados y quien tenga saldos de nómina por pagar.
 const tercerosEgreso = incluir => { const lab = new Set(movs().filter(mv => /^(2370|2380|2505|2510|2515|2520|2525)/.test(mv.cuenta)).map(mv => mv.tercero_id)); return [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || esEmpleado(t.id) || lab.has(t.id) || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre)); };
 const refAplicacion = a => { if (a.cuenta) return { ...a, ref: `${nomCta(a.cuenta)} (${a.cuenta})` }; const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; };
@@ -4345,7 +4367,7 @@ function vCompras(m, tipo) {
     const l = compras().filter(c => c.tipo === tipo && (anulados || c.estado !== 'anulado') && (!q || `${c.numero} ${c.num_proveedor} ${terc(c.tercero_id)?.nombre} ${terc(c.tercero_id)?.numero}`.toLowerCase().includes(q)))
       .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero - a.numero);
     $('lst').innerHTML = l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Número</th><th>Proveedor</th>${tipo === 'FC' ? '<th>Factura del proveedor</th>' : ''}<th class="r">${tipo === 'CE' ? 'Pagado' : 'Neto a pagar'}</th>${tipo === 'CE' ? '' : '<th class="r">Saldo</th>'}<th></th></tr></thead><tbody>
-      ${l.map(c => { const s = saldos[c.id]; return `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/compra/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="mono"><a href="#/compra/${c.id}">${c.numero}</a></td><td>${esc(terc(c.tercero_id)?.nombre)}</td>${tipo === 'FC' ? `<td class="mono">${esc(c.num_proveedor)}</td>` : ''}
+      ${l.map(c => { const s = saldos[c.id]; return `<tr class="click ${c.estado === 'anulado' ? 'muted' : ''}" data-go="#/compra/${c.id}"><td class="nowrap">${fFecha(c.fecha)}</td><td class="mono"><a href="#/compra/${c.id}">${preInt(c.tipo)}${c.numero}</a></td><td>${esc(terc(c.tercero_id)?.nombre)}</td>${tipo === 'FC' ? `<td class="mono">${esc(c.num_proveedor)}</td>` : ''}
         <td class="r mono">${money(tipo === 'CE' ? totalEgreso(c) : c.neto)}</td>${tipo === 'CE' ? '' : `<td class="r mono">${s && s.saldo > 0.009 ? money(s.saldo) : ''}</td>`}
         <td>${c.estado === 'anulado' ? '<span class="tag bad">Anulado</span>' : s && s.saldo > 0.009 && s.diasVencida ? `<span class="tag bad">Vencida ${s.diasVencida} d</span>` : s && s.saldo <= 0.009 ? '<span class="tag ok">Pagada</span>' : ''}</td></tr>`; }).join('')}</tbody></table></div>`
       : `<p class="muted">No hay ${T.plural.toLowerCase()}${q ? ' con ese filtro' : ' todavía'}.</p>`;
@@ -4581,7 +4603,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
 function hojaCompra(c, imprimir) {
   const t = terc(c.tercero_id), T = TIPOS_COMPRA[c.tipo];
   const s = c.tipo === 'CE' ? null : cxp().find(x => x.compra.id === c.id);
-  return `${cabInforme(T.nombre, `No. ${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
+  return `${cabInforme(T.nombre, `No. ${preInt(c.tipo)}${c.numero}<br><small>${fFecha(c.fecha)}</small>`)}
     <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
     <div>${c.tipo === 'NA' ? `<b>Ajusta:</b> ${esc(nomCompra(compraById(c.ref_id) || {}))}${numeroDianCompra(c.ref_id) ? ` <span class="mono">(${esc(numeroDianCompra(c.ref_id))})</span>` : ''}<br><b>Concepto:</b> ${esc(CONCEPTOS_NA.find(x => x[0] === String(c.concepto))?.[1] || '')}<br>` : ''}${c.electronica && numeroDianCompra(c.id) ? `<b>Número DIAN:</b> <span class="mono">${esc(numeroDianCompra(c.id))}</span><br>` : ''}${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), false, c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
     ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
