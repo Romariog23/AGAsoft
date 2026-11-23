@@ -4179,7 +4179,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       <datalist id="prodsK">${prodsInv.map(p => `<option value="${esc(p.codigo)} · ${esc(p.nombre)}">`).join('')}</datalist>
       <datalist id="ctasK">${optsLista(cuentasAux().filter(x => CLASES_COMPRA.some(p => x.codigo.startsWith(p))))}</datalist>
       <div class="tbl-wrap"><table class="tbl items comp"><thead><tr>${prodsInv.length ? '<th>Producto</th>' : ''}<th>Cuenta</th><th>Descripción</th><th class="r">Cantidad</th><th class="r">Costo unitario</th><th class="r">Valor antes de IVA</th><th class="r">IVA %</th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody id="kl"></tbody></table></div>
-      ${prodsInv.length ? '<p class="hint">Cada línea lleva <b>producto o cuenta</b>, no los dos. Con producto, la compra entra al inventario de la bodega escogida y va a su cuenta 14; con cuenta, va a un gasto, costo o activo.</p>' : ''}
+      ${prodsInv.length ? '<p class="hint">Cada línea lleva <b>producto o cuenta</b>, no los dos. Con producto, la compra entra al inventario de la bodega escogida y va a su cuenta 14; con cuenta, va a un gasto, costo o activo, y puedes poner cantidad y costo unitario o escribir el valor directo.</p>' : ''}
       ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
     <section class="panel grid-doc">
       <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
@@ -4225,8 +4225,8 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         ${pr ? `<select data-k="bodega_id" class="sm-sel" aria-label="Bodega">${optsBod(l.bodega_id)}</select>` : ''}</td>` : ''}
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasK" class="mono w-cod" autocomplete="off" value="${esc(l.cuenta)}" placeholder="${pr ? '' : 'Código o nombre'}" aria-label="Cuenta" ${pr ? 'disabled title="La da la bodega del producto"' : ''}><small class="hint" data-n="${i}">${esc(l.cuenta ? nomCta(l.cuenta) : '')}</small></td>
       <td data-l="Descripción" class="c-desc"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}" aria-label="Descripción"></td>
-      <td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${pr ? num(l.cantidad) || '' : ''}" aria-label="Cantidad" ${pr ? '' : 'disabled'}>${p ? `<small class="hint">${esc(p.unidad || '')}</small>` : ''}</td>
-      <td data-l="Costo unitario"><input data-k="costo" type="number" min="0" step="any" class="r mono w-val" value="${pr ? num(l.costo) || '' : ''}" aria-label="Costo unitario" ${pr ? '' : 'disabled'}></td>
+      <td data-l="Cantidad"><input data-k="cantidad" type="number" min="0" step="any" class="r mono w-num" value="${num(l.cantidad) || ''}" aria-label="Cantidad">${p ? `<small class="hint">${esc(p.unidad || '')}</small>` : ''}</td>
+      <td data-l="Costo unitario"><input data-k="costo" type="number" min="0" step="any" class="r mono w-val" value="${num(l.costo) || ''}" aria-label="Costo unitario" ${pr ? '' : 'placeholder="Opcional"'}></td>
       <td data-l="Valor">${pr ? `<span class="mono r blk" data-kb="${i}">${money(l.base)}</span>` : `<input data-k="base" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.base) || ''}" aria-label="Valor antes de IVA">`}</td>
       <td data-l="IVA %"><select data-k="iva_pct" class="w-num" aria-label="IVA %">${optsIva(l.iva_pct)}</select></td>
       ${ccCfg().activo ? `<td data-l="Centro de costo" class="c-cc">${btnCC(l.cc, i, pr && tieneDist(p?.cc) ? p.cc : c.cc)}</td>` : ''}
@@ -4267,6 +4267,9 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         const pi = tr.querySelector('[data-k=producto]'); if (pi) pi.disabled = !!l.cuenta;
       }
       if (esLineaProducto(l)) c.lineas[i] = lineaProducto(l, bodegaDe(l.bodega_id));
+      // Línea por cuenta: con costo unitario, el valor es cantidad × costo (sin cantidad cuenta 1); si se escribe el valor a mano, se quita el costo.
+      else if (el.dataset.k === 'cantidad' || el.dataset.k === 'costo') { if (num(l.costo)) { l.base = String(r2((num(l.cantidad) || 1) * num(l.costo))); const bi = tr.querySelector('[data-k=base]'); if (bi) bi.value = l.base; } }
+      else if (el.dataset.k === 'base' && num(l.costo)) { l.costo = ''; const ci = tr.querySelector('[data-k=costo]'); if (ci) ci.value = ''; }
       resumen();
     });
     $('kl').addEventListener('change', ev => {
@@ -4307,7 +4310,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     ev.preventDefault(); leer();
     if (!esCE) c.lineas = c.lineas.filter(l => esLineaProducto(l) || String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base)).map(l => esLineaProducto(l)
       ? (({ producto_id, bodega_id, cantidad, costo, cuenta, base }) => ({ producto_id, bodega_id: bodega_id || '', cantidad, costo, cuenta, descripcion: String(l.descripcion || '').trim(), base, iva_pct: num(l.iva_pct), ...ccLinea(l) }))(lineaProducto(l, bodegaDe(l.bodega_id)))
-      : { cuenta: String(l.cuenta).trim(), descripcion: String(l.descripcion || '').trim(), base: r2(num(l.base)), iva_pct: num(l.iva_pct), ...ccLinea(l) });
+      : { cuenta: String(l.cuenta).trim(), descripcion: String(l.descripcion || '').trim(), base: r2(num(l.base)), iva_pct: num(l.iva_pct), ...(num(l.costo) ? { cantidad: num(l.cantidad) || 1, costo: num(l.costo) } : {}), ...ccLinea(l) });
     else c.aplicaciones = c.aplicaciones.filter(a => num(a.valor) > 0).map(a => refAplicacion({ ...(a.cuenta ? { cuenta: a.cuenta } : { compra_id: a.compra_id }), valor: r2(num(a.valor)) }));
     if (esCE) {
       const lab = porPagarLaboral(movs().filter(mv => mv.doc_id !== c.id), c.tercero_id);
