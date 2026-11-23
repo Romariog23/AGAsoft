@@ -14,7 +14,7 @@ export const TIPOS_CAMPO = [
   ['numero', 'Número'], ['lectura', 'Lectura inicial y final (horómetro, odómetro)'], ['texto', 'Texto'],
   ['lista', 'Lista de opciones'], ['sino', 'Sí / No'], ['elemento', 'Elemento de una lista (equipo, obra…)'],
 ];
-export const MODOS_TARIFA = [['unidad', 'Por unidad (hora, viaje, kg)'], ['registro', 'Por registro (día o servicio)'], ['fijo', 'Valor fijo por corte'], ['adicional', 'Ajuste adicional por unidad (se suma a la tarifa)']];
+export const MODOS_TARIFA = [['unidad', 'Por unidad (hora, viaje, kg)'], ['registro', 'Por registro (día o servicio)'], ['fijo', 'Valor fijo por corte']];
 export const USOS_TARIFA = [['pago', 'Programación (lo que se le reconoce a la persona)'], ['cobro', 'Cobro (lo que se le cobra al cliente)']];
 export const CUANDO = [['dominical_festivo', 'Domingo o festivo'], ['domingo', 'Solo domingo'], ['festivo', 'Solo festivo'], ['sabado', 'Sábado'], ['siempre', 'Siempre']];
 export const SALIDAS_PAGO = [['ninguno', 'No se programa (solo control)'], ['ds', 'Documento soporte'], ['nomina', 'Novedad de nómina']];
@@ -151,11 +151,15 @@ export function variables(r, cfg) {
   }
   return v;
 }
-const valorCriterio = (r, k) => k === 'tercero' ? r.tercero_id : r.datos?.[k];
+const valorCriterio = (r, k) => k === 'tercero' ? r.tercero_id : k === 'cotizacion' ? r.cotizacion_id : r.datos?.[k];
 // La tarifa más específica que aplica al registro: todos sus criterios coinciden; gana la que tenga más criterios y, si empatan, la más reciente.
 const tarifasQueAplican = (r, tarifas, uso) => (tarifas || []).filter(t => t.tipo_id === r.tipo_id && (t.uso || 'pago') === uso && (!t.desde || t.desde <= r.fecha) && (!t.hasta || r.fecha <= t.hasta)
   && Object.entries(t.criterios || {}).every(([k, val]) => !val || valorCriterio(r, k) === val));
-// Ajustes adicionales de programación (p. ej. +$1.000 la hora en una obra): se suman a la tarifa base, no la reemplazan.
+// Ajuste adicional al operador escrito en la cotización (proyecto): +valor por unidad liquidada, solo en los registros de ese proyecto.
+// Se vuelve una tarifa interna 'adicional' que se suma a la tarifa base del operador; no se guarda en op_tarifas.
+export const ajustesDeCotizaciones = (cotizaciones, tipoId) => (cotizaciones || []).filter(c => c.op_tipo_id === tipoId && n(c.ajuste_op) > 0)
+  .map(c => ({ id: 'aj-' + c.id, sintetica: true, tipo_id: tipoId, uso: 'pago', modo: 'adicional', valor: n(c.ajuste_op), criterios: { cotizacion: c.id }, nota: `Ajuste proyecto N.º ${c.numero}`, producto_id: null }));
+// Ajustes adicionales de programación: se suman a la tarifa base, no la reemplazan.
 export const ajustesPara = (r, tarifas) => tarifasQueAplican(r, tarifas, 'pago').filter(t => t.modo === 'adicional');
 export function tarifaPara(r, tarifas, uso = 'pago') {
   const ok = tarifasQueAplican(r, tarifas, uso).filter(t => t.modo !== 'adicional');
@@ -280,7 +284,6 @@ export function erroresTarifa(t) {
   const e = [];
   if (!(n(t.valor) > 0)) e.push('El valor de la tarifa debe ser mayor que cero.');
   if (!MODOS_TARIFA.some(m => m[0] === t.modo)) e.push('Escoge el modo de la tarifa.');
-  if (t.modo === 'adicional' && t.uso === 'cobro') e.push('El ajuste adicional es solo para programación: al cliente se le cobra con la cotización.');
   if (t.desde && t.hasta && t.hasta < t.desde) e.push('La vigencia termina antes de empezar.');
   return e;
 }
@@ -358,6 +361,8 @@ export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, product
 // La cotización fija el precio de cobro. Se amarra a un tipo de operación y, si quiere, a elementos (obra, equipo…);
 // cada línea puede pedir más elementos. Sin cotización que coincida se usa la tarifa de cobro, si existe.
 export const ESTADOS_COT = [['abierta', 'Abierta'], ['aceptada', 'Aceptada'], ['rechazada', 'Rechazada'], ['cerrada', 'Cerrada']];
+// Nombre corto del proyecto (cotización) para listas.
+export const nombreProyecto = (c, nomT, nomEl) => [`N.º ${c.numero}`, ...Object.values(c.criterios || {}).filter(Boolean).map(nomEl).filter(Boolean), nomT(c.tercero_id)].join(' · ');
 export const cotizacionVigente = c => !!c && (c.estado === 'abierta' || c.estado === 'aceptada');
 const coincide = (criterios, r) => Object.entries(criterios || {}).every(([k, v]) => !v || r.datos?.[k] === v);
 const pesoCrit = c => Object.values(c || {}).filter(Boolean).length;
