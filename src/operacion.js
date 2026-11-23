@@ -15,9 +15,9 @@ export const TIPOS_CAMPO = [
   ['lista', 'Lista de opciones'], ['sino', 'Sí / No'], ['elemento', 'Elemento de una lista (equipo, obra…)'],
 ];
 export const MODOS_TARIFA = [['unidad', 'Por unidad (hora, viaje, kg)'], ['registro', 'Por registro (día o servicio)'], ['fijo', 'Valor fijo por corte']];
-export const USOS_TARIFA = [['pago', 'Pago (lo que se le paga a la persona)'], ['cobro', 'Cobro (lo que se le cobra al cliente)']];
+export const USOS_TARIFA = [['pago', 'Programación (lo que se le reconoce a la persona)'], ['cobro', 'Cobro (lo que se le cobra al cliente)']];
 export const CUANDO = [['dominical_festivo', 'Domingo o festivo'], ['domingo', 'Solo domingo'], ['festivo', 'Solo festivo'], ['sabado', 'Sábado'], ['siempre', 'Siempre']];
-export const SALIDAS_PAGO = [['ninguno', 'No genera pago (solo control)'], ['ds', 'Documento soporte'], ['nomina', 'Novedad de nómina']];
+export const SALIDAS_PAGO = [['ninguno', 'No se programa (solo control)'], ['ds', 'Documento soporte'], ['nomina', 'Novedad de nómina']];
 export const SALIDAS_COBRO = [['ninguno', 'No se factura'], ['fv', 'Factura de venta']];
 const FUNCIONES = { min: Math.min, max: Math.max, redondear: (x, d = 0) => { const p = 10 ** d; return Math.round(x * p) / p; } };
 export const VARIABLES_FIJAS = ['cantidad', 'pagadas', 'tarifa'];
@@ -217,9 +217,9 @@ export function avisos(registros, tipo, tarifas) {
   }
   for (const r of registros) {
     const c = calcular(r, tipo, tarifas), v = variables(r, cfg);
-    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.cantidad) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se pagan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
+    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.cantidad) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se liquidan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
     if (cfg.pendiente?.campo && (cfg.pendiente.valores || []).includes(r.datos?.[cfg.pendiente.campo])) out.push({ clase: 'pendiente', registro_id: r.id, fecha: r.fecha, texto: `Soporte pendiente: ${r.datos[cfg.pendiente.campo]}.` });
-    if (!c.tarifa && c.pagadas > 0) out.push({ clase: 'tarifa', registro_id: r.id, fecha: r.fecha, texto: 'No hay tarifa de pago que aplique a este registro.' });
+    if (!c.tarifa && c.pagadas > 0) out.push({ clase: 'tarifa', registro_id: r.id, fecha: r.fecha, texto: 'No hay tarifa de programación que aplique a este registro.' });
     for (const k of cfg.campos.filter(x => x.tipo === 'lectura')) { const x = r.datos?.[k.k]; if (x && x.ini !== '' && x.fin !== '' && x.ini != null && x.fin != null && v[k.k] < 0) out.push({ clase: 'lectura', registro_id: r.id, fecha: r.fecha, texto: `${k.nombre}: la lectura final es menor que la inicial.` }); }
   }
   return out;
@@ -336,7 +336,7 @@ export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, product
     if (!cuenta) errores.push(`Falta la cuenta de "${p?.nombre || l.regla || 'la tarifa'}": ponla en el ítem de servicio o en Configurar › Salidas.`);
     return { cuenta, descripcion: `${p?.nombre ? p.nombre + " · " : l.regla || l.cargo ? "" : tipoNombre + " · "}${l.detalle} · ${periodo}`.slice(0, 300), base: r2(l.valor), iva_pct: 0, ...(conCC && l.cc?.length ? { cc: l.cc } : {}) };
   });
-  if (!lineas.length) errores.push('El volante no tiene valores para pagar.');
+  if (!lineas.length) errores.push('El volante no tiene valores para programar.');
   return { errores, compra: { empresa_id, tipo: 'DS', fecha, vence: null, tercero_id: v.tercero_id, num_proveedor: '', lineas,
     retefuente_pct: n(tercero.ret_compra_fuente_pct), reteiva_pct: n(tercero.ret_compra_iva_pct), reteica_milaje: n(tercero.ret_compra_ica_milaje), cuenta_retefuente: '', retenciones: {},
     cuenta_pago: '', aplicaciones: [], anticipo: 0, observaciones: `Generado desde Operación · ${tipoNombre} · ${periodo}` } };
