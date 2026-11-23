@@ -601,9 +601,10 @@ button.cfg-main:hover{background:none}
 .cq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
 .cq-lineas td{vertical-align:middle}.cq-lineas td.c{text-align:center}
 .cq-lineas input,.cq-lineas select{width:100%;min-width:70px}
-.cq-lineas td:nth-child(2) input{min-width:200px}
+.cq-lineas td:first-child{min-width:190px;width:200px}.cq-lineas td:first-child select{width:200px;min-width:0}.cq-lineas [data-lc]{width:110px}
+.cq-lineas td,.cq-lineas th{padding-left:3px;padding-right:3px}.cq-lineas [data-k=descuento_pct],.cq-lineas [data-k=iva_pct],.cq-lineas [data-k=cantidad]{min-width:56px}.cq-lineas [data-k=unidad]{min-width:56px}.cq-lineas [data-k=total]{min-width:120px;font-weight:600}
 .op-fac{border-left:3px solid var(--lime,#b5d334)}
-.cq-lineas [data-k=precio]{min-width:120px}.cq-lineas [data-lc]{min-width:140px}.cq-lineas [data-k=producto_id]{min-width:150px}
+.cq-lineas [data-k=precio]{min-width:110px}.cq-lineas [data-op]{min-width:110px}.cq-lineas [data-lc]{min-width:110px}
 .op-fac .vhead{margin:0}
 .op-pc{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}.op-pc .vhead{margin:0}
 .kpi small{display:block;color:var(--muted,#6b7280);font-size:.78rem}
