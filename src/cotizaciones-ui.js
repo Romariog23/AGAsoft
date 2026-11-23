@@ -89,14 +89,13 @@ export function vCotizacion(m, id) {
       ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Sin ${esc(f.nombre.toLowerCase())}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}<option value="__nueva" ${c.nuevos[f.k] != null ? 'selected' : ''}>+ Crear ${esc(f.nombre.toLowerCase())}…</option></select>${c.nuevos[f.k] != null ? `<input id="cqN_${f.k}" data-nuevo="${f.k}" value="${esc(c.nuevos[f.k])}" placeholder="Nombre (ej.: CORTEVA)" maxlength="80" style="margin-top:6px">` : ''}</div>`).join('')}</div>
       ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por hora (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
       <p class="hint">Se suma a la tarifa de programación de cada operador, solo en los registros de este proyecto. Sale como línea aparte en el volante y el documento soporte. No cambia lo que se le cobra al cliente.</p>` : ''}</section>` : ''}
-    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro desde Operación</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
-      ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select></td>
-        <td><input data-k="descripcion" value="${esc(l.descripcion)}" maxlength="300"></td>
+    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto y descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Valor unitario</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
+      ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select><input data-k="descripcion" value="${esc(l.descripcion)}" maxlength="300" placeholder="Descripción" style="margin-top:4px"></td>
         ${t ? libres.map(f => `<td><select data-lc="${f.k}"><option value="">${l.op === false ? '—' : 'Cualquiera'}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === l.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></td>`).join('') : ''}
         <td><input data-k="cantidad" type="number" step="any" min="0" class="r" value="${l.cantidad}"></td><td><input data-k="unidad" value="${esc(l.unidad)}" maxlength="10" size="5"></td>
         <td><input data-k="precio" type="number" step="any" min="0" class="r" value="${l.precio}"></td><td><input data-k="descuento_pct" type="number" step="any" min="0" max="100" class="r" value="${l.descuento_pct}"></td>
         <td><input data-k="iva_pct" type="number" step="any" min="0" class="r" value="${l.iva_pct}"></td>
-        ${t ? `<td><select data-op>${X.opts(COBRO_LINEA, cobroDeLinea(l))}</select>${l.op === 'fijo' && l.facturado ? '<br><small class="hint">Ya facturada</small>' : ''}</td>` : ''}<td class="r mono" data-tot>${money(totalLineaCot(l))}</td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
+        ${t ? `<td><select data-op>${X.opts(COBRO_LINEA, cobroDeLinea(l))}</select>${l.op === 'fijo' && l.facturado ? '<br><small class="hint">Ya facturada</small>' : ''}</td>` : ''}<td><input data-k="total" data-tot type="number" step="any" min="0" class="r" value="${totalLineaCot(l) || ''}" title="Escribe el total y se calcula el valor unitario"></td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
       </tbody></table></div><div class="row"><button type="button" class="ghost" id="cqAdd">+ Agregar línea</button></div><div id="cqTot"></div></section>
     ${avanceHtml()}
     <section class="panel"><div class="grid2"><div><label for="cqO">Observaciones</label><textarea id="cqO" rows="3" maxlength="2000">${esc(c.observaciones || '')}</textarea></div><div><label for="cqK">Condiciones (forma de pago, mínimos, movilización…)</label><textarea id="cqK" rows="3" maxlength="2000">${esc(c.condiciones || '')}</textarea></div></div></section>`;
@@ -120,8 +119,15 @@ export function vCotizacion(m, id) {
     const tb = m.querySelector('.cq-lineas tbody');
     tb.addEventListener('input', ev => {
       const tr = ev.target.closest('tr'), l = c.lineas[Number(tr.dataset.i)], k = ev.target.dataset.k; if (!k || k === 'producto_id') return;
+      if (k === 'total') { // escribe el total: el valor unitario sale de total ÷ (cantidad × (1 − descuento))
+        const div = X.num(l.cantidad) * (1 - X.num(l.descuento_pct) / 100);
+        if (!div) { if (!X.num(l.cantidad)) { l.cantidad = 1; tr.querySelector('[data-k=cantidad]').value = 1; } }
+        const d2 = X.num(l.cantidad) * (1 - X.num(l.descuento_pct) / 100);
+        l.precio = d2 ? Math.round(X.num(ev.target.value) / d2 * 1e6) / 1e6 : 0;
+        tr.querySelector('[data-k=precio]').value = l.precio; totalesTxt(); return;
+      }
       l[k] = ['cantidad', 'precio', 'descuento_pct', 'iva_pct'].includes(k) ? X.num(ev.target.value) : ev.target.value;
-      tr.querySelector('[data-tot]').textContent = money(totalLineaCot(l)); totalesTxt();
+      tr.querySelector('[data-tot]').value = totalLineaCot(l) || ''; totalesTxt();
     });
     tb.addEventListener('change', ev => {
       const tr = ev.target.closest('tr'); if (!tr) return; const l = c.lineas[Number(tr.dataset.i)];
