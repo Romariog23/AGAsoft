@@ -41,11 +41,12 @@ export const ICONO_MENU = ICO.op;
 /* ---------- Inicio de Operación ---------- */
 export function vOperacion(m) {
   const { esc, money } = X;
+  if (operacionActiva()) { location.hash = '#/oprecibos'; return; }
   if (!operacionActiva()) {
-    m.innerHTML = `<header class="vhead"><div><h2>Operación</h2><p class="sub">Registros operativos que no afectan la contabilidad hasta que generes un documento.</p></div></header>
-    <section class="panel callout stack"><b>Operación está apagada para esta empresa.</b><p>Es opcional: actívala si quieres llevar aquí horas máquina, viajes, jornales u otros registros de tu operación y después usarlos para tus documentos.</p>
+    m.innerHTML = `<header class="vhead"><div><h2>Operación</h2><p class="sub">Horas máquina por operador, proyecto y máquina. No mueve la contabilidad hasta que programes (documento soporte) o factures.</p></div></header>
+    <section class="panel callout stack"><b>Operación está apagada para esta empresa.</b><p>Es opcional: actívala si alquilas maquinaria con operador: recibos de horas, valor hora de cada operador, horómetro por máquina, documento soporte al operador y factura al cliente con la cotización.</p>
     <div class="row"><button class="primary" id="opOn">Activar Operación</button></div></section>`;
-    X.$('opOn').onclick = async () => { try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true }); X.toast('Operación activada. Escoge una plantilla para empezar.'); X.route(); } catch (e) { X.fail(e); } };
+    X.$('opOn').onclick = async () => { try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true }); X.toast('Operación activada.'); location.hash = '#/oprecibos'; } catch (e) { X.fail(e); } };
     return;
   }
   const tipos = tiposOp(), desde = mesActual(), hasta = X.hoy();
@@ -488,7 +489,7 @@ const corteDe = r => r.corte_id ? (X.S.d.op_cortes || []).find(c => c.id === r.c
 const corteById = id => (X.S.d.op_cortes || []).find(c => c.id === id);
 const perTxt = c => { const f = d => new Date(d + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }); return `${f(c.desde)} al ${f(c.hasta)} ${c.hasta.slice(0, 4)}`; };
 const regsCorte = c => (X.S.d.op_registros || []).filter(r => r.corte_id === c.id);
-const ctxCC = () => ({ elementos: X.S.d.op_elementos || [], centros: X.S.d.centros_costo || [] });
+export const ctxCC = () => ({ elementos: X.S.d.op_elementos || [], centros: X.S.d.centros_costo || [] });
 // Volantes del corte: congelados al cerrar; mientras está en borrador se calculan con la configuración actual.
 const volantesCorte = (c, t) => c.estado === 'cerrado' && (c.volantes || []).length ? c.volantes : volantes(regsCorte(c), t, tarifasDe(t), ctxCC());
 const compraDe = id => (X.S.d.compras || []).find(x => x.id === id);
@@ -565,7 +566,8 @@ export function vOpCorte(m, id) {
   if (X.$('opGen')) X.$('opGen').onclick = () => generarDS(c, t, porPagar);
 }
 // Un documento soporte por persona, contabilizado, con el ítem de servicio de cada tarifa. Los registros quedan programados con ese DS (el pago real va por egreso).
-async function generarDS(c, t, lista) {
+// c es un corte o solo un periodo {desde, hasta} (pantalla Programar, sin cortes).
+export async function generarDS(c, t, lista) {
   const { esc, money } = X, cfg = cfgTipo(t), ccOn = X.emp()?.contabilidad?.cc?.activo === true;
   const arm = lista.map(v => ({ v, ...dsDeVolante(v, { empresa_id: X.S.eid, fecha: c.hasta, periodo: perTxt(c), tipoNombre: t.nombre, productos: X.S.d.productos, cuentaDefecto: cfg.salidas.cuenta, tercero: terc(v.tercero_id) || {}, conCC: ccOn }) }));
   for (const a of arm) if (!a.errores.length) a.errores = erroresCompra(a.compra, X.S.d.cuentas, X.S.d.productos);
@@ -582,7 +584,7 @@ async function generarDS(c, t, lista) {
       gen.push({ tercero_id: a.v.tercero_id, compra_id: g.id, numero: g.numero });
       await guardarVarios('op_registros', a.v.registros.map(r => ({ id: r.id, cierre_pago: g.id })));
       const tr = terc(a.v.tercero_id); if (tr && !tr.es_proveedor) { try { await X.store.save('terceros', { id: tr.id, es_proveedor: true }); } catch (_) { /* sin permiso */ } }
-      await X.store.save('op_cortes', { id: c.id, generados: gen });
+      if (c.id) await X.store.save('op_cortes', { id: c.id, generados: gen });
     }
     await X.cargarEmpresa(); X.toast(arm.length === 1 ? "Documento soporte generado y contabilizado." : `${arm.length} documentos soporte generados y contabilizados.`); X.route();
   } catch (e) { await X.cargarEmpresa(); X.fail(faltaSql(e)); X.route(); }
@@ -609,7 +611,7 @@ export function vOpFacturar(m, id, q) {
   const porDoc = new Map(); for (const r of todos.filter(r => r.cierre_cobro)) porDoc.set(r.cierre_cobro, [...(porDoc.get(r.cierre_cobro) || []), r]);
   const hechas = [...porDoc.entries()].map(([did, rs]) => ({ id: did, doc: docVenta(did), regs: rs })).sort((a, b) => String(b.doc?.fecha || '').localeCompare(String(a.doc?.fecha || '')));
   const nomDoc = d => d ? (d.estado === 'borrador' ? 'Factura en borrador' : `Factura ${d.prefijo || ''}${d.numero || ''}`) : 'Factura eliminada';
-  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/opregistros/${t.id}">← ${esc(t.nombre)}</a><h2>Facturar</h2><p class="sub">Junta lo registrado y aún no facturado en las fechas que escojas. Cada cotización arma su factura en borrador; la revisas y la envías a la DIAN desde Ventas.</p></div><a class="btn ghost" href="#/cotizaciones">Cotizaciones</a></header>
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/oprecibos">← Recibos</a><h2>Facturar</h2><p class="sub">Junta lo registrado y aún no facturado en las fechas que escojas. Cada cotización arma su factura en borrador; la revisas y la envías a la DIAN desde Ventas.</p></div><a class="btn ghost" href="#/cotizaciones">Cotizaciones</a></header>
   ${cfg.salidas.cobro !== 'fv' ? `<section class="panel callout">Este tipo no está configurado para facturar. Actívalo en <a href="#/opcfg/${t.id}">Configurar › Salidas</a> (Cobro al cliente: Factura de venta).</section>` : ''}
   <section class="panel row op-filtros"><div><label for="fcD">Desde</label><input type="date" id="fcD" value="${f.desde}"></div><div><label for="fcH">Hasta</label><input type="date" id="fcH" value="${f.hasta}"></div>
     <div><label for="fcC">Cotización</label><select id="fcC"><option value="">Todas</option>${cotsT.map(c => `<option value="${c.id}" ${c.id === f.cot ? 'selected' : ''}>N.º ${c.numero} · ${esc(nomT(c.tercero_id))}${cotizacionVigente(c) ? '' : ' (' + c.estado + ')'}</option>`).join('')}</select></div></section>
@@ -666,7 +668,7 @@ export function vOpPorCerrar(m) {
     <div class="kpis">${x.conPago ? `<div class="kpi"><span>Falta programar</span><b>${money(x.pago.valor)}</b><small>${nReg(x.pago.registros)}</small></div>` : ''}${x.conCobro ? `<div class="kpi"><span>Falta facturar</span><b>${money(x.cobro.valor)}</b><small>${nReg(x.cobro.registros)}${x.cobro.sinPrecio.length ? ` · ${x.cobro.sinPrecio.length} sin precio` : ''}</small></div>` : ''}
       ${x.conPago && x.conCobro ? `<div class="kpi"><span>Programados sin facturar</span><b>${x.pagadoSinFacturar}</b><small>registros</small></div><div class="kpi"><span>Facturados sin programar</span><b>${x.facturadoSinPagar}</b><small>registros</small></div>` : ''}</div>
     <div class="op-pc">
-    ${x.conPago ? `<section class="panel stack"><header class="vhead"><h3>Falta programar</h3><a class="btn sm" href="#/opcortes/${t.id}">Cortes de programación</a></header><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(cfg.persona)}</th><th>Desde</th><th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
+    ${x.conPago ? `<section class="panel stack"><header class="vhead"><h3>Falta programar</h3><a class="btn sm" href="#/opprogramar">Programar</a></header><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(cfg.persona)}</th><th>Desde</th><th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
       ${x.pago.personas.map(p => `<tr><td><b>${esc(nomT(p.tercero_id))}</b><br><small class="muted">${p.registros} reg.${p.enCorte ? ` · ${p.enCorte} en corte abierto` : ''}${p.pendientes ? ` · ${p.pendientes} sin soporte` : ''}</small></td><td class="nowrap">${X.fFecha(p.desde)}${viejo(p.desde)}</td><td class="r mono">${cant(p.cantidad)}</td><td class="r mono">${money(p.valor)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Todo programado.</td></tr>'}</tbody></table></div></section>` : ''}
     ${x.conCobro ? `<section class="panel stack"><header class="vhead"><h3>Falta facturar</h3><a class="btn sm" href="#/opfacturar/${t.id}?desde=${x.cobro.grupos.reduce((mn, g) => g.desde < mn ? g.desde : mn, hasta)}&hasta=${hasta}&cot=">Facturar</a></header><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cliente</th><th>Desde</th><th class="r">${esc(cfg.unidad || 'Cant.')}</th><th class="r">Valor</th></tr></thead><tbody>
       ${x.cobro.grupos.sort((a, b) => b.total - a.total).map(g => `<tr><td><b>${esc(nomT(g.tercero_id))}</b><br><small class="muted">${g.cotizacion ? `Cotización N.º ${g.cotizacion.numero}` : 'Tarifa de cobro'} · ${g.registros.length} reg.</small></td><td class="nowrap">${X.fFecha(g.desde)}${viejo(g.desde)}</td><td class="r mono">${cant(g.cantidad)}</td><td class="r mono">${money(g.total)}</td></tr>`).join('')}
@@ -674,7 +676,7 @@ export function vOpPorCerrar(m) {
       ${!x.cobro.grupos.length && !x.cobro.sinPrecio.length ? '<tr><td colspan="4" class="muted">Todo facturado.</td></tr>' : ''}</tbody></table></div></section>` : ''}
     </div></section>`;
   };
-  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/operacion">← Operación</a><h2>Horas por cerrar</h2><p class="sub">Lo registrado que todavía no se ha programado a la persona (documento soporte) o no se ha facturado al cliente. Los valores son estimados con las tarifas y cotizaciones vigentes.</p></div></header>
+  m.innerHTML = `<header class="vhead"><div><a class="back" href="#/oprecibos">← Recibos</a><h2>Horas por cerrar</h2><p class="sub">Lo registrado que todavía no se ha programado a la persona (documento soporte) o no se ha facturado al cliente. Los valores son estimados con las tarifas y cotizaciones vigentes.</p></div></header>
   <section class="panel row op-filtros"><div><label for="pcH">Registrado hasta</label><input type="date" id="pcH" value="${hasta}"></div>${tiposOp().length > 1 ? `<div><label for="pcT">Tipo</label><select id="pcT"><option value="">Todos</option>${tiposOp().map(t => `<option value="${t.id}" ${t.id === pcTipo ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>` : ''}</section>
   ${bloques.map(bloque).join('') || '<p class="muted">No hay tipos de operación activos.</p>'}`;
   X.$('pcH').onchange = e => { pcHasta = e.target.value; vOpPorCerrar(m); };
@@ -682,7 +684,7 @@ export function vOpPorCerrar(m) {
 }
 
 /* ---------- Impresión ---------- */
-function hojaVolante(v, c, t) {
+export function hojaVolante(v, c, t) {
   const { esc, money } = X, cfg = cfgTipo(t), tr = terc(v.tercero_id);
   const els = cfg.campos.filter(f => f.tipo === 'elemento').map(f => [f.nombre, [...new Set(v.registros.map(r => elem(r.datos?.[f.k])?.nombre).filter(Boolean))].join(', ')]).filter(x => x[1]);
   const cols = cfg.campos.filter(f => !['elemento'].includes(f.tipo));
@@ -696,7 +698,7 @@ function hojaVolante(v, c, t) {
     ${v.registros.filter(r => r.nota).map(r => `<p class="hint">• ${r.fecha.slice(8)}/${r.fecha.slice(5, 7)}: ${esc(r.nota)}</p>`).join('')}
     <div class="firmas"><span>${esc(X.emp().nombre)}</span><span>Recibí conforme · ${esc(tr?.nombre || '')}</span></div></article>`;
 }
-function hojaResumen(vs, c, t) {
+export function hojaResumen(vs, c, t) {
   const { esc, money } = X, cfg = cfgTipo(t), total = vs.reduce((s, v) => s + v.total, 0);
   return `<article class="desprendible">${X.cabInforme('Resumen de programación', `${esc(cfg.salidas.titulo || t.nombre)}<br><small>Corte ${perTxt(c)} · ${vs.length} volantes</small>`)}
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th>${esc(cfg.persona)}</th><th>Concepto</th><th class="r">Valor programado</th></tr></thead><tbody>

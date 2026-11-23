@@ -207,3 +207,17 @@ test('avance de la cotización y acumulado por máquina', async () => {
   const mq = acumuladoMaquinas(regs, t, { desde: '2026-11-02', hasta: '2026-11-30' });
   assert.equal(mq.length, 1); assert.equal(mq[0].ultimo, 1022); assert.equal(mq[0].total, 16); assert.equal(mq[0].periodo, 8); assert.equal(mq[0].saltos.length, 1); assert.equal(mq[0].saltos[0].dif, 6);
 });
+
+test('maquinaria: configuración fija y operador sin recargo', async () => {
+  const { configMaquinaria, cfgTipo: cfgT } = await import('../src/operacion.js');
+  const c = configMaquinaria({ ...tipo.config, sin_recargo: ['waldy'], salidas: { ...tipo.config.salidas, cuenta: '73559501' } });
+  assert.deepEqual(c.campos.map(f => f.k), ['equipo', 'obra', 'recibo', 'horometro']);
+  assert.equal(c.formulas.cantidad, 'horometro'); assert.equal(c.proyecto, 'obligatorio'); assert.equal(c.salidas.cuenta, '73559501');
+  assert.equal(c.reglas.length, 1); assert.deepEqual(c.reglas[0].terceros, []);
+  assert.deepEqual(configMaquinaria(c), c); // idempotente
+  const t2 = { ...tipo, config: c };
+  assert.deepEqual(cfgT(t2).sin_recargo, ['waldy']);
+  const r = reg('w', '2026-11-15', 'waldy', 'bull', 'guac', 131.3, 135.9);
+  assert.equal(calcular(r, t2, tarifas).recargos.length, 0);
+  assert.equal(calcular(r, { ...t2, config: { ...c, sin_recargo: [] } }, tarifas).recargos.length, 1);
+});
