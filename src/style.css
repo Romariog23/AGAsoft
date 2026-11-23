@@ -607,3 +607,5 @@ button.cfg-main:hover{background:none}
 .op-fac .vhead{margin:0}
 .op-pc{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}.op-pc .vhead{margin:0}
 .kpi small{display:block;color:var(--muted,#6b7280);font-size:.78rem}
+.op-cerrados summary{cursor:pointer;padding:8px 0}
+.op-cerrados .op-cards{margin-top:8px}
