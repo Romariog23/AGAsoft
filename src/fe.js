@@ -2,7 +2,7 @@
 // nota crédito y nota débito con los códigos DIAN que usa Factus. La función de Supabase (supabase/functions/fe-factus)
 // pone el código DANE del municipio (_municipio) y el rango de numeración antes de enviar.
 import { codigoDian } from './unidades.js';
-import { r2, num, linea } from './calc.js';
+import { r2, num, linea, dvOf } from './calc.js';
 import qrcode from 'qrcode-generator';
 
 const TIPOS_FE = ['FV', 'NC', 'ND'];
@@ -60,6 +60,13 @@ function jsonFE({ doc, items, tercero, ref, numeroRef, unidades }) {
 const referenciaDS = c => `${c.tipo}-${c.numero}`;
 // Medio de pago del documento soporte: a crédito sin cuenta; de contado según la cuenta (caja = efectivo, si no transferencia).
 const medioDS = cuenta => /^1105/.test(String(cuenta || '')) ? '10' : '47';
+const EXTRANJEROS = ['21', '22', '41', '42', '47', '50'];
+function provDoc(t) {
+  const numero = soloDigitos(t.numero) || String(t.numero || '');
+  if (EXTRANJEROS.includes(String(t.tipo_id))) return { identification_document_code: String(t.tipo_id), identification: String(t.numero || '').replace(/[^A-Za-z0-9]/g, '') };
+  const dv = t.tipo_id === '31' && t.dv != null && t.dv !== '' ? String(t.dv) : String(dvOf(numero));
+  return { identification_document_code: '31', identification: numero, dv };
+}
 // c: la compra (DS o NA) con sus totales; tercero: el proveedor; productos y unidades para código y unidad de cada línea.
 // numeroRef: número con que la DIAN validó el documento soporte que ajusta la nota.
 function jsonDS({ c, tercero, productos, unidades, nomCuenta, numeroRef }) {
@@ -75,10 +82,10 @@ function jsonDS({ c, tercero, productos, unidades, nomCuenta, numeroRef }) {
     reference_code: referenciaDS(c),
     observation: String(c.observaciones || '').slice(0, 500),
     payment_details: [{ payment_form: contado ? '1' : '2', payment_method_code: contado ? medioDS(c.cuenta_pago) : '10', amount: dinero(total), ...(!contado ? { due_date: c.vence || c.fecha } : {}) }],
+    // La DIAN exige que el proveedor residente en Colombia vaya con NIT: la persona natural con cédula usa
+    // su número como NIT con su dígito de verificación. Los extranjeros conservan su documento.
     provider: {
-      identification_document_code: tercero.tipo_id || '13',
-      identification: soloDigitos(tercero.numero) || String(tercero.numero),
-      ...(tercero.tipo_id === '31' && tercero.dv != null && tercero.dv !== '' ? { dv: String(tercero.dv) } : {}),
+      ...provDoc(tercero),
       legal_organization_code: juridica ? '1' : '2',
       names: tercero.nombre,
       ...(juridica ? { company: tercero.nombre } : {}),

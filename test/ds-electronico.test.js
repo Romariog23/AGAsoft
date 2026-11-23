@@ -38,3 +38,15 @@ test('JSON del documento soporte y de la nota de ajuste para Factus', () => {
   assert.ok(erroresDS({ c: na, tercero, ref: ds, numeroRef: '' }).some(e => /validado/.test(e)));
   assert.deepEqual(erroresDS({ c: ds, tercero }), []);
 });
+
+test('DS: proveedor con cédula va como NIT con DV; extranjero conserva su documento', async () => {
+  const { jsonDS } = await import('../src/fe.js');
+  const c = { tipo: 'DS', numero: 1, fecha: '2026-11-23', lineas: [{ base: 10000, iva_pct: 0, descripcion: 'x' }] };
+  const b = jsonDS({ c, tercero: { tipo_id: '13', numero: '1.020.304.050', nombre: 'Ana Ruiz', tipo_persona: 'natural' }, productos: [], unidades: [] });
+  assert.equal(b.provider.identification_document_code, '31');
+  assert.equal(b.provider.identification, '1020304050');
+  assert.match(b.provider.dv, /^\d$/);
+  const e = jsonDS({ c, tercero: { tipo_id: '41', numero: 'AB123', nombre: 'John Doe', tipo_persona: 'natural' }, productos: [], unidades: [] });
+  assert.equal(e.provider.identification_document_code, '41');
+  assert.equal(e.provider.dv, undefined);
+});
