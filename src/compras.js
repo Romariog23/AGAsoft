@@ -1,4 +1,4 @@
-// Compras y gastos: factura de proveedor (FC), documento soporte (DS) y comprobante de egreso (CE).
+// Compras y gastos: factura de proveedor (FC), documento soporte (DS), nota de ajuste al DS (NA) y comprobante de egreso (CE).
 // Funciones puras: totales, contabilización y cuentas por pagar.
 import { r2, num } from './calc.js';
 import { a8, esAuxiliar, parametrosDe } from './puc.js';
@@ -10,7 +10,10 @@ const TIPOS_COMPRA = {
   FC: { nombre: 'Factura de proveedor', corto: 'Fact. prov.', plural: 'Facturas de proveedor', nuevo: 'Nueva factura de proveedor' },
   DS: { nombre: 'Documento soporte', corto: 'Doc. soporte', plural: 'Documentos soporte', nuevo: 'Nuevo documento soporte' },
   CE: { nombre: 'Comprobante de egreso', corto: 'Egreso', plural: 'Comprobantes de egreso', nuevo: 'Nuevo comprobante de egreso' },
+  NA: { nombre: 'Nota de ajuste al documento soporte', corto: 'Nota ajuste DS', plural: 'Notas de ajuste a documentos soporte', nuevo: 'Nueva nota de ajuste al documento soporte' },
 };
+// Conceptos DIAN de la nota de ajuste al documento soporte.
+const CONCEPTOS_NA = [['1', 'Devolución parcial de los bienes o no aceptación parcial del servicio'], ['2', 'Anulación del documento soporte'], ['3', 'Rebaja o descuento parcial o total'], ['4', 'Ajuste de precio'], ['5', 'Otros']];
 
 // Totales de una factura de proveedor o documento soporte. Las retenciones son las que la empresa le practica al proveedor.
 function totalesCompra(lineas, ret = {}) {
@@ -50,6 +53,8 @@ function asientoCompra(c, param, tarifas, ctx = {}) {
     mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
     return out;
   }
+  // Nota de ajuste: el mismo asiento de un documento soporte, al revés (disminuye el gasto o el inventario y lo que se debe).
+  if (c.tipo === 'NA') return asientoCompra({ ...c, tipo: 'DS' }, param, tarifas, ctx).map(m => ({ ...m, tipo: 'NA', ref, detalle: m.detalle.replace(TIPOS_COMPRA.DS.nombre, nom), debito: m.credito, credito: m.debito }));
   const t = totalesCompra(c.lineas, c);
   const det = `${nom} ${c.num_proveedor || c.numero}`;
   for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || det, distLineaCompra(l, c, prods));
@@ -75,6 +80,8 @@ function asientoCompra(c, param, tarifas, ctx = {}) {
 function cuentasPorPagar(compras, hoy) {
   const pagos = {};
   for (const e of compras.filter(x => x.tipo === 'CE' && x.estado !== 'anulado')) for (const a of e.aplicaciones || []) pagos[a.compra_id] = r2((pagos[a.compra_id] || 0) + num(a.valor));
+  // Las notas de ajuste a crédito disminuyen el saldo de su documento soporte.
+  for (const n of compras.filter(x => x.tipo === 'NA' && x.estado !== 'anulado' && x.ref_id && !String(x.cuenta_pago || '').trim())) pagos[n.ref_id] = r2((pagos[n.ref_id] || 0) + num(n.neto ?? totalesCompra(n.lineas, n).neto));
   return compras.filter(x => (x.tipo === 'FC' || x.tipo === 'DS') && x.estado !== 'anulado' && !String(x.cuenta_pago || '').trim()).map(f => {
     const neto = num(f.neto ?? totalesCompra(f.lineas, f).neto), pagado = pagos[f.id] || 0, saldo = r2(neto - pagado);
     const diasVencida = f.vence && hoy && f.vence < hoy ? Math.round((new Date(hoy + 'T12:00:00') - new Date(f.vence + 'T12:00:00')) / 864e5) : 0;
@@ -94,6 +101,7 @@ function erroresCompra(c, cuentas, productos) {
     return out;
   }
   if (c.tipo === 'FC' && !String(c.num_proveedor || '').trim()) out.push('Escribe el número de la factura del proveedor.');
+  if (c.tipo === 'NA') { if (!c.ref_id) out.push('Escoge el documento soporte que ajusta la nota.'); if (!CONCEPTOS_NA.some(x => x[0] === String(c.concepto))) out.push('Escoge el concepto de la nota de ajuste.'); }
   const ls = c.lineas || [];
   if (!ls.length) out.push('Agrega al menos una línea.');
   ls.forEach((l, i) => {
@@ -104,4 +112,7 @@ function erroresCompra(c, cuentas, productos) {
   return out;
 }
 
-export { distCompra, distLineaCompra, TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra, numCompra };
+// Valor que todavía se puede ajustar de un documento soporte (total menos sus notas de ajuste vigentes).
+const ajustableDS = (ds, compras, sinId) => r2(num(ds.total) - (compras || []).filter(n => n.tipo === 'NA' && n.ref_id === ds.id && n.estado !== 'anulado' && n.id !== sinId).reduce((s, n) => s + num(n.total), 0));
+
+export { CONCEPTOS_NA, ajustableDS, distCompra, distLineaCompra, TIPOS_COMPRA, totalesCompra, totalEgreso, asientoCompra, cuentasPorPagar, erroresCompra, numCompra };
