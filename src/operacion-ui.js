@@ -182,19 +182,29 @@ function tabCampos(box, t, c) {
     try { await guardarCfg(t, { config: { campos: c.campos.filter(x => x !== f), tarifa_por: c.tarifa_por.filter(k => k !== f.k), continuidad: [c.continuidad?.lectura, c.continuidad?.por].includes(f.k) ? null : c.continuidad, pendiente: c.pendiente?.campo === f.k ? null : c.pendiente } }, 'Campo quitado.'); } catch (e) { X.fail(e); }
   });
 }
+// Fórmulas como lista para escoger; "Otra fórmula" abre el campo para escribirla.
+const VALOR_OPC = [['pagadas * tarifa', 'Cantidad liquidada × tarifa'], ['cantidad * tarifa', 'Cantidad de la fórmula (horómetro) × tarifa'], ['tarifa', 'Solo la tarifa (un valor por registro)']];
+function selFormula(k, label, val, opciones) {
+  const { esc } = X, esOtra = !opciones.some(o => o[0] === val);
+  return `<div><label for="f_${k}">${label}</label><select id="f_${k}" name="${k}" data-fsel="${k}">${opciones.map(([v, n]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__otra" ${esOtra ? 'selected' : ''}>Otra fórmula…</option></select>
+    <input id="f_${k}_otra" name="${k}_otra" class="mono" value="${esOtra ? esc(val) : ''}" placeholder="Escribe la fórmula" ${esOtra ? '' : 'hidden'} style="margin-top:6px"></div>`;
+}
 function tabCalculo(box, t, c) {
   const { esc } = X, cuandoN = k => CUANDO.find(x => x[0] === k)?.[1] || k;
   const vars = [...c.campos.filter(f => ['numero', 'lectura', 'sino'].includes(f.tipo)).map(f => [f.k, f.nombre]), ...c.constantes.map(k => [k.k, k.nombre])];
   box.innerHTML = `<form class="panel stack" id="opF"><h3>Fórmulas</h3>
-    <div class="grid2">${X.campo('cantidad', `Cantidad (${esc(c.unidad)})`, c.formulas.cantidad, 'required class="mono" placeholder="horometro"')}${X.campo('valor', 'Valor a programar con tarifa por unidad', c.formulas.valor, 'required class="mono" placeholder="pagadas * tarifa"')}</div>
-    <p class="hint">Variables: ${vars.map(([k, nn]) => `<span class="mono">${k}</span> (${esc(nn)})`).join(', ') || 'ninguna todavía'}${vars.length ? ', ' : ''}<span class="mono">cantidad</span>, <span class="mono">pagadas</span> y <span class="mono">tarifa</span>. Funciones: min, max, redondear. Ejemplo: <span class="mono">max(pagadas, 8) * tarifa</span> cobra mínimo 8 horas.</p>
+    <div class="grid2">${selFormula('cantidad', `Cantidad (${esc(c.unidad)})`, c.formulas.cantidad, c.campos.filter(f => ['lectura', 'numero'].includes(f.tipo)).map(f => [f.k, f.tipo === 'lectura' ? `${f.nombre} (final − inicial)` : f.nombre]))}
+      ${selFormula('valor', 'Valor a programar con tarifa por unidad', c.formulas.valor, VALOR_OPC)}</div>
+    <p class="hint">Escoge de la lista. "Otra fórmula" deja escribirla a mano con: ${vars.map(([k, nn]) => `<span class="mono">${k}</span> (${esc(nn)})`).join(', ') || 'ninguna variable todavía'}${vars.length ? ', ' : ''}<span class="mono">cantidad</span>, <span class="mono">pagadas</span> (liquidadas) y <span class="mono">tarifa</span>; funciones min, max, redondear.</p>
     <p class="hint">Con tarifa <b>por registro</b> el valor es la tarifa; con tarifa <b>fija por corte</b> se programa una vez el valor fijo.</p>
     <div class="row end"><button class="primary">Guardar fórmulas</button></div></form>
   <section class="panel stack"><header class="vhead"><div><h3>Constantes</h3><p class="hint">Valores que usas en las fórmulas y cambias en un solo lugar, como el salario base del recargo.</p></div><button class="sm" id="opNK">Nueva constante</button></header>
     ${c.constantes.length ? `<div class="tbl-wrap"><table class="tbl"><tbody>${c.constantes.map((k, i) => `<tr><td><b>${esc(k.nombre)}</b></td><td class="mono">${k.k}</td><td class="r mono">${cant(k.valor)}</td><td class="r nowrap"><button class="sm" data-ek="${i}">Editar</button><button class="sm ghost" data-qk="${i}">Quitar</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sin constantes.</p>'}</section>
   <section class="panel stack"><header class="vhead"><div><h3>Reglas de día y recargos</h3><p class="hint">Se suman al valor cuando se cumple la condición. Los festivos salen del calendario de Colombia.</p></div><button class="sm" id="opNR">Nueva regla</button></header>
     ${c.reglas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Regla</th><th>Cuándo</th><th>Fórmula</th><th>A quién</th><th></th></tr></thead><tbody>${c.reglas.map((g, i) => `<tr><td><b>${esc(g.nombre)}</b></td><td>${esc(cuandoN(g.cuando))}</td><td class="mono">${esc(g.formula)}</td><td>${g.terceros?.length ? g.terceros.map(id => esc(nomT(id))).join(', ') : 'Todos'}</td><td class="r nowrap"><button class="sm" data-er="${i}">Editar</button><button class="sm ghost" data-qr="${i}">Quitar</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sin reglas.</p>'}</section>`;
-  X.$('opF').onsubmit = async ev => { ev.preventDefault(); const fd = new FormData(ev.target); try { await guardarCfg(t, { config: { formulas: { cantidad: String(fd.get('cantidad')).trim(), valor: String(fd.get('valor')).trim() } } }, 'Fórmulas guardadas.'); } catch (e) { X.fail(e); } };
+  X.$('opF').querySelectorAll('select[data-fsel]').forEach(sel => sel.onchange = () => { const inp = X.$('f_' + sel.dataset.fsel + '_otra'); inp.hidden = sel.value !== '__otra'; if (!inp.hidden) inp.focus(); });
+  const leerF = (fd, k) => { const v = fd.get(k); return String(v === '__otra' ? fd.get(k + '_otra') : v).trim(); };
+  X.$('opF').onsubmit = async ev => { ev.preventDefault(); const fd = new FormData(ev.target); try { const f = { cantidad: leerF(fd, 'cantidad'), valor: leerF(fd, 'valor') }; if (!f.cantidad || !f.valor) throw new Error('Escribe la fórmula.'); compilar(f.cantidad); compilar(f.valor); await guardarCfg(t, { config: { formulas: f } }, 'Fórmulas guardadas.'); } catch (e) { X.fail(e); } };
   const formK = (k = {}, i = -1) => X.dialogo(`<h2>${i >= 0 ? 'Editar' : 'Nueva'} constante</h2><div class="grid2">${X.campo('nombre', 'Nombre', k.nombre || '', 'required maxlength="40" placeholder="Salario base del recargo"')}${X.campo('valor', 'Valor', k.valor ?? '', 'required class="mono" inputmode="decimal"')}</div>${X.pie()}`, async fd => {
     const nombre = String(fd.get('nombre')).trim(); let kk = k.k || claveDe(nombre); if (!k.k) while ([...c.constantes, ...c.campos].some(x => x.k === kk)) kk += '_2';
     const nueva = { k: kk, nombre, valor: numIn(fd.get('valor')) };
