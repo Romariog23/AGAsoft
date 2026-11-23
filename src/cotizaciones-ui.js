@@ -44,6 +44,10 @@ export function vCotizacion(m, id) {
   const c = prev ? JSON.parse(JSON.stringify(prev)) : { fecha: X.hoy(), vence: X.sumarDias(X.hoy(), 30), tercero_id: '', estado: 'abierta', op_tipo_id: null, criterios: {}, lineas: [nuevaLinea()], observaciones: '', condiciones: '' };
   c.criterios = c.criterios || {}; c.lineas = (c.lineas || []).map(l => ({ ...nuevaLinea(), ...l, criterios: l.criterios || {} }));
   const opOn = operacionActiva() && tiposOp().length;
+  // La cotización es el proyecto: si hay un solo tipo de operación abierto, la nueva queda amarrada a él de una.
+  const abiertos = opOn ? tiposOp().filter(t => t.activo !== false) : [];
+  if (!prev && abiertos.length === 1) c.op_tipo_id = abiertos[0].id;
+  c.nuevos = {}; // elementos por crear al guardar (p. ej. la obra nueva del proyecto)
   const clientes = [...X.S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   const prods = (X.S.d.productos || []).filter(p => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -79,9 +83,9 @@ export function vCotizacion(m, id) {
       <div><label for="cqF">Fecha</label><input id="cqF" type="date" value="${c.fecha || ''}"></div>
       <div><label for="cqV">Válida hasta</label><input id="cqV" type="date" value="${c.vence || ''}"></div>
       <div><label for="cqE">Estado</label><select id="cqE">${X.opts(ESTADOS_COT, c.estado)}</select></div></div></section>
-    ${opOn ? `<section class="panel stack"><h3>Amarrar a Operación</h3><p class="hint">Las horas registradas en Operación con estos datos se facturan con los precios de esta cotización. Deja "Todas" para que aplique a cualquiera.</p>
+    ${opOn ? `<section class="panel stack"><h3>Proyecto en Operación</h3><p class="hint">Esta cotización es el proyecto: aparece de una para escogerla en los recibos y sus horas se facturan con estos precios. Si la obra no existe, escoge "+ Crear obra…" y escribe el nombre. Deja "Todas" para lo que no aplique.</p>
       <div class="cq-grid"><div><label for="cqT">Tipo de operación</label><select id="cqT"><option value="">No se amarra</option>${tiposOp().map(x => `<option value="${x.id}" ${x.id === c.op_tipo_id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
-      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></div>`).join('')}</div>
+      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}<option value="__nueva" ${c.nuevos[f.k] != null ? 'selected' : ''}>+ Crear ${esc(f.nombre.toLowerCase())}…</option></select>${c.nuevos[f.k] != null ? `<input id="cqN_${f.k}" data-nuevo="${f.k}" value="${esc(c.nuevos[f.k])}" placeholder="Nombre (ej.: CORTEVA)" maxlength="80" style="margin-top:6px">` : ''}</div>`).join('')}</div>
       ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por ${esc(cfgTipo(t).unidad || 'unidad')} (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
       <p class="hint">Se suma a la tarifa de programación de cada operador, solo en los registros de este proyecto. Sale como línea aparte en el volante y el documento soporte. No cambia lo que se le cobra al cliente.</p>` : ''}</section>` : ''}
     <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro desde Operación</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
@@ -102,7 +106,10 @@ export function vCotizacion(m, id) {
     X.$('cqO').oninput = e => { c.observaciones = e.target.value; }; X.$('cqK').oninput = e => { c.condiciones = e.target.value; };
     if (X.$('cqA')) X.$('cqA').oninput = e => { c.ajuste_op = X.num(e.target.value); };
     if (X.$('cqT')) X.$('cqT').onchange = e => { c.op_tipo_id = e.target.value || null; c.criterios = {}; c.lineas.forEach(l => { l.criterios = {}; }); pintar(); };
+    m.querySelectorAll('[data-nuevo]').forEach(i => i.oninput = () => { c.nuevos[i.dataset.nuevo] = i.value; });
     m.querySelectorAll('[data-crit]').forEach(s => s.onchange = () => {
+      if (s.value === '__nueva') { c.nuevos[s.dataset.crit] = ''; delete c.criterios[s.dataset.crit]; pintar(); X.$('cqN_' + s.dataset.crit)?.focus(); return; }
+      delete c.nuevos[s.dataset.crit];
       c.criterios[s.dataset.crit] = s.value || undefined; if (!s.value) delete c.criterios[s.dataset.crit];
       c.lineas.forEach(l => delete l.criterios[s.dataset.crit]);
       const e = elem(s.value); if (e?.tercero_id && !c.tercero_id) c.tercero_id = e.tercero_id; // la obra trae su cliente
@@ -142,7 +149,18 @@ export function vCotizacion(m, id) {
   const guardar = async () => {
     const err = X.$('cqErr'); err.hidden = true;
     const lineas = c.lineas.filter(l => String(l.descripcion).trim() || X.num(l.precio)).map(l => ({ ...l, descripcion: String(l.descripcion).trim(), cantidad: X.num(l.cantidad), precio: X.num(l.precio), descuento_pct: X.num(l.descuento_pct), iva_pct: X.num(l.iva_pct), producto_id: l.producto_id || null, op: c.op_tipo_id ? (l.op === 'fijo' ? 'fijo' : l.op !== false) : false, criterios: c.op_tipo_id ? l.criterios : {} }));
-    const row = { ...c, lineas, criterios: c.op_tipo_id ? c.criterios : {}, op_tipo_id: c.op_tipo_id || null, vence: c.vence || null };
+    // Obra (u otro elemento) nueva escrita en la cotización: se crea en la lista del tipo y queda amarrada.
+    const tN = tipoById(c.op_tipo_id);
+    for (const [k, nombre] of Object.entries(c.nuevos || {})) {
+      const f = camposEl(tN).find(x => x.k === k); if (!f) continue;
+      const nom = String(nombre || '').trim(); if (!nom) { err.textContent = `Escribe el nombre para crear ${f.nombre.toLowerCase()}.`; err.hidden = false; return; }
+      const ya = (X.S.d.op_elementos || []).find(e => e.tipo_id === tN.id && e.lista === f.lista && e.nombre.trim().toLowerCase() === nom.toLowerCase());
+      try { const e = ya || await X.store.save('op_elementos', { empresa_id: X.S.eid, tipo_id: tN.id, lista: f.lista, codigo: '', nombre: nom, datos: {}, tercero_id: c.tercero_id || null, activo: true }); c.criterios[k] = e.id; }
+      catch (e) { err.textContent = e.message; err.hidden = false; return; }
+    }
+    c.nuevos = {};
+    const { nuevos: _n, ...c2 } = c;
+    const row = { ...c2, lineas, criterios: c.op_tipo_id ? c.criterios : {}, op_tipo_id: c.op_tipo_id || null, vence: c.vence || null };
     // ajuste_op (039_op_ajuste.sql): solo se envía si tiene valor o ya existía, para no romper el guardado antes de correr el SQL.
     if (c.op_tipo_id && X.num(c.ajuste_op) > 0) row.ajuste_op = X.num(c.ajuste_op); else if (prev && 'ajuste_op' in prev) row.ajuste_op = 0; else delete row.ajuste_op;
     const errores = erroresCotizacion(row); if (errores.length) { err.textContent = errores[0]; err.hidden = false; return; }
