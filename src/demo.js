@@ -212,7 +212,7 @@ export function datosDemo(hoy = hoyLocal()) {
 
     // Nómina mensual: se contabiliza el último día del mes (si ya pasó).
     if (finMes(mes) <= hoy) {
-      const ls = EMP.map((e, j) => liquidar(e, j === 0 ? { comisiones: 350000 + 120000 * k } : j === 2 && k === 1 ? { horas_extra: 180000 } : {}, PN));
+      const ls = EMP.map((e, j) => liquidar(e, j === 0 ? { comisiones: 350000 + 120000 * k } : j === 2 && k === 1 ? { horas: { HED: 10, HRDDF: 8 } } : {}, PN));
       cuentasDeNomina(ls).forEach(c => cuentasNomina.add(c));
       add('nominas', { periodo: 'mensual', desde: `${mes}-01`, hasta: finMes(mes), fecha: finMes(mes), lineas: ls, novedades: {}, cuenta_neto: PN.cuenta_neto, observaciones: '', numero: i + 1, estado: 'contabilizado', ...totalesNomina(ls) });
       // Pago de salarios el último día del mes.
