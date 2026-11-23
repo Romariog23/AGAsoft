@@ -4,6 +4,7 @@
 //  - sin repetir: la clave ya incluye la etapa (por ejemplo "faltan 7 días" y "vence mañana" son avisos distintos).
 import { cartera } from './calc.js';
 import { cuentasPorPagar } from './compras.js';
+import { estadoPM } from './operacion.js';
 
 const dd = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
 const plural = (n, s, p = s + 's') => `${n} ${n === 1 ? s : p}`;
@@ -53,6 +54,15 @@ export function avisosEmpresa({ empresa: e, d, hoy, local = false, diasPrueba = 
     const mesAnt = (() => { const [y, m] = hoy.split('-').map(Number); const x = new Date(y, m - 2, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`; })();
     const liquidada = (d.nominas || []).some(n => n.estado !== 'anulado' && String(n.hasta || '').slice(0, 7) === mesAnt);
     if (!liquidada && Number(hoy.slice(8)) >= 3) add(`op-nomina-${mesAnt}`, 'operacion', 'Nómina sin liquidar', `No hay nómina del mes anterior (${mesAnt}). Liquídala para causar salarios y aportes.`, '#/nomina', 'alerta', null);
+  }
+  // Mantenimiento preventivo de las máquinas (Operación › Máquinas): aviso cuando se acerca y cuando ya se cumplió.
+  if (C.operacion?.activo === true) {
+    const fh = v => Number(v).toLocaleString('es-CO', { maximumFractionDigits: 1 });
+    for (const m of (d.op_elementos || []).filter(x => x.lista === 'equipos' && x.activo !== false && x.datos?.pm)) {
+      const pm = estadoPM(m, d.op_registros || []); if (!pm || pm.estado === 'ok') continue;
+      if (pm.estado === 'vencido') add(`op-pm-${m.id}-${pm.proximo}-vencido`, 'operacion', `Mantenimiento preventivo: ${m.nombre}`, `Le tocaba el PM a las ${fh(pm.proximo)} h y el horómetro va en ${fh(pm.actual)} h${pm.faltan < 0 ? ` (pasada ${fh(-pm.faltan)} h)` : ''}. Hazlo y regístralo en Máquinas.`, '#/opmaquinas', 'alerta', 3);
+      else add(`op-pm-${m.id}-${pm.proximo}-pronto`, 'operacion', `Se acerca el PM de ${m.nombre}`, `Faltan ${fh(pm.faltan)} h: el próximo mantenimiento preventivo es a las ${fh(pm.proximo)} h (va en ${fh(pm.actual)} h).`, '#/opmaquinas', 'alerta', null);
+    }
   }
   return out;
 }

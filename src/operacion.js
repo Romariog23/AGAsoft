@@ -517,3 +517,24 @@ export function configMaquinaria(actual) {
     tarifa_por: ['tercero'], proyecto: 'obligatorio', sin_recargo: c.sin_recargo || [],
     salidas: { ...(c.salidas || {}), pago: 'ds', cobro: 'fv', cobrar: 'cantidad', titulo: (c.salidas || {}).titulo || 'Horas adicionales' } };
 }
+
+/* ---------- Mantenimiento preventivo (PM) por horas ---------- */
+// datos.pm de la máquina: { cada, base, inicial, hist[] }. base = horómetro del último PM (al configurar: horómetro actual − horas que
+// ya llevaba desde el último PM, que se pregunta una sola vez). Próximo PM = base + cada. Cada PM registrado mueve la base.
+export const pmBase = (actual, lleva) => r2(n(actual) - n(lleva));
+export function horometroActual(maq, registros) {
+  let h = maq?.datos?.pm?.inicial != null && maq.datos.pm.inicial !== '' ? n(maq.datos.pm.inicial) : null;
+  for (const r of registros || []) {
+    if (esCargo(r) || r.datos?.equipo !== maq?.id) continue;
+    const f = r.datos?.horometro?.fin; if (f === '' || f == null) continue;
+    if (h == null || n(f) > h) h = n(f);
+  }
+  return h;
+}
+export function estadoPM(maq, registros) {
+  const pm = maq?.datos?.pm; if (!pm || !(n(pm.cada) > 0) || pm.base === '' || pm.base == null) return null;
+  const actual = horometroActual(maq, registros), proximo = r2(n(pm.base) + n(pm.cada));
+  const usadas = actual == null ? 0 : r2(actual - n(pm.base)), faltan = r2(proximo - (actual ?? n(pm.base)));
+  const margen = Math.max(10, r2(n(pm.cada) * 0.1)); // aviso previo: 10 % del intervalo, mínimo 10 h
+  return { actual, proximo, cada: n(pm.cada), usadas, faltan, estado: faltan <= 0 ? 'vencido' : faltan <= margen ? 'pronto' : 'ok', ultimo: (pm.hist || []).slice(-1)[0] || null };
+}

@@ -46,3 +46,10 @@ test('el calendario muestra solo la empresa con el NIT de la empresa abierta', (
   assert.ok(v.every(x => x.empresa_id === 'b'));
   assert.equal(vencimientos(datos, '2026-11-01', '2026-12-31', { nit: '111' }).length, 0);
 });
+
+test('aviso de mantenimiento preventivo en la campanita', () => {
+  const empresa = { id: 'e1', nombre: 'Maq', correo: 'a@b.co', contabilidad: { operacion: { activo: true } } };
+  const d = { op_elementos: [{ id: 'm1', lista: 'equipos', nombre: 'Retro 320', datos: { pm: { cada: 250, base: 900, inicial: 1000, hist: [] } } }], op_registros: [{ datos: { equipo: 'm1', horometro: { ini: 1000, fin: 1160 } } }] };
+  const a = avisosEmpresa({ empresa, d, hoy: '2026-11-22', local: true }).filter(x => x.clave.includes('op-pm'));
+  assert.equal(a.length, 1); assert.match(a[0].titulo, /Retro 320/); assert.match(a[0].clave, /1150-vencido/);
+});
