@@ -1827,16 +1827,72 @@ function formNumeracion(n = {}) {
   if (usada) t.disabled = true, f.querySelector('[name=prefijo]').readOnly = true;
   if (usada) f.insertAdjacentHTML('afterbegin', `<input type="hidden" name="tipo" value="${n.tipo}">`);
 }
+// Numeraciones de documentos electrónicos que no son de ventas (documento soporte, nota de ajuste, nómina): se guardan en
+// contabilidad.num_dian. El prefijo escoge el rango de Factus al enviar; el número oficial lo asigna Factus.
+const NUM_DIAN = [
+  { k: 'DS', nombre: 'Documento soporte electrónico', resolucion: true, codigo: '24', re: d => (/soporte/i.test(d) && !/ajuste/i.test(d)) },
+  { k: 'NA', nombre: 'Nota de ajuste al documento soporte', resolucion: false, codigo: '25', re: d => /ajuste/i.test(d) && /soporte/i.test(d) },
+  { k: 'NIE', nombre: 'Nómina electrónica', resolucion: false, codigo: '26', re: d => /n[oó]mina/i.test(d) && !/ajuste/i.test(d) },
+  { k: 'NIAE', nombre: 'Nota de ajuste de nómina', resolucion: false, codigo: '27', re: d => /n[oó]mina/i.test(d) && /ajuste/i.test(d) },
+];
+const numDian = k => emp()?.contabilidad?.num_dian?.[k] || {};
+// Rangos de Factus de la última vez que se probó la conexión (Configuración › Facturación electrónica).
+const rangosFactus = k => { const t = NUM_DIAN.find(x => x.k === k); return (emp()?.contabilidad?.fe_hab?.rangos || []).filter(r => String(r.documento) === t.codigo || t.re(String(r.documento))); };
+function formNumDian(t) {
+  const n = numDian(t.k), rs = rangosFactus(t.k);
+  dialogo(`<h2>${t.nombre}</h2>
+    <p class="hint">${t.resolucion ? 'Lleva resolución de numeración de la DIAN, igual que la factura electrónica. ' : 'No necesita resolución de la DIAN: basta el prefijo. '}El número oficial lo asigna Factus al validar; AGAsoft usa el rango de Factus que tenga este prefijo.</p>
+    <div class="grid2">${campo('prefijo', 'Prefijo', n.prefijo || '', `class="mono" placeholder="${t.k === 'DS' ? 'DSE' : t.k === 'NA' ? 'NAE' : t.k === 'NIE' ? 'NE' : 'NAN'}" maxlength="4"`)}</div>
+    ${t.resolucion ? `<div class="grid2">${campo('resolucion', 'Número de resolución DIAN', n.resolucion || '', 'class="mono" inputmode="numeric"')}${campo('vigencia_hasta', 'Vigente hasta', n.vigencia_hasta || '', 'type="date"')}</div>
+      <div class="grid2">${campo('desde', 'Desde', n.desde || '', 'type="number" min="1" class="mono"')}${campo('hasta', 'Hasta', n.hasta || '', 'type="number" min="1" class="mono"')}</div>` : ''}
+    ${rs.length ? `<p class="hint">En Factus hay: ${rs.map(r => `<b class="mono">${esc(r.prefijo || '(sin prefijo)')}</b> ${r.resolucion ? `· resolución ${esc(r.resolucion)}` : ''}${r.actual != null ? ` · va en ${esc(String(r.actual))}` : ''}`).join('; ')}.</p>` : `<p class="hint">Todavía no veo esta numeración en Factus.</p>`}
+    ${store.mode === 'supabase' ? `<div>${check('crear', `Crearla en Factus con este prefijo${t.resolucion ? ' y esta resolución' : ''} si todavía no existe`, !rs.length)}</div>
+      <div class="grid2">${campo('actual', 'Empieza en el número', 1, 'type="number" min="1" class="mono"')}</div><p class="hint">Si ya emitiste documentos de este tipo en otro programa, pon el número que sigue al último.</p>` : ''}
+    ${pie()}`, async fd => {
+    const row = { prefijo: String(fd.get('prefijo') || '').trim().toUpperCase() };
+    if (!/^[A-Z0-9]{0,4}$/.test(row.prefijo)) throw new Error('El prefijo lleva máximo 4 letras o números (así lo pide Factus).');
+    if (t.resolucion) Object.assign(row, { resolucion: String(fd.get('resolucion') || '').trim(), vigencia_hasta: fd.get('vigencia_hasta') || '', desde: Math.round(num(fd.get('desde'))) || '', hasta: Math.round(num(fd.get('hasta'))) || '' });
+    if (row.desde && row.hasta && row.hasta < row.desde) throw new Error('Revisa el rango: "Hasta" debe ser mayor o igual que "Desde".');
+    await guardarContab('num_dian', { ...(emp()?.contabilidad?.num_dian || {}), [t.k]: row });
+    // Crear en Factus (si se marcó y no hay una con ese prefijo) y traer de nuevo sus numeraciones.
+    if (fd.get('crear') === 'on' && !rs.some(r => (r.prefijo || '').toUpperCase() === row.prefijo)) {
+      if (!row.prefijo) throw new Error('Escribe el prefijo para crearla en Factus.');
+      if (t.resolucion && !row.resolucion) throw new Error('Escribe el número de resolución de la DIAN para crearla en Factus.');
+      await store.fe('crear_rango', { empresa_id: S.eid, tipo: t.k, prefijo: row.prefijo, resolucion: row.resolucion || '', actual: num(fd.get('actual')) || 1 });
+      try { await store.fe('probar', { empresa_id: S.eid }); } catch (_) {}
+      await recargar(); toast('Numeración guardada y creada en Factus.'); route(); return;
+    }
+    toast('Numeración guardada.'); route();
+  });
+}
 function vNumeraciones(m) {
   const l = [...S.d.numeraciones].sort((a, b) => Object.keys(TIPOS).indexOf(a.tipo) - Object.keys(TIPOS).indexOf(b.tipo) || (b.activa - a.activa));
-  m.innerHTML = `<header class="vhead"><h2>Numeraciones</h2><button class="primary" id="nuevo">Nueva numeración</button></header>
-    <p class="sub">La factura electrónica usa el prefijo y el rango de tu resolución DIAN. La factura normal (no electrónica) lleva su propio consecutivo con otro prefijo. Las notas y los recibos llevan el suyo.</p>
-    <div class="row"><button id="nuevaN">Nueva numeración de factura normal</button></div>
-    <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>
-    ${l.map(n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${!n.activa ? '<span class="tag">Inactiva</span>' : n.electronica && !feHabilitada() ? '<span class="tag warn" title="Falta superar el set de pruebas de la DIAN">Sin habilitar DIAN</span>' : '<span class="tag ok">Activa</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
+  const fila = n => { const quedan = Number(n.hasta) - Number(n.siguiente) + 1; const vence = n.vigencia_hasta && n.vigencia_hasta < sumarDias(hoy(), 30); return `<tr class="${n.activa ? '' : 'muted'}"><td>${TIPOS[n.tipo].nombre}${n.tipo === 'FV' ? (n.electronica ? ' electrónica' : ' normal') : ''} ${!n.activa ? '<span class="tag">Inactiva</span>' : n.electronica && !feHabilitada() ? '<span class="tag warn" title="Falta superar el set de pruebas de la DIAN">Sin habilitar DIAN</span>' : '<span class="tag ok">Activa</span>'}</td><td class="mono">${esc(n.prefijo) || '—'}</td><td class="mono">${esc(n.resolucion) || '—'}</td>
       <td class="r mono">${n.desde} – ${Number(n.hasta) >= 999999999 ? 'sin límite' : n.hasta}</td><td class="r mono">${n.siguiente}${n.tipo === 'FV' && quedan <= 50 ? ` <span class="tag bad">quedan ${Math.max(0, quedan)}</span>` : ''}</td>
-      <td>${n.vigencia_hasta ? `hasta ${fFecha(n.vigencia_hasta)}${vence ? ' <span class="tag bad">por vencer</span>' : ''}` : '—'}</td><td class="r"><button class="ghost sm" data-ed="${n.id}">Editar</button></td></tr>`; }).join('')}
-    </tbody></table></div>` : '<p class="muted">No hay numeraciones.</p>'}</section>`;
+      <td>${n.vigencia_hasta ? `hasta ${fFecha(n.vigencia_hasta)}${vence ? ' <span class="tag bad">por vencer</span>' : ''}` : '—'}</td><td class="r"><button class="ghost sm" data-ed="${n.id}">Editar</button></td></tr>`; };
+  const filaDian = t => { const n = numDian(t.k), rs = rangosFactus(t.k), r = rs.find(x => (x.prefijo || '').toUpperCase() === (n.prefijo || '').toUpperCase()) || (!n.prefijo ? rs[0] : null);
+    return `<tr><td>${t.nombre} ${r ? '<span class="tag ok">En Factus</span>' : '<span class="tag warn" title="No aparece en Factus (prueba la conexión en Facturación electrónica)">Falta en Factus</span>'}</td><td class="mono">${esc(n.prefijo || r?.prefijo || '') || '—'}</td><td class="mono">${t.resolucion ? esc(n.resolucion || r?.resolucion || '') || '—' : '<span class="hint">No aplica</span>'}</td>
+      <td class="r mono">${t.resolucion && (n.desde || r?.desde) ? `${n.desde || r.desde} – ${n.hasta || r?.hasta || ''}` : '—'}</td><td class="r mono">${r?.actual != null ? esc(String(r.actual)) : '<span class="hint">lo asigna Factus</span>'}</td>
+      <td>${t.resolucion && (n.vigencia_hasta || r?.vence) ? `hasta ${fFecha(String(n.vigencia_hasta || r.vence).slice(0, 10))}` : '—'}</td><td class="r"><button class="ghost sm" data-dian="${t.k}">Editar</button></td></tr>`; };
+  const tabla = (filas, vacio = '') => filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Siguiente</th><th>Vigencia</th><th></th></tr></thead><tbody>${filas.join('')}</tbody></table></div>` : `<p class="muted">${vacio}</p>`;
+  const conRes = l.filter(n => n.tipo === 'FV' && n.electronica), notasV = l.filter(n => ['NC', 'ND'].includes(n.tipo)), internas = l.filter(n => (n.tipo === 'FV' && !n.electronica) || n.tipo === 'RC');
+  const sig = (lista, tipo) => Math.max(0, ...lista.filter(x => !tipo || x.tipo === tipo).map(x => Number(x.numero) || 0)) + 1;
+  const consecutivos = [['Factura de proveedor', 'FC', sig(compras(), 'FC')], ['Documento soporte (normal o electrónico, número interno)', 'DS', sig(compras(), 'DS')], ['Nota de ajuste al documento soporte (número interno)', 'NA', sig(compras(), 'NA')], ['Comprobante de egreso', 'CE', sig(compras(), 'CE')],
+    ['Liquidación de nómina', 'NE', sig(nominas())], ...Object.entries(TIPOS_COMP).filter(([k]) => k !== 'CI').map(([k, v]) => [v.nombre, k, sig(comps(), k)])];
+  m.innerHTML = `<header class="vhead"><h2>Numeraciones</h2><button class="primary" id="nuevo">Nueva numeración</button></header>
+    <p class="sub">Los documentos electrónicos usan la numeración que la DIAN autoriza y que Factus tiene asociada: el prefijo de aquí debe ser el mismo de Factus.</p>
+    <section class="panel stack"><header class="vhead"><h3>Electrónicos con resolución DIAN</h3><span class="tag el">Resolución DIAN</span></header>
+      <p class="hint">Necesitan resolución de numeración de la DIAN (prefijo, rango y vigencia). Se piden en el portal de la DIAN y Factus las asocia a tu cuenta.</p>
+      ${tabla([...conRes.map(fila), filaDian(NUM_DIAN[0])])}</section>
+    <section class="panel stack"><header class="vhead"><h3>Electrónicos sin resolución · solo prefijo</h3><span class="tag el">Electrónico</span></header>
+      <p class="hint">Notas y nómina electrónica: la DIAN no pide resolución, basta el prefijo. El consecutivo oficial lo lleva Factus.</p>
+      ${tabla([...notasV.map(fila), ...NUM_DIAN.slice(1).map(filaDian)])}</section>
+    <section class="panel stack"><header class="vhead"><h3>Documentos internos</h3><button id="nuevaN">Nueva numeración de factura normal</button></header>
+      <p class="hint">No van a la DIAN. La factura normal y el recibo de caja llevan prefijo propio; los demás, un consecutivo automático por tipo.</p>
+      ${tabla(internas.map(fila), 'No hay numeraciones de factura normal ni de recibos.')}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Consecutivo automático</th><th>Tipo</th><th class="r">Siguiente</th></tr></thead><tbody>
+        ${consecutivos.map(([n, k, v]) => `<tr><td>${esc(n)}</td><td class="mono">${k}</td><td class="r mono">${v}</td></tr>`).join('')}</tbody></table></div></section>`;
+  m.querySelectorAll('[data-dian]').forEach(b => b.onclick = () => formNumDian(NUM_DIAN.find(t => t.k === b.dataset.dian)));
   $('nuevo').onclick = () => formNumeracion();
   $('nuevaN').onclick = () => formNumeracion({ tipo: 'FV', prefijo: 'FN', electronica: false, hasta: 999999999 });
   m.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => formNumeracion(S.d.numeraciones.find(n => n.id === b.dataset.ed)));
@@ -2961,7 +3017,7 @@ async function enviarNE(e, anio, mes) {
   const ne = est.pendiente || { tipo: 'NIE', numero: siguienteNE('NIE'), anio, mes };
   const body = jsonNominaE({ ne, ...D }), T = totalesNE(body);
   const g = await store.save('nominas_e', { ...(ne.id ? { id: ne.id } : { empresa_id: S.eid, tipo: 'NIE', numero: ne.numero, anio, mes, empleado_id: e.id, tercero_id: e.tercero_id }), body, devengado: T.devengado, deducciones: T.deducciones });
-  return store.fe('enviar_nomina', { nomina_e_id: g.id || ne.id, body: JSON.parse(JSON.stringify(body)) });
+  return store.fe('enviar_nomina', { nomina_e_id: g.id || ne.id, prefijo: numDian('NIE').prefijo, body: JSON.parse(JSON.stringify(body)) });
 }
 async function anularNE(vig) {
   const numeroNE = numeroDianNE(vig.id); if (!numeroNE) throw new Error('No encuentro el número con que la DIAN validó esta nómina.');
@@ -2969,7 +3025,7 @@ async function anularNE(vig) {
   const nota = pend || { tipo: 'NIAE', numero: siguienteNE('NIAE') };
   const body = jsonNotaNE({ nota, numeroNE });
   const g = await store.save('nominas_e', { ...(pend ? { id: pend.id } : { empresa_id: S.eid, tipo: 'NIAE', numero: nota.numero, anio: vig.anio, mes: vig.mes, empleado_id: vig.empleado_id, tercero_id: vig.tercero_id, ref_id: vig.id }), body });
-  return store.fe('enviar_nomina', { nomina_e_id: g.id || pend.id, body });
+  return store.fe('enviar_nomina', { nomina_e_id: g.id || pend.id, prefijo: numDian('NIAE').prefijo, body });
 }
 const faltaNE = e => /nominas_e|nomina_e_id|relation .* does not exist|schema cache/i.test(e?.message || '') ? 'Falta correr en Supabase el archivo supabase/041_nomina_electronica.sql.' : e?.message || String(e);
 function vNominaE(m, mesQ) {
@@ -4559,7 +4615,7 @@ function vCompra(m, id) {
     if (!await confirmar(`Enviar ${esc(nomCompra(c))} a la DIAN`, 'Se envía a la DIAN por Factus. Si la DIAN lo valida, queda con su código (CUDS) y ya no se puede modificar, anular ni eliminar: se corrige con una nota de ajuste.', 'Enviar')) return;
     const b = $('dsEnviar'); b.disabled = true; b.textContent = 'Enviando…';
     try {
-      const r = await store.fe('enviar_compra', { compra_id: c.id, tipo: c.tipo, body: jsonDS(x) });
+      const r = await store.fe('enviar_compra', { compra_id: c.id, tipo: c.tipo, prefijo: numDian(c.tipo).prefijo, body: jsonDS(x) });
       await cargarEmpresa(); route();
       if (r.error_guardar) fail(new Error(r.error_guardar));
       else if (r.estado === 'aceptado') toast(`${nomCompra(c)} validado por la DIAN.${(r.avisos || []).length ? ' ' + r.avisos.join(' ') : ''}`); else fail(new Error(`La DIAN no validó el documento. ${[r.mensaje, ...(r.errores || []), ...(r.avisos || [])].filter(Boolean).join(' ')}`));
