@@ -9,7 +9,7 @@ export const MODULOS = {
   avanzados: { nombre: 'Informes avanzados', rutas: ['ercomp', 'ercc', 'flujocaja'] },
   consulta: { nombre: 'Usuarios de solo consulta', rutas: [] },
   // Productos y servicios (catálogo) y unidades de medida no son del módulo: todos los planes los tienen.
-  operacion: { nombre: 'Operación', rutas: ['operacion', 'opcfg', 'opregistros', 'opcortes', 'opcorte', 'opfacturar', 'opporcerrar'] },
+  operacion: { nombre: 'Operación', rutas: ['operacion', 'opcfg', 'opregistros', 'opcortes', 'opcorte', 'opfacturar', 'opporcerrar', 'opmaquinas'] },
   cotizaciones: { nombre: 'Cotizaciones', rutas: ['cotizaciones', 'cotizacion'] },
   inventario: { nombre: 'Control de inventario', rutas: ['existencias', 'kardex', 'ajustesinv', 'ajusteinvnuevo', 'ajusteinveditar', 'ajusteinv', 'traslados', 'trasladonuevo', 'trasladoeditar', 'traslado', 'costoproducto', 'inventariocfg'] },
 };

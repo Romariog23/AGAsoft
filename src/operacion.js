@@ -27,7 +27,7 @@ export const VARIABLES_FIJAS = ['cantidad', 'pagadas', 'tarifa'];
 export const PLANTILLAS = {
   maquinaria: {
     nombre: 'Maquinaria amarilla', icono: 'maquina',
-    descripcion: 'Horas máquina por operador, equipo y obra. Pago por hora, por día o fijo por obra, con recargo de domingo y festivo.',
+    descripcion: 'Recibos de horas máquina por operador y máquina, amarrados a la cotización del proyecto. Valor hora por operador, acumulado de horómetro y recargo de domingo y festivo.',
     config: {
       persona: 'Operador', unidad: 'h',
       listas: [
@@ -37,7 +37,7 @@ export const PLANTILLAS = {
       campos: [
         { k: 'equipo', nombre: 'Equipo', tipo: 'elemento', lista: 'equipos', obligatorio: true },
         { k: 'obra', nombre: 'Obra', tipo: 'elemento', lista: 'obras', obligatorio: true },
-        { k: 'soporte', nombre: 'Soporte', tipo: 'lista', opciones: ['Recibo firmado', 'Foto horómetro', 'Reporte del operador', 'Sin soporte'], obligatorio: true },
+        { k: 'soporte', nombre: 'Soporte', tipo: 'lista', opciones: ['Recibo firmado', 'Foto horómetro', 'Reporte del operador', 'Sin soporte'] },
         { k: 'recibo', nombre: 'N.º de recibo', tipo: 'texto' },
         { k: 'actividad', nombre: 'Actividad', tipo: 'texto' },
         { k: 'horometro', nombre: 'Horómetro', tipo: 'lectura' },
@@ -86,8 +86,11 @@ export function cfgTipo(t) {
   const c = t?.config || {};
   return { persona: c.persona || 'Persona', unidad: c.unidad || 'und', listas: c.listas || [], campos: c.campos || [], formulas: { cantidad: '0', valor: 'pagadas * tarifa', ...(c.formulas || {}) },
     editar_pagadas: !!c.editar_pagadas, continuidad: c.continuidad || null, pendiente: c.pendiente || null, tarifa_por: c.tarifa_por || ['tercero'],
-    constantes: c.constantes || [], reglas: c.reglas || [], salidas: { pago: 'ninguno', cobro: 'ninguno', ...(c.salidas || {}) } };
+    constantes: c.constantes || [], reglas: c.reglas || [], salidas: { pago: 'ninguno', cobro: 'ninguno', ...(c.salidas || {}) },
+    // Proyecto (cotización) al registrar: obligatorio si el tipo factura, salvo que la empresa diga otra cosa.
+    proyecto: c.proyecto || ((c.salidas || {}).cobro === 'fv' ? 'obligatorio' : 'opcional') };
 }
+export const MODOS_PROYECTO = [['obligatorio', 'Obligatorio'], ['opcional', 'Opcional'], ['no', 'No se pide']];
 
 /* ---------- Fórmulas ---------- */
 // Calculadora segura (sin eval): números, variables, + - * / ( ), y min, max, redondear.
@@ -454,4 +457,38 @@ export function porCerrar(registros, tipo, { hasta = '9999-12-31', tarifas = [],
     pagadoSinFacturar: conPago && conCobro ? regs.filter(r => r.cierre_pago && !r.cierre_cobro && !esCargo(r)).length : 0,
     facturadoSinPagar: conPago && conCobro ? regs.filter(r => r.cierre_cobro && !r.cierre_pago).length : 0,
   };
+}
+
+/* ---------- Avance de la cotización y acumulado por máquina ---------- */
+// Cantidad de cada línea "con horas" de la cotización: proyectada (con adiciones), ejecutada en Operación y saldo.
+export const adicionado = l => r2((l.adiciones || []).reduce((s, a) => s + n(a.cantidad), 0));
+export function avanceCotizacion(cot, registros, tipo, cotizaciones) {
+  const cfg = cfgTipo(tipo), out = (cot?.lineas || []).map((l, i) => ({ i, descripcion: l.descripcion, unidad: l.unidad, horas: l.op !== false && l.op !== 'fijo', proyectado: n(l.cantidad), adicionado: adicionado(l), ejecutado: 0, registros: 0 }));
+  for (const r of (registros || []).filter(x => x.tipo_id === tipo?.id && !esCargo(x))) {
+    if (cotizacionPara(r, cotizaciones || [cot])?.id !== cot.id) continue;
+    const lc = lineaCotPara(r, cot); if (!lc) continue;
+    const k = calcular(r, tipo, [], 'cobro'), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
+    out[lc.i].ejecutado = r2(out[lc.i].ejecutado + q); out[lc.i].registros++;
+  }
+  return out.map(x => ({ ...x, saldo: r2(x.proyectado - x.ejecutado), pct: x.proyectado > 0 ? Math.round(x.ejecutado / x.proyectado * 100) : 0 }));
+}
+// Acumulado de lecturas por máquina (elemento de continuidad): último horómetro, horas del período y totales, y saltos.
+export function acumuladoMaquinas(registros, tipo, { desde, hasta } = {}) {
+  const co = cfgTipo(tipo).continuidad; if (!co?.lectura || !co?.por) return [];
+  const g = new Map();
+  for (const r of (registros || []).filter(x => x.tipo_id === tipo.id && !esCargo(x))) {
+    const el = r.datos?.[co.por], x = r.datos?.[co.lectura]; if (!el) continue;
+    if (!g.has(el)) g.set(el, []); g.get(el).push({ r, ini: x?.ini === '' || x?.ini == null ? null : n(x.ini), fin: x?.fin === '' || x?.fin == null ? null : n(x.fin) });
+  }
+  return [...g.entries()].map(([elemento, l]) => {
+    l.sort((a, b) => a.r.fecha.localeCompare(b.r.fecha) || (a.ini ?? 0) - (b.ini ?? 0));
+    const saltos = []; let total = 0, periodo = 0, recibosPer = 0;
+    l.forEach((x, i) => {
+      const h = x.ini != null && x.fin != null ? r2(x.fin - x.ini) : 0; total = r2(total + h);
+      if ((!desde || x.r.fecha >= desde) && (!hasta || x.r.fecha <= hasta)) { periodo = r2(periodo + h); recibosPer++; }
+      const prev = l[i - 1]; if (prev && prev.fin != null && x.ini != null && Math.abs(x.ini - prev.fin) > 0.001) saltos.push({ registro_id: x.r.id, fecha: x.r.fecha, esperado: prev.fin, ini: x.ini, dif: r2(x.ini - prev.fin) });
+    });
+    const ult = [...l].reverse().find(x => x.fin != null);
+    return { elemento, ultimo: ult ? ult.fin : null, fecha: ult ? ult.r.fecha : l[l.length - 1].r.fecha, total, periodo, recibos: l.length, recibosPeriodo: recibosPer, saltos };
+  });
 }

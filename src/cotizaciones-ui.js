@@ -1,6 +1,6 @@
 // Cotizaciones (Ventas): no mueven contabilidad. Fijan el precio de cobro y, si se amarran a un tipo de Operación
 // (obra, equipo…), las horas registradas se facturan desde Operación con ese precio. Tabla: supabase/038_cotizaciones.sql.
-import { cfgTipo, ESTADOS_COT, erroresCotizacion, totalLineaCot, COBRO_LINEA, cobroDeLinea } from './operacion.js';
+import { cfgTipo, avanceCotizacion, ESTADOS_COT, erroresCotizacion, totalLineaCot, COBRO_LINEA, cobroDeLinea } from './operacion.js';
 import { operacionActiva, tiposOp } from './operacion-ui.js';
 import { totales, enLetras } from './calc.js';
 
@@ -47,6 +47,28 @@ export function vCotizacion(m, id) {
   const clientes = [...X.S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   const prods = (X.S.d.productos || []).filter(p => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre));
 
+  // Avance del proyecto: horas ejecutadas en Operación contra las proyectadas, y adiciones cuando se acaban.
+  const tipoP = prev?.op_tipo_id ? tipoById(prev.op_tipo_id) : null;
+  const avanceHtml = () => {
+    if (!tipoP) return '';
+    const u = cfgTipo(tipoP).unidad || '', av = avanceCotizacion(prev, X.S.d.op_registros || [], tipoP, cots()).filter(x => x.horas);
+    if (!av.length) return '';
+    const f = v => X.num(v).toLocaleString('es-CO', { maximumFractionDigits: 2 });
+    return `<section class="panel stack"><header class="vhead"><div><h3>Avance del proyecto</h3><p class="hint">Lo ejecutado sale de los recibos de ${esc(tipoP.nombre)}. Las cantidades cotizadas casi siempre se extienden: cuando se acaben, adiciona las que faltan.</p></div></header>
+      ${av.map(x => { const l = prev.lineas[x.i], ad = l.adiciones || []; return `<div class="op-bar-row"><div class="row between"><b>${esc(x.descripcion || 'Línea ' + (x.i + 1))}</b><span class="row"><span class="mono">${f(x.ejecutado)} de ${f(x.proyectado)} ${esc(u)} · saldo ${f(x.saldo)}</span><button type="button" class="sm ${x.saldo <= 0 ? 'primary' : 'ghost'}" data-adi="${x.i}">Adicionar</button></span></div>
+        <div class="op-bar"><i style="width:${Math.min(100, x.pct)}%" class="${x.saldo <= 0 ? 'over' : x.pct >= 80 ? 'warn' : ''}"></i></div>
+        ${ad.length ? `<p class="hint">Cotizado inicial ${f(x.proyectado - x.adicionado)} ${esc(u)} · ${ad.map(a => `+${f(a.cantidad)} el ${X.fFecha(a.fecha)}${a.nota ? ' (' + esc(a.nota) + ')' : ''}`).join(' · ')}</p>` : ''}</div>`; }).join('')}</section>`;
+  };
+  const adicionar = i => { const l = prev.lineas[i], av = avanceCotizacion(prev, X.S.d.op_registros || [], tipoP, cots())[i];
+    X.dialogo(`<h2>Adicionar a la cotización N.º ${prev.numero}</h2><p class="hint">${esc(l.descripcion || '')}: van ${X.num(av.ejecutado).toLocaleString('es-CO')} de ${X.num(av.proyectado).toLocaleString('es-CO')}.</p>
+      <div class="grid2">${X.campo('cantidad', 'Cantidad a adicionar *', av.saldo < 0 ? String(-av.saldo).replace('.', ',') : '', 'required class="mono" inputmode="decimal"')}${X.campo('fecha', 'Fecha', X.hoy(), 'type="date"')}</div>
+      ${X.campo('nota', 'Nota (opcional)', '', 'maxlength="200" placeholder="Ej.: aprobado por el cliente por correo"')}${X.pie()}`, async fd => {
+      const q = X.num(fd.get('cantidad')); if (!(q > 0)) throw new Error('La cantidad debe ser mayor que cero.');
+      const lineas = prev.lineas.map((x, j) => j !== i ? x : { ...x, cantidad: X.num(x.cantidad) + q, adiciones: [...(x.adiciones || []), { fecha: fd.get('fecha') || X.hoy(), cantidad: q, nota: String(fd.get('nota') || '').trim() }] });
+      const tt = totales(lineas, {});
+      await X.store.save('cotizaciones', { id: prev.id, lineas, bruto: tt.bruto, descuento: tt.descuento, base: tt.base, iva: tt.iva, total: tt.total }); await X.cargarEmpresa();
+      X.toast(`Se adicionaron ${q.toLocaleString('es-CO')} a la cotización N.º ${prev.numero}.`); X.route();
+    }); };
   const pintar = () => {
     const t = tipoById(c.op_tipo_id), cel = camposEl(t), libres = cel.filter(f => !c.criterios[f.k]);
     m.innerHTML = `<header class="vhead"><div><a class="back" href="#/cotizaciones">← Cotizaciones</a><h2>${prev ? `Cotización N.º ${prev.numero}` : 'Nueva cotización'}</h2>${prev ? `<p class="sub"><span class="tag ${ESTADO_TAG[prev.estado] || ''}">${nomEstado(prev.estado)}</span></p>` : ''}</div>
@@ -71,6 +93,7 @@ export function vCotizacion(m, id) {
         <td><input data-k="iva_pct" type="number" step="any" min="0" class="r" value="${l.iva_pct}"></td>
         ${t ? `<td><select data-op>${X.opts(COBRO_LINEA, cobroDeLinea(l))}</select>${l.op === 'fijo' && l.facturado ? '<br><small class="hint">Ya facturada</small>' : ''}</td>` : ''}<td class="r mono" data-tot>${money(totalLineaCot(l))}</td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
       </tbody></table></div><div class="row"><button type="button" class="ghost" id="cqAdd">+ Agregar línea</button></div><div id="cqTot"></div></section>
+    ${avanceHtml()}
     <section class="panel"><div class="grid2"><div><label for="cqO">Observaciones</label><textarea id="cqO" rows="3" maxlength="2000">${esc(c.observaciones || '')}</textarea></div><div><label for="cqK">Condiciones (forma de pago, mínimos, movilización…)</label><textarea id="cqK" rows="3" maxlength="2000">${esc(c.condiciones || '')}</textarea></div></div></section>`;
     totalesTxt();
     // Encabezado
@@ -103,6 +126,7 @@ export function vCotizacion(m, id) {
       if (ev.target.dataset.op !== undefined) { l.op = ev.target.value === 'horas' ? true : ev.target.value === 'fijo' ? 'fijo' : false; if (l.op !== 'fijo') delete l.facturado; }
     });
     tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { c.lineas.splice(Number(b.dataset.del), 1); if (!c.lineas.length) c.lineas.push(nuevaLinea()); pintar(); });
+    m.querySelectorAll('[data-adi]').forEach(b => b.onclick = () => adicionar(+b.dataset.adi));
     X.$('cqAdd').onclick = () => { c.lineas.push(nuevaLinea()); pintar(); m.querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
     X.$('cqSave').onclick = guardar;
     if (X.$('cqImp')) X.$('cqImp').onclick = () => imprimir(prev);

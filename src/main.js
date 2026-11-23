@@ -21,7 +21,7 @@ import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
-import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
+import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCfg, vOpRegistros, vOpCortes, vOpCorte, vOpFacturar, vOpPorCerrar, vOpMaquinas, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -285,7 +285,7 @@ function route() {
   const [ruta, qs = ''] = location.hash.split('?');
   const [, v = 'inicio', arg] = ruta.split('/');
   const q = new URLSearchParams(qs);
-  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes', 'opfacturar'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v === 'cotizacion' ? 'cotizaciones' : v);
+  renderNav(['ajusteinv', 'ajusteinvnuevo', 'ajusteinveditar'].includes(v) ? 'ajustesinv' : ['traslado', 'trasladonuevo', 'trasladoeditar'].includes(v) ? 'traslados' : ['nominanueva', 'nominaeditar', 'nominadoc'].includes(v) ? 'nomina' : v === 'nominapago' || (v === 'comp' && compById(arg)?.tipo === 'PN') ? 'nominapagos' : ['nuevo', 'doc', 'editar'].includes(v) ? (arg && TIPOS[arg] ? arg : docById(arg)?.tipo) : ['comp', 'compnuevo', 'compeditar'].includes(v) ? 'comprobantes' : v === 'compras' || (v === 'importar' && arg) ? v + '/' + arg : ['compra', 'compraeditar'].includes(v) ? 'compras/' + (compraById(arg)?.tipo || 'FC') : v === 'compranueva' ? 'compras/' + (q.get('tipo') || 'FC') : ['opregistros', 'opcfg', 'opcortes', 'opfacturar', 'opmaquinas'].includes(v) ? 'opregistros/' + arg : v === 'opcorte' ? 'operacion' : v === 'cotizacion' ? 'cotizaciones' : v);
   pintarCampana();
   const m = $('main');
   document.body.classList.remove('onboarding');
@@ -296,7 +296,8 @@ function route() {
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
     if (v === 'operacion') return vOperacion(m);
-    if (v === 'opcfg') return operacionActiva() ? vOpCfg(m, arg) : vOperacion(m);
+    if (v === 'opcfg') return operacionActiva() ? vOpCfg(m, arg, q) : vOperacion(m);
+    if (v === 'opmaquinas') return operacionActiva() ? vOpMaquinas(m, arg, q) : vOperacion(m);
     if (v === 'opregistros') return operacionActiva() ? vOpRegistros(m, arg, q) : vOperacion(m);
     if (v === 'opcortes') return operacionActiva() ? vOpCortes(m, arg) : vOperacion(m);
     if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
