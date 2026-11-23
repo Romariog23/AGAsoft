@@ -19,7 +19,12 @@ const elementosDe = (t, lista) => (X.S.d.op_elementos || []).filter(e => e.tipo_
 const faltaSql = e => /ajuste_op/i.test(e?.message || '') ? new Error('Para el ajuste al operador falta correr en Supabase el archivo supabase/039_op_ajuste.sql.') : /cotizaciones|schema cache|does not exist/i.test(e?.message || '') ? new Error('Falta correr en Supabase el archivo supabase/038_cotizaciones.sql.') : e;
 const ESTADO_TAG = { abierta: 'demo', aceptada: 'ok', rechazada: 'bad', cerrada: '' };
 const nomEstado = e => (ESTADOS_COT.find(x => x[0] === e) || [e, e])[1];
+const obraDe = c => elem(c?.criterios?.obra)?.nombre || '';
 const amarre = c => { const t = tipoById(c.op_tipo_id); if (!t) return ''; const els = Object.values(c.criterios || {}).filter(Boolean).map(id => elem(id)?.nombre).filter(Boolean); return [t.nombre, ...els].join(' · '); };
+// Dos diseños: estándar (cualquier empresa) y de maquinaria (solo con Operación activa en modo maquinaria; la amarra op_tipo_id).
+export const maqActiva = () => operacionActiva() && !!tipoMaq();
+const esMaq = c => !!c?.op_tipo_id;
+const COND_MAQ = 'Mínimo de horas: \nOperador: incluido\nCombustible: \nMovilización: \nLas horas se facturan según el horómetro de cada recibo firmado en obra.\nForma de pago: ';
 const nuevaLinea = () => ({ producto_id: '', codigo: '', descripcion: '', unidad: 'UND', cantidad: 1, precio: 0, descuento_pct: 0, iva_pct: 19, op: true, criterios: {} });
 
 /* ---------- Lista ---------- */
@@ -29,10 +34,10 @@ export function vCotizaciones(m) {
   const todas = [...cots()].sort((a, b) => Number(b.numero) - Number(a.numero));
   const ls = todas.filter(c => !filtro || c.estado === filtro);
   const cuenta = e => todas.filter(c => c.estado === e).length;
-  m.innerHTML = `<header class="vhead"><div><h2>Cotizaciones</h2><p class="sub">Precios ofrecidos a tus clientes. No mueven la contabilidad. Si amarras una cotización a Operación, las horas de esa obra se facturan con su precio.</p></div><a class="btn primary" href="#/cotizacion/nueva">Nueva cotización</a></header>
+  m.innerHTML = `<header class="vhead"><div><h2>Cotizaciones</h2><p class="sub">Precios ofrecidos a tus clientes. No mueven la contabilidad. ${maqActiva() ? 'Las de maquinaria son los proyectos de Operación: sus horas se facturan con su precio.' : ''}</p></div><div class="row">${maqActiva() ? '<a class="btn" href="#/cotizacion/nueva-maq">Nueva de maquinaria</a>' : ''}<a class="btn primary" href="#/cotizacion/nueva">Nueva cotización</a></div></header>
   <div class="seg" role="tablist"><button type="button" data-f="" aria-selected="${!filtro}">Todas (${todas.length})</button>${ESTADOS_COT.map(([k, n]) => `<button type="button" data-f="${k}" aria-selected="${filtro === k}">${n} (${cuenta(k)})</button>`).join('')}</div>
-  <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>N.º</th><th>Fecha</th><th>Cliente</th><th>Amarrada a</th><th class="r">Total</th><th>Estado</th></tr></thead><tbody>
-  ${ls.map(c => `<tr class="click" data-c="${c.id}"><td class="mono">${c.numero}</td><td>${X.fFecha(c.fecha)}${c.vence && c.vence < X.hoy() && c.estado === 'abierta' ? ' <span class="tag bad">Vencida</span>' : ''}</td><td><b>${esc(nomT(c.tercero_id))}</b></td><td>${esc(amarre(c)) || '<span class="muted">—</span>'}</td><td class="r mono">${money(c.total)}</td><td><span class="tag ${ESTADO_TAG[c.estado] || ''}">${nomEstado(c.estado)}</span></td></tr>`).join('') || `<tr><td colspan="6" class="muted">${todas.length ? 'No hay cotizaciones con ese estado.' : 'Todavía no hay cotizaciones.'}</td></tr>`}
+  <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>N.º</th><th>Fecha</th><th>Cliente</th><th>Diseño</th><th class="r">Total</th><th>Estado</th></tr></thead><tbody>
+  ${ls.map(c => `<tr class="click" data-c="${c.id}"><td class="mono">${c.numero}</td><td>${X.fFecha(c.fecha)}${c.vence && c.vence < X.hoy() && c.estado === 'abierta' ? ' <span class="tag bad">Vencida</span>' : ''}</td><td><b>${esc(nomT(c.tercero_id))}</b></td><td>${esMaq(c) ? `<span class="tag ok">Maquinaria</span> ${esc(obraDe(c))}` : '<span class="muted">Estándar</span>'}</td><td class="r mono">${money(c.total)}</td><td><span class="tag ${ESTADO_TAG[c.estado] || ''}">${nomEstado(c.estado)}</span></td></tr>`).join('') || `<tr><td colspan="6" class="muted">${todas.length ? 'No hay cotizaciones con ese estado.' : 'Todavía no hay cotizaciones.'}</td></tr>`}
   </tbody></table></div></section>`;
   m.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { filtro = b.dataset.f; vCotizaciones(m); });
   m.querySelectorAll('[data-c]').forEach(tr => tr.onclick = () => { location.hash = '#/cotizacion/' + tr.dataset.c; });
@@ -40,14 +45,14 @@ export function vCotizaciones(m) {
 
 /* ---------- Editor ---------- */
 export function vCotizacion(m, id) {
-  const { esc, money } = X, prev = id && id !== 'nueva' ? cotById(id) : null;
-  if (id && id !== 'nueva' && !prev) { location.hash = '#/cotizaciones'; return; }
+  const { esc, money } = X, nueva = id === 'nueva' || id === 'nueva-maq', prev = id && !nueva ? cotById(id) : null;
+  if (id && !nueva && !prev) { location.hash = '#/cotizaciones'; return; }
+  if (id === 'nueva-maq' && !maqActiva()) { location.hash = '#/cotizacion/nueva'; return; }
   const c = prev ? JSON.parse(JSON.stringify(prev)) : { fecha: X.hoy(), vence: X.sumarDias(X.hoy(), 30), tercero_id: '', estado: 'abierta', op_tipo_id: null, criterios: {}, lineas: [nuevaLinea()], observaciones: '', condiciones: '' };
   c.criterios = c.criterios || {}; c.lineas = (c.lineas || []).map(l => ({ ...nuevaLinea(), ...l, criterios: l.criterios || {} }));
-  const opOn = operacionActiva() && tiposOp().length;
-  // La cotización es el proyecto: si hay un solo tipo de operación abierto, la nueva queda amarrada a él de una.
-  const tm = opOn ? tipoMaq() : null;
-  if (!prev && tm) c.op_tipo_id = tm.id;
+  // Diseño de maquinaria: la cotización es el proyecto de Operación (queda amarrada al tipo de maquinaria).
+  if (id === 'nueva-maq') { c.op_tipo_id = tipoMaq().id; c.condiciones = COND_MAQ; c.lineas = [{ ...nuevaLinea(), unidad: 'H' }]; }
+  const opOn = esMaq(c);
   c.nuevos = {}; // elementos por crear al guardar (p. ej. la obra nueva del proyecto)
   const clientes = [...X.S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre));
   const prods = (X.S.d.productos || []).filter(p => p.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -76,7 +81,7 @@ export function vCotizacion(m, id) {
     }); };
   const pintar = () => {
     const t = tipoById(c.op_tipo_id), celT = camposEl(t), cel = celT.filter(f => f.k === 'obra'), libres = celT.filter(f => f.k !== 'obra' && !c.criterios[f.k]);
-    m.innerHTML = `<header class="vhead"><div><a class="back" href="#/cotizaciones">← Cotizaciones</a><h2>${prev ? `Cotización N.º ${prev.numero}` : 'Nueva cotización'}</h2>${prev ? `<p class="sub"><span class="tag ${ESTADO_TAG[prev.estado] || ''}">${nomEstado(prev.estado)}</span></p>` : ''}</div>
+    m.innerHTML = `<header class="vhead"><div><a class="back" href="#/cotizaciones">← Cotizaciones</a><h2>${prev ? `Cotización${opOn ? ' de maquinaria' : ''} N.º ${prev.numero}` : opOn ? 'Nueva cotización de maquinaria' : 'Nueva cotización'}</h2>${prev ? `<p class="sub"><span class="tag ${ESTADO_TAG[prev.estado] || ''}">${nomEstado(prev.estado)}</span></p>` : ''}</div>
       <div class="row">${prev ? `<button class="ghost" id="cqDel">Eliminar</button><button id="cqImp">Imprimir</button>${t && operacionActiva() && cfgTipo(t).salidas.cobro === 'fv' ? `<a class="btn" href="#/opfacturar/${t.id}?cot=${prev.id}">Facturar horas</a>` : ''}` : ''}<button class="primary" id="cqSave">Guardar</button></div></header>
     <p class="err" id="cqErr" hidden></p>
     <section class="panel"><div class="cq-grid">
@@ -84,12 +89,12 @@ export function vCotizacion(m, id) {
       <div><label for="cqF">Fecha</label><input id="cqF" type="date" value="${c.fecha || ''}"></div>
       <div><label for="cqV">Válida hasta</label><input id="cqV" type="date" value="${c.vence || ''}"></div>
       <div><label for="cqE">Estado</label><select id="cqE">${X.opts(ESTADOS_COT, c.estado)}</select></div></div></section>
-    ${opOn ? `<section class="panel stack"><h3>Proyecto de horas máquina</h3><label class="check"><input type="checkbox" id="cqT" ${c.op_tipo_id ? 'checked' : ''}> Esta cotización es un proyecto de Operación</label>${t ? `<p class="hint">Aparece de una para escogerla en los recibos y sus horas se facturan con estos precios. Si la obra no existe, escoge "+ Crear obra…" y escribe el nombre.</p>` : ''}
+    ${opOn ? `<section class="panel stack"><h3>Proyecto</h3><p class="hint">Esta cotización es el proyecto: aparece de una para escogerla en los recibos y sus horas se facturan con estos valores. Si la obra no existe, escoge "+ Crear obra…" y escribe el nombre.</p>
       <div class="cq-grid">
       ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Sin ${esc(f.nombre.toLowerCase())}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}<option value="__nueva" ${c.nuevos[f.k] != null ? 'selected' : ''}>+ Crear ${esc(f.nombre.toLowerCase())}…</option></select>${c.nuevos[f.k] != null ? `<input id="cqN_${f.k}" data-nuevo="${f.k}" value="${esc(c.nuevos[f.k])}" placeholder="Nombre (ej.: CORTEVA)" maxlength="80" style="margin-top:6px">` : ''}</div>`).join('')}</div>
       ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por hora (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
       <p class="hint">Se suma a la tarifa de programación de cada operador, solo en los registros de este proyecto. Sale como línea aparte en el volante y el documento soporte. No cambia lo que se le cobra al cliente.</p>` : ''}</section>` : ''}
-    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto y descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Valor unitario</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
+    <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>${t ? 'Ítem a facturar' : 'Producto y descripción'}</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">${t ? 'Horas proy.' : 'Cant.'}</th><th>Unidad</th><th class="r">${t ? 'Valor hora' : 'Valor unitario'}</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
       ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select><input data-k="descripcion" value="${esc(l.descripcion)}" maxlength="300" placeholder="Descripción" style="margin-top:4px"></td>
         ${t ? libres.map(f => `<td><select data-lc="${f.k}"><option value="">${l.op === false ? '—' : 'Cualquiera'}</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === l.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></td>`).join('') : ''}
         <td><input data-k="cantidad" type="number" step="any" min="0" class="r" value="${l.cantidad}"></td><td><input data-k="unidad" value="${esc(l.unidad)}" maxlength="10" size="5"></td>
@@ -98,14 +103,13 @@ export function vCotizacion(m, id) {
         ${t ? `<td><select data-op>${X.opts(COBRO_LINEA, cobroDeLinea(l))}</select>${l.op === 'fijo' && l.facturado ? '<br><small class="hint">Ya facturada</small>' : ''}</td>` : ''}<td><input data-k="total" data-tot type="number" step="any" min="0" class="r" value="${totalLineaCot(l) || ''}" title="Escribe el total y se calcula el valor unitario"></td><td><button type="button" class="sm ghost" data-del="${i}" title="Quitar línea">✕</button></td></tr>`).join('')}
       </tbody></table></div><div class="row"><button type="button" class="ghost" id="cqAdd">+ Agregar línea</button></div><div id="cqTot"></div></section>
     ${avanceHtml()}
-    <section class="panel"><div class="grid2"><div><label for="cqO">Observaciones</label><textarea id="cqO" rows="3" maxlength="2000">${esc(c.observaciones || '')}</textarea></div><div><label for="cqK">Condiciones (forma de pago, mínimos, movilización…)</label><textarea id="cqK" rows="3" maxlength="2000">${esc(c.condiciones || '')}</textarea></div></div></section>`;
+    <section class="panel"><div class="grid2"><div><label for="cqO">Observaciones</label><textarea id="cqO" rows="3" maxlength="2000">${esc(c.observaciones || '')}</textarea></div><div><label for="cqK">${opOn ? 'Condiciones del servicio (una por renglón; las que dejes vacías no se imprimen)' : 'Condiciones (forma de pago, tiempos de entrega…)'}</label><textarea id="cqK" rows="${opOn ? 7 : 3}" maxlength="2000">${esc(c.condiciones || '')}</textarea></div></div></section>`;
     totalesTxt();
     // Encabezado
     X.$('cqCli').onchange = e => { c.tercero_id = e.target.value; };
     X.$('cqF').onchange = e => { c.fecha = e.target.value; }; X.$('cqV').onchange = e => { c.vence = e.target.value; }; X.$('cqE').onchange = e => { c.estado = e.target.value; };
     X.$('cqO').oninput = e => { c.observaciones = e.target.value; }; X.$('cqK').oninput = e => { c.condiciones = e.target.value; };
     if (X.$('cqA')) X.$('cqA').oninput = e => { c.ajuste_op = X.num(e.target.value); };
-    if (X.$('cqT')) X.$('cqT').onchange = e => { c.op_tipo_id = e.target.checked ? (tipoById(prev?.op_tipo_id) || tipoMaq())?.id || null : null; c.criterios = {}; c.lineas.forEach(l => { l.criterios = {}; }); pintar(); };
     m.querySelectorAll('[data-nuevo]').forEach(i => i.oninput = () => { c.nuevos[i.dataset.nuevo] = i.value; });
     m.querySelectorAll('[data-crit]').forEach(s => s.onchange = () => {
       if (s.value === '__nueva') { c.nuevos[s.dataset.crit] = ''; delete c.criterios[s.dataset.crit]; pintar(); X.$('cqN_' + s.dataset.crit)?.focus(); return; }
@@ -141,7 +145,7 @@ export function vCotizacion(m, id) {
     });
     tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { c.lineas.splice(Number(b.dataset.del), 1); if (!c.lineas.length) c.lineas.push(nuevaLinea()); pintar(); });
     m.querySelectorAll('[data-adi]').forEach(b => b.onclick = () => adicionar(+b.dataset.adi));
-    X.$('cqAdd').onclick = () => { c.lineas.push(nuevaLinea()); pintar(); m.querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
+    X.$('cqAdd').onclick = () => { c.lineas.push(opOn ? { ...nuevaLinea(), unidad: 'H' } : nuevaLinea()); pintar(); m.querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=descripcion]`)?.focus(); };
     X.$('cqSave').onclick = guardar;
     if (X.$('cqImp')) X.$('cqImp').onclick = () => imprimir(prev);
     if (X.$('cqDel')) X.$('cqDel').onclick = async () => {
@@ -181,14 +185,28 @@ export function vCotizacion(m, id) {
 }
 
 /* ---------- Impresión ---------- */
+// Dos diseños: estándar (producto, cantidad, valor unitario) y de maquinaria (obra, máquina, horas proyectadas, valor hora, condiciones del servicio).
 function imprimir(c) {
-  const { esc, money } = X, tr = terc(c.tercero_id), tt = totales(c.lineas || [], {}), am = amarre(c);
-  X.$('print').innerHTML = `<article class="desprendible">${X.cabInforme('Cotización', `N.º ${c.numero}<br><small>${X.fFecha(c.fecha)}${c.vence ? ' · válida hasta ' + X.fFecha(c.vence) : ''}</small>`)}
-    <div class="grid2"><div><b>CLIENTE</b><br>${esc(tr?.nombre || '')}<br><span class="muted">${esc(X.docId(tr))}</span>${tr?.direccion ? `<br><span class="muted">${esc(tr.direccion)}${tr.ciudad ? ', ' + esc(tr.ciudad) : ''}</span>` : ''}</div><div>${am ? `<b>Aplica a:</b> ${esc(am)}` : ''}</div></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Descripción</th><th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th>${tt.descuento ? '<th class="r">Desc.</th>' : ''}<th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
-    ${(c.lineas || []).map(l => { const crit = Object.values(l.criterios || {}).map(x => elem(x)?.nombre).filter(Boolean).join(', '); return `<tr><td>${esc(l.descripcion)}${crit ? `<br><small class="muted">${esc(crit)}</small>` : ''}</td><td class="r mono">${X.num(l.cantidad).toLocaleString('es-CO')}</td><td>${esc(l.unidad || '')}</td><td class="r mono">${money(l.precio)}</td>${tt.descuento ? `<td class="r">${X.num(l.descuento_pct) ? X.num(l.descuento_pct) + ' %' : ''}</td>` : ''}<td class="r">${X.num(l.iva_pct)} %</td><td class="r mono">${money(totalLineaCot(l))}</td></tr>`; }).join('')}</tbody></table></div>
-    <dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(tt.base)}</dd>${tt.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}%</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}<dt class="strong">Total</dt><dd class="mono big">${money(tt.total)}</dd></dl><p class="hint letras">${enLetras(tt.total)}</p>
-    ${c.condiciones ? `<p><b>Condiciones:</b> ${esc(c.condiciones).replace(/\n/g, '<br>')}</p>` : ''}${c.observaciones ? `<p class="hint">${esc(c.observaciones).replace(/\n/g, '<br>')}</p>` : ''}
-    <div class="firmas"><span>${esc(X.emp().nombre)}</span><span>Aceptada · ${esc(tr?.nombre || '')}</span></div></article>`;
+  const { esc, money } = X, tr = terc(c.tercero_id), tt = totales(c.lineas || [], {}), maq = esMaq(c);
+  const cliente = `<div><b>CLIENTE</b><br>${esc(tr?.nombre || '')}<br><span class="muted">${esc(X.docId(tr))}</span>${tr?.direccion ? `<br><span class="muted">${esc(tr.direccion)}${tr.ciudad ? ', ' + esc(tr.ciudad) : ''}</span>` : ''}${tr?.telefono ? `<br><span class="muted">${esc(tr.telefono)}</span>` : ''}</div>`;
+  const totHtml = `<dl class="tot"><dt>Subtotal</dt><dd class="mono">${money(tt.bruto)}</dd>${tt.descuento ? `<dt>Descuentos</dt><dd class="mono">−${money(tt.descuento)}</dd>` : ''}${tt.porTarifa.filter(x => x.tarifa > 0).map(x => `<dt>IVA ${x.tarifa}%</dt><dd class="mono">${money(x.iva)}</dd>`).join('')}<dt class="strong">Total</dt><dd class="mono big">${money(tt.total)}</dd></dl><p class="hint letras">${enLetras(tt.total)}</p>`;
+  const cant = v => X.num(v).toLocaleString('es-CO', { maximumFractionDigits: 2 });
+  const firmas = `<div class="firmas"><span>${esc(X.emp().nombre)}</span><span>Aceptada · ${esc(tr?.nombre || '')}</span></div>`;
+  const cab = X.cabInforme(maq ? 'Cotización de alquiler de maquinaria' : 'Cotización', `N.º ${c.numero}<br><small>${X.fFecha(c.fecha)}${c.vence ? ' · válida hasta ' + X.fFecha(c.vence) : ''}</small>`);
+  let cuerpo;
+  if (maq) {
+    const obra = obraDe(c), conds = String(c.condiciones || '').split('\n').map(x => x.trim()).filter(x => x && !/:\s*$/.test(x));
+    cuerpo = `<div class="grid2">${cliente}<div><b>OBRA O PROYECTO</b><br>${esc(obra || '—')}</div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Máquina</th><th>Servicio</th><th class="r">Horas proyectadas</th><th class="r">Valor hora</th>${tt.descuento ? '<th class="r">Desc.</th>' : ''}<th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
+    ${(c.lineas || []).map(l => { const maqN = elem(l.criterios?.equipo)?.nombre || ''; const unica = l.op === 'fijo'; return `<tr><td>${esc(maqN || (unica ? '—' : 'Según disponibilidad'))}</td><td>${esc(l.descripcion)}${unica ? '<br><small class="muted">Cobro único</small>' : ''}</td><td class="r mono">${unica ? '' : cant(l.cantidad) + ' ' + esc(l.unidad || 'H')}</td><td class="r mono">${unica ? '' : money(l.precio)}</td>${tt.descuento ? `<td class="r">${X.num(l.descuento_pct) ? X.num(l.descuento_pct) + ' %' : ''}</td>` : ''}<td class="r">${X.num(l.iva_pct)} %</td><td class="r mono">${money(totalLineaCot(l))}</td></tr>`; }).join('')}</tbody></table></div>
+    ${totHtml}<p class="hint">Las horas proyectadas son de referencia: se factura lo ejecutado según el horómetro de cada recibo firmado en obra.</p>
+    ${conds.length ? `<div><b>CONDICIONES DEL SERVICIO</b><ul>${conds.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}${c.observaciones ? `<p class="hint">${esc(c.observaciones).replace(/\n/g, '<br>')}</p>` : ''}`;
+  } else {
+    cuerpo = `<div class="grid2">${cliente}<div></div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Descripción</th><th class="r">Cant.</th><th>Unidad</th><th class="r">Valor unitario</th>${tt.descuento ? '<th class="r">Desc.</th>' : ''}<th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
+    ${(c.lineas || []).map(l => `<tr><td class="mono">${esc(l.codigo || '')}</td><td>${esc(l.descripcion)}</td><td class="r mono">${cant(l.cantidad)}</td><td>${esc(l.unidad || '')}</td><td class="r mono">${money(l.precio)}</td>${tt.descuento ? `<td class="r">${X.num(l.descuento_pct) ? X.num(l.descuento_pct) + ' %' : ''}</td>` : ''}<td class="r">${X.num(l.iva_pct)} %</td><td class="r mono">${money(totalLineaCot(l))}</td></tr>`).join('')}</tbody></table></div>
+    ${totHtml}${c.condiciones ? `<p><b>Condiciones:</b> ${esc(c.condiciones).replace(/\n/g, '<br>')}</p>` : ''}${c.observaciones ? `<p class="hint">${esc(c.observaciones).replace(/\n/g, '<br>')}</p>` : ''}`;
+  }
+  X.$('print').innerHTML = `<article class="desprendible">${cab}${cuerpo}${firmas}</article>`;
   const tt0 = document.title; document.title = `Cotización ${c.numero} - ${tr?.nombre || ''}`; window.print(); document.title = tt0;
 }
