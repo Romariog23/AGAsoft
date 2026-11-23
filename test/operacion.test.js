@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compilar, evaluar, diaDe, nuevoTipo, calcular, resumen, avisos, tarifaPara, erroresTipo, erroresRegistro, ultimaLectura, claveDe } from '../src/operacion.js';
+import { compilar, evaluar, diaDe, nuevoTipo, calcular, resumen, avisos, tarifaPara, erroresTipo, erroresRegistro, ultimaLectura, claveDe, estaCerrado } from '../src/operacion.js';
 
 // Datos del corte del 7 al 20 de noviembre de 2026 (volantes de horas adicionales).
 const tipo = { id: 'maq', ...nuevoTipo('maquinaria', 'e1') };
@@ -172,4 +172,14 @@ test('pagadas en 0 o vacías: se paga la cantidad del horómetro', () => {
   assert.equal(calcular({ ...r, cantidad_pagada: 0 }, tipo, tarifas).valor, 56000);
   assert.equal(calcular({ ...r, cantidad_pagada: '' }, tipo, tarifas).pagadas, 8);
   assert.equal(calcular({ ...r, cantidad_pagada: 7.5 }, tipo, tarifas).valor, 52500);
+});
+
+test('estaCerrado: abierto hasta hacer todos los cierres del tipo', () => {
+  const ambos = { salidas: { pago: 'ds', cobro: 'fv' } };
+  assert.equal(estaCerrado({ cierre_pago: 'x' }, ambos), false);
+  assert.equal(estaCerrado({ cierre_pago: 'x', cierre_cobro: 'y' }, ambos), true);
+  assert.equal(estaCerrado({ clase: 'cargo', cierre_pago: 'x' }, ambos), true);
+  assert.equal(estaCerrado({ cierre_pago: 'x' }, { salidas: { pago: 'ds', cobro: 'ninguno' } }), true);
+  assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, { estado: 'cerrado' }), true);
+  assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, null), false);
 });
