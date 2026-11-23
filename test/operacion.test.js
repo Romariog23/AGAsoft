@@ -166,3 +166,10 @@ test('cargos sueltos en el volante y líneas de una sola vez en la factura', () 
   ({ grupos } = facturables(regs, tipo, { cotizaciones: [{ ...cot, lineas: [cot.lineas[0], { ...cot.lineas[1], facturado: 'fv1' }] }] }));
   assert.equal(grupos[0].total, 600000);
 });
+
+test('pagadas en 0 o vacías: se paga la cantidad del horómetro', () => {
+  const r = reg('h', '2026-11-20', 'antonio', 'mot140k', 'malambo', 1000, 1008);
+  assert.equal(calcular({ ...r, cantidad_pagada: 0 }, tipo, tarifas).valor, 56000);
+  assert.equal(calcular({ ...r, cantidad_pagada: '' }, tipo, tarifas).pagadas, 8);
+  assert.equal(calcular({ ...r, cantidad_pagada: 7.5 }, tipo, tarifas).valor, 52500);
+});

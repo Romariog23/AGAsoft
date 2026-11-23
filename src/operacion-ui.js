@@ -335,13 +335,13 @@ function formRegistro(t, r) {
       else d[fc.k] = String(fd.get('d_' + fc.k) ?? '').trim();
     }
     const p = String(fd.get('pagadas') ?? '').trim();
-    return { ...r, empresa_id: X.S.eid, tipo_id: t.id, fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id') || null, datos: d, cantidad_pagada: c.editar_pagadas && p !== '' ? numIn(p) : null, nota: String(fd.get('nota') || '').trim() };
+    return { ...r, empresa_id: X.S.eid, tipo_id: t.id, fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id') || null, datos: d, cantidad_pagada: c.editar_pagadas && p !== '' && numIn(p) > 0 ? numIn(p) : null, nota: String(fd.get('nota') || '').trim() };
   };
   const f = X.dialogo(`<h2>${r.id ? 'Editar registro' : 'Nuevo registro'} · ${esc(t.nombre)}</h2>
     <div class="grid2">${X.campo('fecha', 'Fecha', r.fecha, 'type="date" required')}<div><label for="f_tercero_id">${esc(c.persona)} *</label><select id="f_tercero_id" name="tercero_id" required><option value="">Escoge…</option>${personas().map(p => `<option value="${p.id}" ${p.id === r.tercero_id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></div></div>
     <div class="grid2">${c.campos.map(input).join('')}</div>
     <p class="op-prev" id="opPrev"></p>
-    <div class="grid2">${c.editar_pagadas ? X.campo('pagadas', `${c.unidad ? 'Cantidad' : 'Cantidad'} pagada (vacío = la de la fórmula)`, r.cantidad_pagada ?? '', 'class="mono" inputmode="decimal"') : ''}${X.campo('nota', 'Nota', r.nota || '', 'maxlength="300"')}</div>
+    <div class="grid2">${c.editar_pagadas ? X.campo('pagadas', 'Cantidad pagada, solo si es distinta (vacío = la del horómetro)', r.cantidad_pagada > 0 ? r.cantidad_pagada : '', 'class="mono" inputmode="decimal"') : ''}${X.campo('nota', 'Nota', r.nota || '', 'maxlength="300"')}</div>
     <p class="hint">Si la persona no aparece, créala en Terceros. Los registros no tocan la contabilidad.</p>${X.pie()}`, async (fd, btn) => {
     const row = leer(fd); delete row.creado_en;
     const errs = erroresRegistro(row, t); if (errs.length) throw new Error(errs.join(' '));

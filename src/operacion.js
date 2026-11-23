@@ -167,7 +167,8 @@ export function calcular(r, tipo, tarifas, uso = 'pago') {
   if (esCargo(r)) { const val = uso === 'pago' ? r2(n(r.datos?.valor)) : 0; return { cantidad: 0, pagadas: 0, dia: dia0, tarifa: null, modo: 'cargo', base: val, recargos: [], valor: val, fijo: false, cargo: String(r.datos?.concepto || 'Cargo') }; }
   const cfg = cfgTipo(tipo), v = variables(r, cfg), dia = dia0;
   let cantidad = 0; try { cantidad = r2(evaluar(cfg.formulas.cantidad, v)); } catch (_) { cantidad = 0; }
-  const pagadas = cfg.editar_pagadas && r.cantidad_pagada != null && r.cantidad_pagada !== '' ? r2(n(r.cantidad_pagada)) : cantidad;
+  // Cantidad pagada vacía o en 0 = la de la fórmula (horómetro). Solo un número mayor que cero la reemplaza.
+  const pagadas = cfg.editar_pagadas && n(r.cantidad_pagada) > 0 ? r2(n(r.cantidad_pagada)) : cantidad;
   const t = tarifaPara(r, tarifas, uso), tarifa = t ? n(t.valor) : 0, modo = t?.modo || 'unidad';
   const vv = { ...v, cantidad, pagadas, tarifa };
   let base = 0;
