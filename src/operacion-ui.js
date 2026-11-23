@@ -239,8 +239,9 @@ function tabTarifas(box, t, c) {
     <p class="hint">Gana la tarifa más específica: si hay una para la persona en una obra y otra solo para la persona, en esa obra se usa la primera.</p><div class="row end"><button class="sm">Guardar</button></div></form>
   <section class="panel stack"><header class="vhead"><h3>Tarifas</h3><button class="primary sm" id="opNT">Nueva tarifa</button></header>
     ${tar.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Uso</th><th>Aplica a</th><th>Modo</th><th class="r">Valor</th><th>Vigencia</th><th>Ítem de servicio</th><th></th></tr></thead><tbody>
-    ${tar.map(x => `<tr><td><span class="tag ${x.uso === 'cobro' ? 'el' : 'ok'}">${x.uso === 'cobro' ? 'Cobro' : 'Programación'}</span></td><td>${aplica(x)}</td><td>${esc(modoN(x.modo))}</td><td class="r mono">${money(x.valor)}</td><td class="hint">${x.desde ? X.fFecha(x.desde) : 'Siempre'}${x.hasta ? ' – ' + X.fFecha(x.hasta) : ''}</td>
+    ${tar.map(x => `<tr><td><span class="tag ${x.uso === 'cobro' ? 'el' : 'ok'}">${x.uso === 'cobro' ? 'Cobro' : x.modo === 'adicional' ? 'Ajuste' : 'Programación'}</span>${x.nota && x.modo === 'adicional' ? `<br><small class="hint">${esc(x.nota)}</small>` : ''}</td><td>${aplica(x)}</td><td>${esc(modoN(x.modo))}</td><td class="r mono">${money(x.valor)}</td><td class="hint">${x.desde ? X.fFecha(x.desde) : 'Siempre'}${x.hasta ? ' – ' + X.fFecha(x.hasta) : ''}</td>
       <td>${esc(X.S.d.productos.find(p => p.id === x.producto_id)?.nombre || '')}</td><td class="r nowrap"><button class="sm" data-et="${x.id}">Editar</button><button class="sm ghost" data-bt="${x.id}">Borrar</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sin tarifas. Sin tarifa, los registros quedan en $0 y salen como aviso.</p>'}
+    <p class="hint"><b>Ajuste adicional</b>: un valor por hora que se <b>suma</b> a la tarifa del operador cuando se cumple el criterio (p. ej. +$1.000 la hora en la obra CORTEVA). La tarifa base se crea una vez por operador; el ajuste va por obra. Para escoger la obra, marca Obra en "De qué depende el precio". La nota es el nombre que sale en el volante.</p>
     <p class="hint">El <b>ítem de servicio</b> es el que cerrará el documento soporte (programación) o la factura (cobro). Créalo en Inventario › Productos y servicios como tipo servicio.</p></section>`;
   X.$('opTP').onsubmit = async ev => { ev.preventDefault(); try { await guardarCfg(t, { config: { tarifa_por: new FormData(ev.target).getAll('por') } }, 'Guardado.'); } catch (e) { X.fail(e); } };
   const selCrit = (k, v) => {
@@ -257,7 +258,8 @@ function tabTarifas(box, t, c) {
     const row = { empresa_id: X.S.eid, tipo_id: t.id, uso: fd.get('uso'), modo: fd.get('modo'), valor: numIn(fd.get('valor')), desde: fd.get('desde') || null, hasta: fd.get('hasta') || null,
       criterios: Object.fromEntries(c.tarifa_por.map(k => [k, fd.get('c_' + k) || ''])), producto_id: fd.get('producto_id') || null, nota: String(fd.get('nota') || '').trim() };
     const errs = erroresTarifa(row); if (errs.length) throw new Error(errs.join(' '));
-    await guardar('op_tarifas', x.id ? { ...row, id: x.id } : row); X.toast('Tarifa guardada.'); X.route();
+    try { await guardar('op_tarifas', x.id ? { ...row, id: x.id } : row); } catch (e) { if (/op_tarifas_modo_check/.test(e?.message || '')) throw new Error('Para usar el ajuste adicional falta correr 039_op_ajuste.sql en Supabase.'); throw e; }
+    X.toast('Tarifa guardada.'); X.route();
   }, { ancho: true });
   X.$('opNT').onclick = () => formT();
   box.querySelectorAll('[data-et]').forEach(b => b.onclick = () => formT(tar.find(x => x.id === b.dataset.et)));

@@ -183,3 +183,14 @@ test('estaCerrado: abierto hasta hacer todos los cierres del tipo', () => {
   assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, { estado: 'cerrado' }), true);
   assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, null), false);
 });
+
+test('ajuste adicional por obra: se suma a la tarifa del operador', async () => {
+  const { calcular, nuevoTipo } = await import('../src/operacion.js');
+  const t = { id: 'T', ...nuevoTipo('maquinaria') }; t.config = { ...t.config, formulas: { cantidad: '8', valor: 'pagadas * tarifa' }, reglas: [] };
+  const tar = [{ tipo_id: 'T', uso: 'pago', modo: 'unidad', valor: 7000, criterios: { tercero: 'ana' } },
+    { tipo_id: 'T', uso: 'pago', modo: 'adicional', valor: 1000, criterios: { obra: 'corteva' }, nota: 'Ajuste CORTEVA' }];
+  const enObra = calcular({ tipo_id: 'T', tercero_id: 'ana', fecha: '2026-11-20', datos: { obra: 'corteva' } }, t, tar);
+  assert.equal(enObra.base, 56000); assert.equal(enObra.valor, 64000); assert.equal(enObra.recargos[0].nombre, 'Ajuste CORTEVA');
+  const otra = calcular({ tipo_id: 'T', tercero_id: 'ana', fecha: '2026-11-20', datos: { obra: 'otra' } }, t, tar);
+  assert.equal(otra.valor, 56000);
+});
