@@ -1,7 +1,7 @@
 // Cotizaciones (Ventas): no mueven contabilidad. Fijan el precio de cobro y, si se amarran a un tipo de Operación
 // (obra, equipo…), las horas registradas se facturan desde Operación con ese precio. Tabla: supabase/038_cotizaciones.sql.
 import { cfgTipo, avanceCotizacion, ESTADOS_COT, erroresCotizacion, totalLineaCot, COBRO_LINEA, cobroDeLinea } from './operacion.js';
-import { operacionActiva, tiposOp } from './operacion-ui.js';
+import { operacionActiva, modoOperacion } from './operacion-ui.js';
 import { tipoMaq } from './maquinaria-ui.js';
 import { totales, enLetras } from './calc.js';
 
@@ -22,7 +22,7 @@ const nomEstado = e => (ESTADOS_COT.find(x => x[0] === e) || [e, e])[1];
 const obraDe = c => elem(c?.criterios?.obra)?.nombre || '';
 const amarre = c => { const t = tipoById(c.op_tipo_id); if (!t) return ''; const els = Object.values(c.criterios || {}).filter(Boolean).map(id => elem(id)?.nombre).filter(Boolean); return [t.nombre, ...els].join(' · '); };
 // Dos diseños: estándar (cualquier empresa) y de maquinaria (solo con Operación activa en modo maquinaria; la amarra op_tipo_id).
-export const maqActiva = () => operacionActiva() && !!tipoMaq();
+export const maqActiva = () => modoOperacion() === 'maquinaria' && !!tipoMaq();
 const esMaq = c => !!c?.op_tipo_id;
 const COND_MAQ = 'Mínimo de horas: \nOperador: incluido\nCombustible: \nMovilización: \nLas horas se facturan según el horómetro de cada recibo firmado en obra.\nForma de pago: ';
 const nuevaLinea = () => ({ producto_id: '', codigo: '', descripcion: '', unidad: 'UND', cantidad: 1, precio: 0, descuento_pct: 0, iva_pct: 19, op: true, criterios: {} });

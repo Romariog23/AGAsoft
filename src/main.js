@@ -680,7 +680,7 @@ function vEmpresa(m) {
       ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
     ['Módulos opcionales', [
-      ['operacion', 'capas', 'Operación', operacionActiva() ? 'Recibos, proyectos, operadores y máquinas' : 'Horas máquina por recibo, proyectos y documentos soporte', '#/operacion', { id: 'opOn', on: operacionActiva() }],
+      ['operacion', 'capas', 'Operación', operacionActiva() ? 'Modo Maquinaria amarilla: recibos, proyectos, operadores y máquinas' : 'Escoge el modo al activarla (Maquinaria amarilla)', '#/operacion', { id: 'opOn', on: operacionActiva() }],
     ]],
     S.perfil?.es_admin && ['Administrador', [
       ['feHab', 'admin', 'Habilitada ante la DIAN', 'Ya superó el set de pruebas', null, { id: 'feHab', on: feHabilitada() }],
@@ -695,7 +695,7 @@ function vEmpresa(m) {
     try { await guardarContab(clave, on); toast(on ? msgOn : msgOff); } catch (er) { fail(er); ev.target.checked = !on; }
   }; };
   if ($('ccOn')) $('ccOn').onchange = async ev => { try { await guardarContab('cc', { ...(emp()?.contabilidad?.cc || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Centros de costo activados: configúralos y crea los centros.' : 'Centros de costo desactivados.'); if (ev.target.checked) location.hash = '#/centroscfg'; else route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
-  if ($('opOn')) $('opOn').onchange = async ev => { try { await guardarContab('operacion', { ...(emp()?.contabilidad?.operacion || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Operación activada para esta empresa.' : 'Operación apagada: los registros se conservan.'); route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
+  if ($('opOn')) $('opOn').onchange = async ev => { if (ev.target.checked && !operacionActiva()) { location.hash = '#/operacion'; return; } try { await guardarContab('operacion', { ...(emp()?.contabilidad?.operacion || {}), activo: ev.target.checked }); toast(ev.target.checked ? 'Operación activada para esta empresa.' : 'Operación apagada: los registros se conservan.'); route(); } catch (er) { fail(er); ev.target.checked = !ev.target.checked; } };
   interruptor('factNormal', 'factura_normal', 'Facturas normales habilitadas para esta empresa.', 'Facturas normales ocultas: solo se ofrece la factura electrónica.');
   interruptor('feHab', 'fe_habilitada', 'Facturación electrónica habilitada para esta empresa.', 'Facturación electrónica deshabilitada para esta empresa.',
     () => confirmar('Empresa habilitada ante la DIAN', 'Confirma que esta empresa ya superó el set de pruebas de la DIAN. Desde ahora se pueden emitir facturas y notas electrónicas con su numeración.', 'Sí, está habilitada'));
