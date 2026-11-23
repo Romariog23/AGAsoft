@@ -219,12 +219,12 @@ $('menuBtn').onclick = () => { const o = document.body.classList.toggle('nav-ope
 const MENU = [
   { k: 'inicio', t: 'Inicio', i: 'inicio' },
   { k: 'calendario', t: 'Calendario', i: 'calendario' },
-  { t: 'Ventas', i: 'ventas', l: [['cotizaciones', 'Cotizaciones'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
+  { t: 'Ventas', i: 'ventas', l: [['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['cotizaciones', 'Cotizaciones'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
   { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/NA', 'Notas de ajuste al DS'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
+  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
   { t: 'Operación', i: 'operacion', op: true, l: [] },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
@@ -249,7 +249,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
-  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
 function avisosNav() {
@@ -267,7 +267,7 @@ function renderNav(actual) {
   $('nav').innerHTML = MENU.map(x => {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
     if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['opporcerrar', 'Horas por cerrar']] }; }
-    if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Control de inventario']] };
+    if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
     const n = x.l.reduce((s, [k]) => s + (av[k]?.[0] || 0), 0);
@@ -679,7 +679,8 @@ function vEmpresa(m) {
       ['exogenacfg', 'exogena', 'Medios magnéticos', 'Formatos y conceptos', '#/exogenacfg'],
       ['nominacfg', 'nomina', 'Nómina', 'Valores del año y entidades', '#/nominacfg'],
       ['centroscfg', 'capas', 'Centros de costo', ccCfg().activo ? `${nivelesActivos(ccCfg()).map(n => n.nombre).join(' · ')} · ${ccCfg().alcance === 'todo' ? 'balance y resultado' : 'solo resultado'}` : 'Desactivados', '#/centroscfg', { id: 'ccOn', on: ccCfg().activo }],
-      ['inventariocfg', 'caja', 'Inventario', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
+      ['unidades', 'numero', 'Unidades de medida', `${unidades().length} unidades · código DIAN`, '#/unidades'],
+      ['inventariocfg', 'caja', 'Bodegas y método de costeo', `${METODOS.find(x => x[0] === cfgInventario(e.contabilidad).metodo)[1]} · ${bodegas().length} bodega${bodegas().length === 1 ? '' : 's'}`, '#/inventariocfg'],
     ]],
     ['Módulos opcionales', [
       ['operacion', 'capas', 'Operación', operacionActiva() ? 'Modo Maquinaria amarilla: recibos, proyectos, operadores y máquinas' : 'Escoge el modo al activarla (Maquinaria amarilla)', '#/operacion', { id: 'opOn', on: operacionActiva() }],
@@ -2284,12 +2285,12 @@ function vTraslados(m) {
   m.innerHTML = `<header class="vhead"><div><h2>Traslados entre bodegas</h2><p class="sub">Mueven cantidades de una bodega a otra al costo del momento. Si las dos bodegas usan la misma cuenta 14 no hay asiento; si son distintas, se contabiliza entre esas cuentas.</p></div><a class="btn primary" href="#/trasladonuevo">Nuevo traslado</a></header>
   <section class="panel">${l.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Número</th><th>Fecha</th><th>De</th><th>A</th><th class="r">Productos</th><th class="r">Unidades</th></tr></thead><tbody>
     ${l.map(a => { const b0 = a.lineas?.[0] || {}; return `<tr class="click ${a.estado === 'anulado' ? 'muted' : ''}" data-go="#/traslado/${a.id}"><td class="mono"><a href="#/traslado/${a.id}">TR ${preInt('TR')}${a.numero}</a>${a.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}</td><td>${fFecha(a.fecha)}</td><td>${esc(bodegaDe(b0.bodega_id)?.nombre || '')}</td><td>${esc(bodegaDe(b0.bodega_destino)?.nombre || '')}</td><td class="r">${(a.lineas || []).length}</td><td class="r mono">${cantTxt(cant(a), fmtEmp())}</td></tr>`; }).join('')}
-    </tbody></table></div>` : `<p class="muted">Todavía no hay traslados.${bodegas().length < 2 ? ' Primero crea otra bodega en <a href="#/inventariocfg">Bodegas y método</a>.' : ''}</p>`}</section>`;
+    </tbody></table></div>` : `<p class="muted">Todavía no hay traslados.${bodegas().length < 2 ? ' Primero crea otra bodega en <a href="#/inventariocfg">Configuración › Bodegas y método de costeo</a>.' : ''}</p>`}</section>`;
   m.querySelectorAll('[data-go]').forEach(r => r.onclick = ev => { if (!ev.target.closest('a')) location.hash = r.dataset.go; });
 }
 function vTrasladoEditor(m, { id }) {
   const prods = S.d.productos.filter(p => p.activo !== false && esInventariable(p)), bs = bodegas();
-  if (bs.length < 2) { m.innerHTML = `<header class="vhead"><h2>Nuevo traslado</h2></header><section class="panel"><p class="muted">Para trasladar necesitas al menos dos bodegas. Créalas en <a href="#/inventariocfg">Bodegas y método</a>.</p></section>`; return; }
+  if (bs.length < 2) { m.innerHTML = `<header class="vhead"><h2>Nuevo traslado</h2></header><section class="panel"><p class="muted">Para trasladar necesitas al menos dos bodegas. Créalas en <a href="#/inventariocfg">Configuración › Bodegas y método de costeo</a>.</p></section>`; return; }
   let t;
   if (id) { const x = invDocById(id); if (!x || x.estado === 'anulado') { location.replace('#/traslado/' + id); return; } t = JSON.parse(JSON.stringify(x)); }
   else t = { empresa_id: S.eid, tipo: 'TR', fecha: hoy(), tercero_id: '', observaciones: '', lineas: [{ producto_id: '', cantidad: '' }] };
@@ -4392,7 +4393,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     if (!TIPOS_COMPRA[tipo]) tipo = 'FC';
     const f = ref && compraById(ref), t = terc(f?.tercero_id || tercero);
     c = { empresa_id: S.eid, tipo, fecha: hoy(), vence: '', tercero_id: t?.id || '', num_proveedor: '', observaciones: '',
-      electronica: tipo === 'DS' && feActiva(), lineas: [{ cuenta: '', descripcion: '', base: '', iva_pct: '0' }], retefuente_pct: num(t?.ret_compra_fuente_pct), reteiva_pct: num(t?.ret_compra_iva_pct), reteica_milaje: num(t?.ret_compra_ica_milaje), cuenta_retefuente: '',
+      electronica: tipo === 'DS', lineas: [{ cuenta: '', descripcion: '', base: '', iva_pct: '0' }], retefuente_pct: num(t?.ret_compra_fuente_pct), reteiva_pct: num(t?.ret_compra_iva_pct), reteica_milaje: num(t?.ret_compra_ica_milaje), cuenta_retefuente: '',
       cuenta_pago: param().bancos, aplicaciones: f ? [{ compra_id: f.id, valor: Math.max(0, cxp().find(x => x.compra.id === f.id)?.saldo || 0) }] : [], anticipo: 0 };
   }
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
@@ -4413,7 +4414,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
         `<div><label for="kfp">Forma de pago <a class="hint" href="#/formaspago">Configurar</a></label><select id="kfp">${fCompra().map(f => `<option value="${f.id}" ${f.id === formaDe(fCompra(), !c.cuenta_pago, c.cuenta_pago).id ? 'selected' : ''}>${esc(f.nombre)}${f.credito ? '' : ` · ${esc(f.cuenta)}`}</option>`).join('')}</select></div>
         <div><label for="kv">Vence</label><input id="kv" type="date" value="${c.vence || ''}"></div>
         ${tipo === 'FC' ? `<div><label for="knp">Número de la factura del proveedor</label><input id="knp" class="mono" maxlength="40" value="${esc(c.num_proveedor)}" placeholder="FE-1234"></div>` : ''}
-        ${tipo === 'DS' ? `<div><label for="kel">Clase</label><select id="kel"><option value="1" ${c.electronica ? 'selected' : ''}>Electrónico (se envía a la DIAN)</option><option value="0" ${c.electronica ? '' : 'selected'}>Interno (no se envía)</option></select></div>` : ''}
+        ${tipo === 'DS' ? `<div><label for="kelTxt">Clase</label><input id="kelTxt" value="${c.electronica ? 'Electrónico (se envía a la DIAN)' : 'Interno (no se envía)'}" disabled></div>` : ''}
         ${tipo === 'NA' ? `<div><label>Documento soporte que ajusta</label><p class="mono">${esc(nomCompra(compraById(c.ref_id) || {}))} · ${esc(numeroDianCompra(c.ref_id) || '')}</p></div>
           <div class="span2"><label for="kcon">Concepto (DIAN)</label><select id="kcon">${CONCEPTOS_NA.map(([k, t]) => `<option value="${k}" ${String(c.concepto) === k ? 'selected' : ''}>${k} · ${esc(t)}</option>`).join('')}</select></div>` : ''}`}
       <div><label>Número interno</label><p class="mono">${id ? c.numero : `${siguienteCompra(tipo)} (al guardar)`}</p></div>
@@ -4442,7 +4443,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
     else {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
-      if ($('kel')) c.electronica = $('kel').value === '1'; if ($('kcon')) c.concepto = $('kcon').value;
+      if ($('kcon')) c.concepto = $('kcon').value;
       if ($('kfp')) { const f = fCompra().find(x => x.id === $('kfp').value) || fCompra()[0]; c.cuenta_pago = f.credito ? '' : f.cuenta; }
       c.retenciones = leerRet('compra', RET_C, r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
       Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value) });
