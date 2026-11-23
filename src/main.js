@@ -1519,7 +1519,7 @@ function panelDianCompra(c) {
     ${ok ? `<dl class="kv"><dt>CUDS</dt><dd class="mono fe-cufe">${esc(ok.cufe)}</dd><dt>Enviado</dt><dd>${fFecha(ok.creado_en.slice(0, 10))} · ambiente de ${esc(ok.ambiente)}</dd>${ok.respuesta?.data?.number ? `<dt>Número DIAN</dt><dd class="mono">${esc(ok.respuesta.data.number)}</dd>` : ''}${ok.pdf ? `<dt>Consulta</dt><dd><a href="${esc(ok.pdf)}" target="_blank" rel="noopener">Ver en Factus</a></dd>` : ''}</dl>
       <p class="hint">Validado por la DIAN: ya no se edita, no se anula ni se elimina.${c.tipo === 'DS' ? ' Para corregirlo usa una nota de ajuste.' : ''}</p>`
       : `<p class="muted">${l.length ? 'La DIAN no ha validado este documento. Revisa los errores y vuelve a enviarlo.' : 'Todavía no se ha enviado a la DIAN.'}</p>${falta.length ? `<ul class="err">${falta.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`}
-    ${l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazado'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
+    ${ok ? '' : l.filter(e => e.estado !== 'aceptado').slice(0, 3).map(e => `<details><summary>${fFecha(e.creado_en.slice(0, 10))}: ${e.estado === 'error' ? 'error de envío' : 'rechazado'}${e.mensaje ? ' · ' + esc(e.mensaje) : ''}</summary><ul>${(e.errores || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
   </section>`;
 }
 function datosFE(d) {
