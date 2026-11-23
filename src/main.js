@@ -9,7 +9,8 @@ import { COLOMBIA } from './colombia.js';
 import { formasPago, formaDe } from './formas.js';
 import { nombreTercero, personaDe, PARTES } from './nombres.js';
 import { FORMATOS, CATALOGO, CALCULOS, calculoDe, formato, csvFormato, reglasExogena, reglaDe, nombreConcepto } from './exogena.js';
-import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, PRESTACIONES, cuentaContraSugerida, lineasAjuste, MODOS_PAGO, lineasPagoNomina } from './nomina.js';
+import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEPTO, NOVEDADES, TIPOS_HORA, valorHoras, CUENTA_NETO, paramNomina, cuentaGasto, liquidar, totalesNomina, asientoNomina, cuentasFaltantes, cuentasDeNomina, porPagarLaboral, entidadesFaltantes, resumenPorCuenta, pasivosNomina, CUENTAS_SS, CUENTAS_PREST, PRESTACIONES, cuentaContraSugerida, lineasAjuste, MODOS_PAGO, lineasPagoNomina } from './nomina.js';
+import { jsonNominaE, jsonNotaNE, totalesNE, erroresNE, avisosNE, lineasDelMes, prestacionesPagadas, fechasPago, referenciaNE } from './nominae.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
@@ -220,7 +221,7 @@ const MENU = [
   { k: 'calendario', t: 'Calendario', i: 'calendario' },
   { t: 'Ventas', i: 'ventas', l: [['cotizaciones', 'Cotizaciones'], ['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
   { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/NA', 'Notas de ajuste al DS'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
-  { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
+  { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['unidades', 'Unidades de medida'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['inventariocfg', 'Bodegas y método']] },
@@ -344,6 +345,7 @@ function route() {
     if (v === 'nominacfg') return vNominaCfg(m);
     if (v === 'nominapasivos') return vNominaPasivos(m);
     if (v === 'nominapagos') return vNominaPagos(m);
+    if (v === 'nominae') return vNominaE(m, q.get('mes'));
     if (v === 'nominapago') return vNominaPago(m, { modo: q.get('modo'), tercero: q.get('tercero'), concepto: q.get('concepto') });
     if (v === 'exogenacfg') return vExogenaCfg(m, q.get('f'));
     if (v === 'empresa' || v === 'config') return vEmpresa(m);
@@ -2639,6 +2641,11 @@ function vNominaCfg(m) {
     <section class="panel stack"><h3>Valores del año</h3>
       <div class="grid3">${campo('smmlv', 'Salario mínimo mensual', P.smmlv, 'type="number" min="0" step="1" class="mono"')}${campo('auxilio', 'Auxilio de transporte mensual', P.auxilio, 'type="number" min="0" step="1" class="mono"')}${campoSel('periodo', 'Periodo de pago', PERIODOS, P.periodo)}</div>
       <p class="hint">Revisa el salario mínimo y el auxilio de transporte de cada año en el decreto del Gobierno.</p>
+      <div class="grid3">${campo('horas_mes', 'Horas ordinarias del mes', P.horas_mes, 'type="number" min="1" step="1" class="mono"')}</div>
+      <p class="hint">La hora ordinaria es el salario dividido por estas horas (jornada de 42 horas semanales = 210 al mes).</p>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Horas extra y recargos</th><th class="r">Porcentaje</th></tr></thead><tbody>
+        ${TIPOS_HORA.map(t => `<tr><td>${t.nombre} <span class="hint">${t.extra ? 'hora completa + %' : 'solo el %'}</span></td><td><input name="ph_${t.k}" type="number" min="0" step="0.01" class="r mono w-num" value="${esc(P.pct_horas?.[t.k] ?? '')}" placeholder="${t.pct}" aria-label="${t.nombre}"></td></tr>`).join('')}</tbody></table></div>
+      <p class="hint">Vacío = el de ley (Ley 2466 de 2025: recargo dominical y festivo 90 % desde julio de 2026, 100 % desde julio de 2027).</p>
       <p>${check('exonerada', 'La empresa está exonerada de salud 8,5 %, ICBF y SENA por los empleados que ganan menos de 10 salarios mínimos (artículo 114-1 del Estatuto Tributario)', P.exonerada)}</p></section>
     <section class="panel stack"><h3>Entidades de la empresa</h3>
       <div class="grid3"><div><label for="f_arl">ARL</label><select id="f_arl" name="arl_id">${optsEntidad('arl', P.arl_id)}</select></div><div><label for="f_icbf">ICBF</label><select id="f_icbf" name="icbf_id">${optsEntidad('parafiscales', P.icbf_id)}</select></div><div><label for="f_sena">SENA</label><select id="f_sena" name="sena_id">${optsEntidad('parafiscales', P.sena_id)}</select></div></div>
@@ -2664,7 +2671,8 @@ function vNominaCfg(m) {
       const neto = String(fd.get('cuenta_neto') || '').trim().split(' ')[0];
       if (neto && !/^\d{8}$/.test(neto)) throw new Error('La cuenta de salarios por pagar debe ser auxiliar de 8 dígitos.');
       if (num(fd.get('smmlv')) <= 0) throw new Error('Escribe el salario mínimo.');
-      await guardarContab('nomina', { smmlv: num(fd.get('smmlv')), auxilio: num(fd.get('auxilio')), periodo: fd.get('periodo'), exonerada: fd.get('exonerada') === 'on',
+      const pct_horas = {}; for (const t of TIPOS_HORA) { const x = String(fd.get('ph_' + t.k) || '').trim(); if (x !== '') pct_horas[t.k] = num(x); }
+      await guardarContab('nomina', { horas_mes: num(fd.get('horas_mes')) || 210, pct_horas, smmlv: num(fd.get('smmlv')), auxilio: num(fd.get('auxilio')), periodo: fd.get('periodo'), exonerada: fd.get('exonerada') === 'on',
         arl_id: fd.get('arl_id') || '', icbf_id: fd.get('icbf_id') || '', sena_id: fd.get('sena_id') || '', cuenta_neto: neto, cuentas });
       toast('Configuración de nómina guardada.'); vNominaCfg(m);
     } catch (e) { fail(e); }
@@ -2753,7 +2761,7 @@ function vNominaEditor(m, id) {
     $('nl').innerHTML = !es.length ? '<p class="muted">No hay empleados activos en este periodo. <a href="#/empleados">Crea los empleados</a>.</p>' :
       `<div class="tbl-wrap"><table class="tbl nomina"><thead><tr><th></th><th>Empleado</th><th class="r">Salario</th>${COLS.map(([, t]) => `<th class="r">${t}</th>`).join('')}<th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto</th></tr></thead><tbody>
       ${es.map(e => { const v = novDe(e), inc = nov[e.id]?.incluir ?? true; return `<tr data-e="${e.id}" class="${inc ? '' : 'muted'}"><td><input type="checkbox" data-inc ${inc ? 'checked' : ''} aria-label="Incluir"></td><td><b>${esc(terc(e.tercero_id)?.nombre || '')}</b><br><span class="hint">${esc(e.cargo || nomArea(e.area))}</span></td><td class="r mono">${money(e.salario)}</td>
-        ${COLS.map(([k, t]) => `<td data-l="${t}"><input data-k="${k}" type="number" min="0" ${k === 'dias' ? `max="30" step="1" class="r mono w-num"` : 'step="1" class="r mono w-val"'} value="${k === 'dias' ? v.dias : num(v[k]) || ''}" aria-label="${t}"></td>`).join('')}
+        ${COLS.map(([k, t]) => k === 'horas_extra' ? `<td data-l="${t}" class="r"><button type="button" class="sm mono" data-horas>${celdaHoras(e, v)}</button></td>` : `<td data-l="${t}"><input data-k="${k}" type="number" min="0" ${k === 'dias' ? `max="30" step="1" class="r mono w-num"` : 'step="1" class="r mono w-val"'} value="${k === 'dias' ? v.dias : num(v[k]) || ''}" aria-label="${t}"></td>`).join('')}
         <td class="r mono" data-dv></td><td class="r mono" data-dd></td><td class="r mono" data-dn></td></tr>`; }).join('')}</tbody></table></div>`;
     resumen();
   };
@@ -2768,6 +2776,27 @@ function vNominaEditor(m, id) {
     const nuevas = Object.fromEntries(cuentasFaltantes([...cuentasDeNomina(ls), P.cuenta_neto], S.d.cuentas).map(c => [c.codigo, c.nombre]));
     vistaAsientoNomina($('nas'), { id: 'nuevo', numero: x?.numero || siguienteNomina(), fecha: $('nfe').value, lineas: ls, cuenta_neto: P.cuenta_neto, estado: 'contabilizado' }, nuevas, verAsiento);
   };
+  // Horas extra y recargos: se escriben las horas por tipo y el valor sale solo (la DIAN pide tipo y cantidad).
+  const celdaHoras = (e, v) => {
+    const h = v.horas && Object.values(v.horas).some(x => num(x) > 0) ? valorHoras(e.salario, v.horas, { ...P }) : null;
+    return h ? `${money(h.total)}<br><span class="hint">${h.detalle.reduce((s, d) => s + d.horas, 0)} h</span>` : num(v.horas_extra) ? `${money(v.horas_extra)}<br><span class="hint">sin horas</span>` : 'Horas';
+  };
+  $('nl').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-horas]'); if (!b) return;
+    const tr = b.closest('tr[data-e]'), e = empById(tr.dataset.e), v = nov[e.id] = nov[e.id] || {}, h = v.horas || {};
+    const hora = num(e.salario) / P.horas_mes;
+    dialogo(`<h2>Horas extra y recargos</h2><p class="hint">${esc(terc(e.tercero_id)?.nombre || '')} · hora ordinaria ${money(hora)} (salario ÷ ${P.horas_mes} horas). Las horas extra se pagan completas más el recargo; los recargos, solo el porcentaje.</p>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tipo</th><th class="r">%</th><th class="r">Horas</th><th class="r">Valor</th></tr></thead><tbody>
+      ${TIPOS_HORA.map(t => `<tr><td>${t.nombre}</td><td class="r mono">${String(P.pct_horas?.[t.k] ?? t.pct).replace('.', ',')}</td><td><input name="${t.k}" type="number" min="0" step="0.5" class="r mono w-num" value="${num(h[t.k]) || ''}" aria-label="${t.nombre}"></td><td class="r mono" data-hv="${t.k}"></td></tr>`).join('')}
+      <tr class="strong"><td colspan="3">Total</td><td class="r mono" id="hTot"></td></tr></tbody></table></div>
+      ${num(v.horas_extra) && !Object.values(h).some(x => num(x) > 0) ? `<p class="aviso">Esta nómina tenía ${money(v.horas_extra)} de horas extra sin detalle. Al escribir horas, el valor se calcula con ellas.</p>` : ''}${pie('Aceptar')}`, fd => {
+      const nh = {}; for (const t of TIPOS_HORA) { const x = num(fd.get(t.k)); if (x < 0) throw new Error('Las horas no pueden ser negativas.'); if (x > 0) nh[t.k] = x; }
+      v.horas = nh; if (Object.keys(nh).length) delete v.horas_extra;
+      b.innerHTML = celdaHoras(e, v); resumen();
+    }, { ancho: true });
+    const f = $('dlgForm'), rec = () => { const x = {}; for (const t of TIPOS_HORA) x[t.k] = f.elements[t.k].value; const r = valorHoras(e.salario, x, P); for (const t of TIPOS_HORA) f.querySelector(`[data-hv="${t.k}"]`).textContent = money(r.detalle.find(d => d.tipo === t.k)?.valor || 0); $('hTot').textContent = money(r.total); };
+    f.addEventListener('input', rec); rec();
+  });
   $('nl').addEventListener('input', ev => {
     const tr = ev.target.closest('tr[data-e]'); if (!tr) return; const v = nov[tr.dataset.e] = nov[tr.dataset.e] || {};
     if (ev.target.dataset.k) v[ev.target.dataset.k] = ev.target.value;
@@ -2853,7 +2882,7 @@ function hojaDesprendible(n, l) {
     <div class="grid2"><div><b>${esc(t?.nombre || '')}</b><br><span class="muted">${esc(docId(t))}</span><br>${esc(e.cargo || '')}</div>
       <div><b>Salario:</b> ${money(e.salario)}<br><b>Días liquidados:</b> ${l.dias}${e.banco ? `<br><b>Pago a:</b> ${esc(e.banco)} ${esc(e.cuenta_bancaria || '')}` : ''}</div></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Devengados</th><th class="r">Valor</th><th>Deducciones</th><th class="r">Valor</th></tr></thead><tbody>
-      ${Array.from({ length: filas }, (_, i) => `<tr><td>${esc(dev[i]?.nombre || '')}</td><td class="r mono">${dev[i] ? money(dev[i].valor) : ''}</td><td>${esc(ded[i]?.nombre || '')}</td><td class="r mono">${ded[i] ? money(ded[i].valor) : ''}</td></tr>`).join('')}
+      ${Array.from({ length: filas }, (_, i) => `<tr><td>${esc(dev[i]?.nombre || '')}${dev[i]?.horas?.length ? `<br><span class="hint">${dev[i].horas.map(h => `${esc(h.nombre)}: ${String(h.horas).replace('.', ',')} h`).join(' · ')}</span>` : ''}</td><td class="r mono">${dev[i] ? money(dev[i].valor) : ''}</td><td>${esc(ded[i]?.nombre || '')}</td><td class="r mono">${ded[i] ? money(ded[i].valor) : ''}</td></tr>`).join('')}
       <tr class="strong"><td>Total devengado</td><td class="r mono">${money(l.devengado)}</td><td>Total deducciones</td><td class="r mono">${money(l.deducciones)}</td></tr></tbody></table></div>
     <dl class="tot"><dt class="strong">Neto a pagar</dt><dd class="mono big">${money(l.neto)}</dd></dl><p class="hint letras">${enLetras(l.neto)}</p>
     <div class="firmas"><span>Elaboró</span><span>Recibí conforme</span></div></article>`;
@@ -2900,6 +2929,114 @@ function vNominaDoc(m, id) {
     });
   };
 }
+
+/* ---------- Nómina electrónica (DIAN por Factus) ---------- */
+// Un documento por empleado y mes (NIE). Validado, no se cambia: se elimina con una nota de ajuste (NIAE) y se envía de nuevo.
+const nominasE = () => S.d?.nominas_e || [];
+const enviosNE = id => (S.d?.fe_envios || []).filter(e => e.nomina_e_id === id).sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''));
+const aceptadoNE = id => enviosNE(id).find(e => e.estado === 'aceptado');
+const numeroDianNE = id => aceptadoNE(id)?.respuesta?.data?.number || '';
+// Estado de un empleado en el mes: la NIE vigente (validada y no eliminada), la pendiente y las eliminadas.
+function estadoNE(tercero_id, anio, mes) {
+  const nies = nominasE().filter(n => n.tipo === 'NIE' && n.tercero_id === tercero_id && n.anio === anio && n.mes === mes).sort((a, b) => b.numero - a.numero);
+  const notaVal = id => nominasE().find(x => x.tipo === 'NIAE' && x.ref_id === id && aceptadoNE(x.id));
+  const vigente = nies.find(n => aceptadoNE(n.id) && !notaVal(n.id));
+  const pendiente = nies.find(n => !aceptadoNE(n.id));
+  const notaPend = vigente && nominasE().find(x => x.tipo === 'NIAE' && x.ref_id === vigente.id && !aceptadoNE(x.id));
+  return { vigente, pendiente, notaPend, eliminadas: nies.filter(n => aceptadoNE(n.id) && notaVal(n.id)) };
+}
+const siguienteNE = tipo => nominasE().filter(n => n.tipo === tipo).reduce((m, n) => Math.max(m, Number(n.numero) || 0), 0) + 1;
+function datosNE(e, anio, mes) {
+  const t = terc(e.tercero_id), lineas = lineasDelMes(nominas(), e.tercero_id, anio, mes);
+  const prest = prestacionesPagadas(comps(), e.tercero_id, anio, mes), fechas = fechasPago(comps(), e.tercero_id, anio, mes, lineas);
+  const periodo = lineas.some(x => x.nomina.periodo === 'quincenal') ? 'quincenal' : 'mensual';
+  return { emp: e, tercero: t, lineas, prest, fechas, periodo };
+}
+// Guarda (o actualiza la pendiente) y envía. Devuelve la respuesta de la función.
+async function enviarNE(e, anio, mes) {
+  const D = datosNE(e, anio, mes), errs = erroresNE(D);
+  if (errs.length) throw new Error(errs.join(' '));
+  const est = estadoNE(e.tercero_id, anio, mes);
+  if (est.vigente) throw new Error('Este empleado ya tiene la nómina electrónica del mes validada.');
+  const ne = est.pendiente || { tipo: 'NIE', numero: siguienteNE('NIE'), anio, mes };
+  const body = jsonNominaE({ ne, ...D }), T = totalesNE(body);
+  const g = await store.save('nominas_e', { ...(ne.id ? { id: ne.id } : { empresa_id: S.eid, tipo: 'NIE', numero: ne.numero, anio, mes, empleado_id: e.id, tercero_id: e.tercero_id }), body, devengado: T.devengado, deducciones: T.deducciones });
+  return store.fe('enviar_nomina', { nomina_e_id: g.id || ne.id, body: JSON.parse(JSON.stringify(body)) });
+}
+async function anularNE(vig) {
+  const numeroNE = numeroDianNE(vig.id); if (!numeroNE) throw new Error('No encuentro el número con que la DIAN validó esta nómina.');
+  const pend = nominasE().find(x => x.tipo === 'NIAE' && x.ref_id === vig.id && !aceptadoNE(x.id));
+  const nota = pend || { tipo: 'NIAE', numero: siguienteNE('NIAE') };
+  const body = jsonNotaNE({ nota, numeroNE });
+  const g = await store.save('nominas_e', { ...(pend ? { id: pend.id } : { empresa_id: S.eid, tipo: 'NIAE', numero: nota.numero, anio: vig.anio, mes: vig.mes, empleado_id: vig.empleado_id, tercero_id: vig.tercero_id, ref_id: vig.id }), body });
+  return store.fe('enviar_nomina', { nomina_e_id: g.id || pend.id, body });
+}
+const faltaNE = e => /nominas_e|nomina_e_id|relation .* does not exist|schema cache/i.test(e?.message || '') ? 'Falta correr en Supabase el archivo supabase/041_nomina_electronica.sql.' : e?.message || String(e);
+function vNominaE(m, mesQ) {
+  const mesSel = /^\d{4}-\d{2}$/.test(mesQ || '') ? mesQ : (nominas().filter(n => n.estado === 'contabilizado').map(n => n.hasta.slice(0, 7)).sort().pop() || hoy().slice(0, 7));
+  const anio = Number(mesSel.slice(0, 4)), mes = Number(mesSel.slice(5, 7));
+  const ters = [...new Set(lineasMesTodas(mesSel))];
+  const filas = ters.map(tid => { const e = empleados().find(x => x.tercero_id === tid); return e ? { e, D: datosNE(e, anio, mes), est: estadoNE(tid, anio, mes) } : null; }).filter(Boolean)
+    .sort((a, b) => (terc(a.e.tercero_id)?.nombre || '').localeCompare(terc(b.e.tercero_id)?.nombre || ''));
+  const estadoTxt = f => {
+    if (f.est.vigente) {
+      const T = totalesNE(jsonNominaE({ ne: f.est.vigente, ...f.D })), cambio = Math.abs(T.devengado - num(f.est.vigente.devengado)) > 0.009 || Math.abs(T.deducciones - num(f.est.vigente.deducciones)) > 0.009;
+      return `<span class="tag ok">Validada</span> <span class="mono hint">${esc(numeroDianNE(f.est.vigente.id))}</span>${f.est.notaPend ? '<br><span class="tag bad">Nota de ajuste sin validar</span>' : ''}${cambio ? '<br><span class="tag warn">La nómina cambió después de enviarla</span>' : ''}`;
+    }
+    const ult = f.est.pendiente && enviosNE(f.est.pendiente.id)[0];
+    return ult ? `<span class="tag bad">${ult.estado === 'error' ? 'Error de envío' : 'Rechazada'}</span>` : `<span class="tag">Sin enviar</span>${f.est.eliminadas.length ? '<br><span class="hint">La anterior se eliminó con nota de ajuste</span>' : ''}`;
+  };
+  const pendientes = filas.filter(f => !f.est.vigente && !erroresNE(f.D).length);
+  m.innerHTML = `<header class="vhead"><div><h2>Nómina electrónica</h2><p class="sub">Un documento por empleado y mes con lo de las nóminas contabilizadas del mes. Prima, cesantías, intereses y vacaciones se reportan en el mes en que se pagan.</p></div>
+    <div class="row">${pendientes.length ? `<button class="primary" id="neTodas">Enviar ${pendientes.length === 1 ? 'la pendiente' : `las ${pendientes.length} pendientes`}</button>` : ''}</div></header>
+    ${feActiva() ? '' : '<p class="aviso">La empresa todavía no tiene la facturación electrónica conectada. Conéctala en Configuración › Facturación electrónica (la misma cuenta de Factus sirve para la nómina).</p>'}
+    <section class="panel stack"><div class="row filters"><div><label for="neMes">Mes</label><input id="neMes" type="month" value="${mesSel}"></div><p class="hint grow">Factus debe tener activas las numeraciones de nómina electrónica y de nota de ajuste de nómina.</p></div>
+    ${!filas.length ? '<p class="muted">No hay nóminas contabilizadas en este mes.</p>' : `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Empleado</th><th class="r">Días</th><th class="r">Devengado</th><th class="r">Deducciones</th><th class="r">Neto</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${filas.map((f, i) => { const T = totalesNE(jsonNominaE({ ne: { tipo: 'NIE', numero: 0, anio, mes }, ...f.D })), errs = f.est.vigente ? [] : erroresNE(f.D);
+        return `<tr><td><b>${esc(terc(f.e.tercero_id)?.nombre || '')}</b>${errs.length ? `<ul class="err">${errs.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</td><td class="r">${f.D.lineas.reduce((s, x) => s + num(x.linea.dias), 0)}</td><td class="r mono">${money(T.devengado)}</td><td class="r mono">${money(T.deducciones)}</td><td class="r mono"><b>${money(T.neto)}</b></td><td>${estadoTxt(f)}</td>
+        <td class="r nowrap"><button class="sm ghost" data-ver="${i}">Detalle</button>${f.est.vigente ? `<button class="sm" data-anu="${i}">${f.est.notaPend ? 'Reenviar nota de ajuste' : 'Nota de ajuste'}</button>` : errs.length ? '' : `<button class="sm primary" data-env="${i}">Enviar</button>`}</td></tr>`; }).join('')}</tbody></table></div>`}
+    <p class="hint">Una nómina validada por la DIAN no se cambia. Si hay que corregirla, la nota de ajuste la elimina ante la DIAN y después se envía de nuevo con los valores correctos.</p></section>`;
+  $('neMes').onchange = () => { location.hash = '#/nominae?mes=' + $('neMes').value; };
+  const resultado = r => r.estado === 'aceptado' ? `Validada por la DIAN${r.numero ? ': ' + r.numero : ''}.${r.avisos?.length ? ' ' + r.avisos.join(' ') : ''}${r.error_guardar ? ' Ojo: ' + r.error_guardar : ''}` : `La DIAN no la validó: ${[r.mensaje, ...(r.errores || [])].filter(Boolean).slice(0, 4).join(' · ') || 'sin detalle'}.`;
+  m.querySelectorAll('[data-env]').forEach(b => b.onclick = async () => {
+    const f = filas[Number(b.dataset.env)]; b.disabled = true;
+    try { const r = await enviarNE(f.e, anio, mes); await cargarEmpresa(); toast(resultado(r), r.estado !== 'aceptado'); route(); }
+    catch (e) { toast(faltaNE(e), true); b.disabled = false; }
+  });
+  if ($('neTodas')) $('neTodas').onclick = async () => {
+    $('neTodas').disabled = true; let ok = 0, mal = 0;
+    for (const [i, f] of pendientes.entries()) {
+      $('neTodas').textContent = `Enviando ${i + 1} de ${pendientes.length}…`;
+      try { const r = await enviarNE(f.e, anio, mes); r.estado === 'aceptado' ? ok++ : mal++; } catch (e) { mal++; if (/041|desplegada|Factus|cuenta/i.test(faltaNE(e))) { toast(faltaNE(e), true); break; } }
+    }
+    await cargarEmpresa(); toast(`${ok} validadas${mal ? `, ${mal} con errores (revisa cada una)` : ''}.`, mal > 0); route();
+  };
+  m.querySelectorAll('[data-anu]').forEach(b => b.onclick = () => {
+    const f = filas[Number(b.dataset.anu)], vig = f.est.vigente;
+    dialogo(`<h2>Nota de ajuste a la nómina electrónica</h2><p>Elimina ante la DIAN la nómina ${esc(numeroDianNE(vig.id))} de ${esc(terc(f.e.tercero_id)?.nombre || '')}. Después podrás enviarla de nuevo con los valores que tenga la nómina ahora.</p><p class="hint">No cambia la contabilidad: solo el reporte a la DIAN.</p>${pie('Enviar nota de ajuste')}`, async () => {
+      try { const r = await anularNE(vig); await cargarEmpresa(); toast(r.estado === 'aceptado' ? `Nota de ajuste validada${r.numero ? ': ' + r.numero : ''}. Ya puedes enviar la nómina de nuevo.` : resultado(r), r.estado !== 'aceptado'); route(); }
+      catch (e) { throw new Error(faltaNE(e)); }
+    });
+  });
+  m.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => {
+    const f = filas[Number(b.dataset.ver)], ne = f.est.vigente || f.est.pendiente;
+    const body = f.est.vigente ? f.est.vigente.body : jsonNominaE({ ne: ne || { tipo: 'NIE', numero: 0, anio, mes }, ...f.D });
+    const NOM = { suel: 'Sueldo', tra: 'Auxilio de transporte', hora: 'Horas extra y recargos', comi: 'Comisiones', boni: 'Bonificación no salarial', otro: 'Otros conceptos', prim: 'Prima de servicios', cesa: 'Cesantías e intereses', vaca: 'Vacaciones', salu: 'Salud', pens: 'Pensión', dedu: 'Fondo de solidaridad', rete: 'Retención en la fuente', deud: 'Préstamos', otra: 'Otras deducciones' };
+    const filasDe = o => Object.entries(o || {}).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map(x => `<tr><td>${NOM[k] || k}${k === 'hora' ? ` · ${esc(TIPOS_HORA.find(t => t.dian === x.accrual_type_code)?.nombre || '')} (${String(num(x.quantity)).replace('.', ',')} h, ${String(num(x.percentage)).replace('.', ',')} %)` : x.quantity ? ` (${x.quantity} días)` : ''}${k === 'cesa' && x.accrual_type_code === '2' ? ' · intereses' : ''}</td><td class="r mono">${money(x.amount)}</td></tr>`)).join('');
+    const hist = ne ? enviosNE(ne.id) : [];
+    const avisos = f.est.vigente ? [] : avisosNE(f.D);
+    dialogo(`<h2>${esc(terc(f.e.tercero_id)?.nombre || '')} · ${mesSel}</h2>
+      ${f.est.vigente ? `<dl class="kv"><dt>Número DIAN</dt><dd class="mono">${esc(numeroDianNE(f.est.vigente.id))}</dd><dt>CUNE</dt><dd class="mono fe-cufe">${esc(aceptadoNE(f.est.vigente.id)?.cufe || '')}</dd></dl>` : ''}
+      ${avisos.map(a => `<p class="aviso">${esc(a)}</p>`).join('')}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Devengados</th><th class="r">Valor</th></tr></thead><tbody>${filasDe(body.accruals)}</tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Deducciones</th><th class="r">Valor</th></tr></thead><tbody>${filasDe(body.deductions)}</tbody></table></div>
+      <p class="hint">Fechas de pago: ${(body.payment?.payment_dates || []).map(fFecha).join(', ')}. ${body.payment?.payment_method_code === '47' ? 'Transferencia a ' + esc(body.payment.bank_name) : 'Efectivo (sin banco en la ficha del empleado)'}.</p>
+      ${hist.filter(x => x.estado !== 'aceptado').slice(0, 3).map(x => `<details><summary>${fFecha(x.creado_en.slice(0, 10))}: ${x.estado === 'error' ? 'error de envío' : 'rechazada'}${x.mensaje ? ' · ' + esc(x.mensaje) : ''}</summary><ul>${(x.errores || []).map(y => `<li>${esc(y)}</li>`).join('') || '<li>Sin detalle.</li>'}</ul></details>`).join('')}
+      <div class="row end"><button value="cancel" formnovalidate class="primary">Cerrar</button></div>`, () => {}, { ancho: true });
+  });
+}
+// Terceros con línea en alguna nómina contabilizada cuyo periodo termina en el mes.
+const lineasMesTodas = mes => nominas().filter(n => n.estado === 'contabilizado' && String(n.hasta).slice(0, 7) === mes).flatMap(n => (n.lineas || []).map(l => l.tercero_id));
 
 /* ---------- Seguridad social y prestaciones (pasivos de nómina) ---------- */
 let tabPasivos = 'ss';

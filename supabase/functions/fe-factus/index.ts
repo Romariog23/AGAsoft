@@ -8,6 +8,7 @@
 //   { accion: 'probar', empresa_id }                                                   → prueba la cuenta y trae los rangos.
 //   { accion: 'enviar', documento_id, tipo, body }                                     → envía un documento emitido.
 //   { accion: 'enviar_compra', compra_id, tipo, body }                                 → envía un documento soporte (DS) o su nota de ajuste (NA).
+//   { accion: 'enviar_nomina', nomina_e_id, body }                                     → envía una nómina electrónica (NIE) o su nota de ajuste (NIAE).
 // Secretos opcionales: FACTUS_URL_PRODUCCION (por defecto https://api.factus.com.co), FACTUS_URL_PRUEBAS,
 // Secretos del integrador: FACTUS_CLIENT_ID y FACTUS_CLIENT_SECRET (producción) y, si Factus da otros para el
 // sandbox, FACTUS_CLIENT_ID_PRUEBAS y FACTUS_CLIENT_SECRET_PRUEBAS (si no están, el sandbox usa los de producción).
@@ -21,8 +22,8 @@ const URLS: Record<string, string> = {
   pruebas: (Deno.env.get('FACTUS_URL_PRUEBAS') || 'https://api-sandbox.factus.com.co').replace(/\/+$/, ''),
   produccion: (Deno.env.get('FACTUS_URL_PRODUCCION') || 'https://api.factus.com.co').replace(/\/+$/, ''),
 };
-const RUTA: Record<string, string> = { FV: '/v2/bills/validate', NC: '/v2/credit-notes/validate', ND: '/v2/debit-notes/validate', DS: '/v2/support-documents/validate', NA: '/v2/adjustment-notes/validate' };
-const BORRAR: Record<string, string> = { FV: '/v2/bills/destroy/reference/', NC: '/v2/credit-notes/reference/', ND: '/v2/debit-notes/reference/', DS: '/v2/support-documents/reference/', NA: '/v2/adjustment-notes/reference/' };
+const RUTA: Record<string, string> = { FV: '/v2/bills/validate', NC: '/v2/credit-notes/validate', ND: '/v2/debit-notes/validate', DS: '/v2/support-documents/validate', NA: '/v2/adjustment-notes/validate', NIE: '/v2/payrolls', NIAE: '/v2/adjustment-payrolls' };
+const BORRAR: Record<string, string> = { FV: '/v2/bills/destroy/reference/', NC: '/v2/credit-notes/reference/', ND: '/v2/debit-notes/reference/', DS: '/v2/support-documents/reference/', NA: '/v2/adjustment-notes/reference/', NIE: '/v2/payrolls/reference/', NIAE: '/v2/adjustment-payrolls/reference/' };
 
 type Cuenta = { ambiente: string; usuario: string; clave: string; client_id: string; client_secret: string };
 
@@ -71,10 +72,10 @@ function errores(d: any): string[] {
 // Validado = is_validated en true (en cualquiera de los dos niveles) y con CUFE.
 function leerFactus(resp: any) {
   const d0 = resp?.data && typeof resp.data === 'object' ? resp.data : {};
-  const de = [d0.credit_note, d0.debit_note, d0.bill, d0.support_document, d0.adjustment_note].find(v => v && typeof v === 'object') || {};
+  const de = [d0.credit_note, d0.debit_note, d0.bill, d0.support_document, d0.adjustment_note, d0.adjustment_payroll].find(v => v && typeof v === 'object') || {};
   const data = { ...d0, ...de, links: { ...(d0.links || {}), ...(de.links || {}) } };
-  delete data.credit_note; delete data.debit_note; delete data.bill; delete data.support_document; delete data.adjustment_note;
-  const cufe = String(data.cufe || data.cude || data.cuds || '');
+  delete data.credit_note; delete data.debit_note; delete data.bill; delete data.support_document; delete data.adjustment_note; delete data.adjustment_payroll;
+  const cufe = String(data.cufe || data.cude || data.cuds || data.cune || '');
   const ok = (de.is_validated === true || d0.is_validated === true) && !!cufe;
   return { ok, cufe, numero: String(data.number || ''), pdf: data.links?.public_url || '', data };
 }
@@ -86,6 +87,8 @@ const esTipo = (r: any, tipo: string) => {
   if (tipo === 'ND') return /d[eé]bito/i.test(d) || d === '23';
   if (tipo === 'DS') return (/soporte/i.test(d) && !/ajuste/i.test(d)) || d === '24';
   if (tipo === 'NA') return (/ajuste/i.test(d) && /soporte/i.test(d)) || d === '25';
+  if (tipo === 'NIE') return (/n[oó]mina/i.test(d) && !/ajuste/i.test(d)) || d === '26';
+  if (tipo === 'NIAE') return (/n[oó]mina/i.test(d) && /ajuste/i.test(d)) || d === '27';
   return false;
 };
 
@@ -217,6 +220,35 @@ Deno.serve(async req => {
       const fila = { empresa_id: c.empresa_id, compra_id: c.id, ambiente: cu.ambiente, ...l, respuesta: recortar(r.data && typeof r.data === 'object' ? { ...r.data, data: x.data } : r.data) };
       const { data: guardado, error: e2 } = await sb.from('fe_envios').insert(fila).select().single();
       return json({ ...l, avisos, http: r.status, numero: x.numero, envio: guardado, error_guardar: e2 ? (/compra_id|documento_id/.test(e2.message) ? 'Falta correr en Supabase el archivo supabase/040_documento_soporte_electronico.sql.' : e2.message) : null });
+    }
+    if (p.accion === 'enviar_nomina') {
+      const { data: n, error } = await sb.from('nominas_e').select('id, empresa_id, tipo, numero').eq('id', p.nomina_e_id).single();
+      if (error || !n) return json({ error: 'No encontré la nómina electrónica. ¿Ya corriste supabase/041_nomina_electronica.sql?' }, 404);
+      const { data: puede } = await sb.rpc('puede_editar', { eid: n.empresa_id });
+      if (!puede) return json({ error: 'No tienes permiso para enviar documentos de esta empresa.' }, 403);
+      const ref = `${n.tipo}-${n.numero}`;
+      if (p.body?.reference_code !== ref) return json({ error: 'El número del documento no coincide.' }, 400);
+      const { data: ya } = await sb.from('fe_envios').select('id').eq('nomina_e_id', n.id).eq('estado', 'aceptado').limit(1);
+      if (ya?.length) return json({ error: 'Esta nómina ya fue validada por la DIAN.' }, 409);
+      const cu = await leerCuenta(n.empresa_id);
+      if (!cu) return json({ error: 'La empresa no tiene cuenta de Factus. Conéctala en Factura electrónica.' }, 400);
+      const t = await token(cu), body = p.body, avisos: string[] = [];
+      const mu = body.worker?._municipio; if (body.worker) delete body.worker._municipio;
+      if (mu?.ciudad) { const m = municipio(mu.ciudad, mu.departamento); if (m) body.worker.municipality_code = m; else avisos.push(`No encontré el municipio ${mu.ciudad} en el catálogo DANE.`); }
+      // Rango de numeración (26 nómina electrónica, 27 nota de ajuste de nómina): el primero activo.
+      const rangos = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, n.tipo));
+      if (rangos[0]) body.numbering_range_id = rangos[0].id;
+      else return json({ error: `En Factus no hay una numeración activa de ${n.tipo === 'NIE' ? 'nómina electrónica' : 'nota de ajuste de nómina'}. Pídele a Factus que la asocie.` }, 400);
+      let r = await factus(t, RUTA[n.tipo], { method: 'POST', body: JSON.stringify(body) });
+      if (r.status === 409) {
+        await factus(t, BORRAR[n.tipo] + encodeURIComponent(ref), { method: 'DELETE' });
+        r = await factus(t, RUTA[n.tipo], { method: 'POST', body: JSON.stringify(body) });
+      }
+      const x = leerFactus(r.data), ok = r.status < 300 && x.ok;
+      const l = { estado: ok ? 'aceptado' : r.status < 300 ? 'rechazado' : 'error', cufe: x.cufe, mensaje: String(r.data?.message || (r.status >= 300 ? `Factus respondió ${r.status}` : '')), errores: errores(r.data), pdf: x.pdf || String(x.data?.qr || '') };
+      const fila = { empresa_id: n.empresa_id, nomina_e_id: n.id, ambiente: cu.ambiente, ...l, respuesta: recortar(r.data && typeof r.data === 'object' ? { ...r.data, data: x.data } : r.data) };
+      const { data: guardado, error: e2 } = await sb.from('fe_envios').insert(fila).select().single();
+      return json({ ...l, avisos, http: r.status, numero: x.numero, envio: guardado, error_guardar: e2 ? (/nomina_e_id/.test(e2.message) ? 'Falta correr en Supabase el archivo supabase/041_nomina_electronica.sql.' : e2.message) : null });
     }
     return json({ error: 'Acción desconocida.' }, 400);
   } catch (e) {

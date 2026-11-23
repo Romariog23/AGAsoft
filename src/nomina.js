@@ -40,6 +40,32 @@ export const CONCEPTO = Object.fromEntries(CONCEPTOS.map(c => [c.k, c]));
 export const NOVEDADES = CONCEPTOS.filter(c => c.novedad);
 export const CUENTA_NETO = '25050501';
 
+// Horas extra y recargos (códigos de la nómina electrónica de la DIAN). extra: la hora se paga completa más el porcentaje;
+// recargo: solo el porcentaje, porque la hora ya va en el salario. Porcentajes por defecto con la Ley 2466 de 2025
+// (recargo dominical y festivo de 90 % desde julio de 2026); cada empresa los puede cambiar en Configuración de nómina.
+export const TIPOS_HORA = [
+  { k: 'HED', nombre: 'Hora extra diurna', pct: 25, extra: true, dian: '1' },
+  { k: 'HEN', nombre: 'Hora extra nocturna', pct: 75, extra: true, dian: '2' },
+  { k: 'HRN', nombre: 'Recargo nocturno', pct: 35, extra: false, dian: '3' },
+  { k: 'HEDDF', nombre: 'Hora extra diurna dominical o festiva', pct: 115, extra: true, dian: '4' },
+  { k: 'HRDDF', nombre: 'Recargo diurno dominical o festivo', pct: 90, extra: false, dian: '5' },
+  { k: 'HENDF', nombre: 'Hora extra nocturna dominical o festiva', pct: 165, extra: true, dian: '6' },
+  { k: 'HRNDF', nombre: 'Recargo nocturno dominical o festivo', pct: 125, extra: false, dian: '7' },
+];
+export const TIPO_HORA = Object.fromEntries(TIPOS_HORA.map(t => [t.k, t]));
+// Valor de las horas de un empleado: hora ordinaria = salario ÷ horas del mes.
+// horas: { HED: 3, HRN: 8, ... } → { total, detalle: [{ tipo, nombre, horas, pct, valor }] }
+export function valorHoras(salario, horas, P) {
+  const hora = num(salario) / (num(P.horas_mes) || 210), detalle = [];
+  for (const t of TIPOS_HORA) {
+    const h = num(horas?.[t.k]); if (!(h > 0)) continue;
+    const pct = P.pct_horas?.[t.k] === undefined || P.pct_horas[t.k] === '' ? t.pct : num(P.pct_horas[t.k]);
+    detalle.push({ tipo: t.k, nombre: t.nombre, horas: h, pct, valor: r2(h * hora * ((t.extra ? 100 : 0) + pct) / 100) });
+  }
+  return { total: r2(detalle.reduce((s, d) => s + d.valor, 0)), detalle };
+}
+const hayHoras = h => h && Object.values(h).some(x => num(x) > 0);
+
 // Parámetros de la empresa (los guardados o los de fábrica).
 export function paramNomina(contab) {
   const g = contab?.nomina || {};
@@ -48,6 +74,8 @@ export function paramNomina(contab) {
     periodo: g.periodo === 'quincenal' ? 'quincenal' : 'mensual', exonerada: g.exonerada !== false,
     arl_id: g.arl_id || '', icbf_id: g.icbf_id || '', sena_id: g.sena_id || '',
     cuenta_neto: String(g.cuenta_neto || '').trim() || CUENTA_NETO, cuentas: g.cuentas || {},
+    // Horas del mes para el valor de la hora ordinaria (jornada de 42 horas semanales = 210 al mes).
+    horas_mes: num(g.horas_mes) || 210, pct_horas: g.pct_horas || {},
   };
 }
 // Cuenta de gasto de un concepto para el área del empleado; la empresa puede cambiarla por concepto y área.
@@ -71,11 +99,13 @@ export function pctSolidaridad(ibcMes, smmlv) {
   return 2;
 }
 
-// Liquidación de un empleado en un periodo. nov = { dias, horas_extra, comisiones, bonificacion, retencion, prestamo, otros_desc }.
+// Liquidación de un empleado en un periodo. nov = { dias, horas_extra, horas, comisiones, bonificacion, retencion, prestamo, otros_desc }.
+// Si trae horas por tipo ({ HED: 2, ... }), el valor de horas extra sale de ellas (y queda el detalle para la DIAN).
 export function liquidar(emp, nov, P) {
   const diasPeriodo = P.periodo === 'quincenal' ? 15 : 30;
   const dias = Math.max(0, Math.min(30, nov?.dias === undefined || nov?.dias === '' ? diasPeriodo : num(nov.dias)));
-  const sal = num(emp.salario), v = k => r2(Math.max(0, num(nov?.[k])));
+  const sal = num(emp.salario), H = hayHoras(nov?.horas) ? valorHoras(sal, nov.horas, P) : null;
+  const v = k => k === 'horas_extra' && H ? H.total : r2(Math.max(0, num(nov?.[k])));
   const out = { empleado_id: emp.id, tercero_id: emp.tercero_id, area: emp.area || 'admin', dias, items: [] };
   // Sin la entidad configurada, el saldo queda a nombre del empleado (se avisa al liquidar).
   const entidad = e => ({ eps: emp.eps_id, pension: emp.pension_id, caja: emp.caja_id, arl: P.arl_id, icbf: P.icbf_id, sena: P.sena_id }[e] || null);
@@ -85,6 +115,7 @@ export function liquidar(emp, nov, P) {
     if (c.tipo === 'dev') { it.cuenta = cuentaGasto(P, k, out.area); it.tercero_id = emp.tercero_id; }
     else if (c.tipo === 'ded') { it.cuenta = cuentaPasivo(P, k); it.tercero_id = c.entidad ? entidad(c.entidad) : emp.tercero_id; }
     else { it.cuenta = cuentaGasto(P, k, out.area); it.contra = cuentaPasivo(P, k); it.tercero_id = c.entidad ? entidad(c.entidad) : emp.tercero_id; }
+    if (k === 'horas_extra' && H) it.horas = H.detalle;
     out.items.push(it);
   };
   const salario = sal * dias / 30;
