@@ -221,3 +221,17 @@ test('maquinaria: configuración fija y operador sin recargo', async () => {
   assert.equal(calcular(r, t2, tarifas).recargos.length, 0);
   assert.equal(calcular(r, { ...t2, config: { ...c, sin_recargo: [] } }, tarifas).recargos.length, 1);
 });
+
+test('mantenimiento preventivo por horas', async () => {
+  const { estadoPM, pmBase, horometroActual } = await import('../src/operacion.js');
+  // Lleva 120 h desde el último PM, horómetro 1000, PM cada 250 → próximo a 1130.
+  const maq = { id: 'm1', datos: { pm: { cada: 250, base: pmBase(1000, 120), inicial: 1000, hist: [] } } };
+  assert.equal(estadoPM(maq, []).proximo, 1130);
+  assert.equal(estadoPM(maq, []).estado, 'ok');
+  const regs = [{ datos: { equipo: 'm1', horometro: { ini: 1000, fin: 1110 } } }, { datos: { equipo: 'm2', horometro: { ini: 5, fin: 9000 } } }];
+  assert.equal(horometroActual(maq, regs), 1110);
+  assert.equal(estadoPM(maq, regs).estado, 'pronto'); // faltan 20 h (margen 25 h)
+  regs.push({ datos: { equipo: 'm1', horometro: { ini: 1110, fin: 1140 } } });
+  const e = estadoPM(maq, regs); assert.equal(e.estado, 'vencido'); assert.equal(e.faltan, -10);
+  assert.equal(estadoPM({ id: 'x', datos: {} }, regs), null);
+});

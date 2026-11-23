@@ -2,7 +2,7 @@
 // Diseño aprobado por Romario el 2026-11-22: sin constructor genérico. Recibo = operador + proyecto (cotización) + máquina + horómetro;
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
-import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, diaDe, NOMBRE_DIA } from './operacion.js';
+import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, diaDe, NOMBRE_DIA } from './operacion.js';
 import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC } from './operacion-ui.js';
 
 let X = null;
@@ -224,16 +224,27 @@ export function vMaquinas(m, q) {
     const acc = acumuladoMaquinas(registrosDe(t), t, { desde, hasta }), porId = new Map(acc.map(a => [a.elemento, a]));
     const lista = maquinasDe(t, true).map(e => ({ e, a: porId.get(e.id) }));
     const saltos = acc.flatMap(a => a.saltos.map(s => ({ ...s, elemento: a.elemento }))).sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const pmCelda = e => { const p = estadoPM(e, registrosDe(t)); if (!p) return '<span class="hint">Sin programar: Editar</span>';
+      const tag = p.estado === 'vencido' ? '<span class="tag bad">Vencido</span>' : p.estado === 'pronto' ? '<span class="tag demo">Pronto</span>' : '<span class="tag ok">Al día</span>';
+      return `${tag} <span class="mono">${cant(p.proximo)}</span><br><small class="hint">${p.faltan > 0 ? `faltan ${cant(p.faltan, 'h')}` : `pasado ${cant(-p.faltan, 'h')}`} · cada ${cant(p.cada, 'h')}</small>`; };
     m.innerHTML = encabezado('Máquinas', 'El horómetro acumulado de cada máquina sale de los recibos. Base para controles y mantenimiento.', '<button class="primary" id="mqN">+ Máquina</button>') + `
     <section class="panel row op-fil"><div><label for="mqD">Desde</label><input type="date" id="mqD" value="${desde}"></div><div><label for="mqH">Hasta</label><input type="date" id="mqH" value="${hasta}"></div></section>
-    <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Máquina</th><th>Modelo · placa</th><th class="r">Horómetro</th><th>Último recibo</th><th class="r">Horas del período</th><th class="r">Acumulado</th><th>Control</th><th></th></tr></thead><tbody>
-    ${lista.map(({ e, a }) => `<tr class="${e.activo === false ? 'muted' : ''}"><td><b>${esc(e.nombre)}</b>${e.codigo ? ` <small class="hint">${esc(e.codigo)}</small>` : ''}${e.activo === false ? ' <span class="tag">Inactiva</span>' : ''}</td><td class="hint">${esc([e.datos?.modelo, e.datos?.serie].filter(Boolean).join(' · '))}</td>
-      <td class="r mono">${a?.ultimo != null ? cant(a.ultimo) : '—'}</td><td class="hint">${a ? X.fFecha(a.fecha) : ''}</td><td class="r mono">${a ? cant(a.periodo, 'h') : ''}</td><td class="r mono">${a ? cant(a.total, 'h') : ''}</td>
-      <td>${a?.saltos.length ? `<span class="tag demo">${a.saltos.length} salto${a.saltos.length === 1 ? '' : 's'}</span>` : a ? '<span class="tag ok">Empata</span>' : '<span class="hint">Sin recibos</span>'}</td><td class="r nowrap"><a class="btn sm ghost" href="#/oprecibos" data-maq="${e.id}">Recibos</a><button class="sm" data-em="${e.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Todavía no hay máquinas. Agrégalas con + Máquina.</td></tr>'}</tbody></table></div>
+    <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Máquina</th><th class="r">Horómetro</th><th class="r">Horas del período</th><th class="r">Acumulado</th><th>Control</th><th>Mantenimiento preventivo</th><th></th></tr></thead><tbody>
+    ${lista.map(({ e, a }) => `<tr class="${e.activo === false ? 'muted' : ''}"><td><b>${esc(e.nombre)}</b>${e.codigo ? ` <small class="hint">${esc(e.codigo)}</small>` : ''}${e.activo === false ? ' <span class="tag">Inactiva</span>' : ''}${e.datos?.modelo || e.datos?.serie ? `<br><small class="hint">${esc([e.datos?.modelo, e.datos?.serie].filter(Boolean).join(' · '))}</small>` : ''}</td>
+      <td class="r mono">${a?.ultimo != null ? cant(a.ultimo) : '—'}${a ? `<br><small class="hint">${X.fFecha(a.fecha)}</small>` : ''}</td><td class="r mono">${a ? cant(a.periodo, 'h') : ''}</td><td class="r mono">${a ? cant(a.total, 'h') : ''}</td>
+      <td>${a?.saltos.length ? `<span class="tag demo">${a.saltos.length} salto${a.saltos.length === 1 ? '' : 's'}</span>` : a ? '<span class="tag ok">Empata</span>' : '<span class="hint">Sin recibos</span>'}</td><td>${pmCelda(e)}</td><td class="r nowrap">${estadoPM(e, registrosDe(t)) ? `<button class="sm" data-pm="${e.id}">PM hecho</button>` : ''}<a class="btn sm ghost" href="#/oprecibos" data-maq="${e.id}">Recibos</a><button class="sm" data-em="${e.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Todavía no hay máquinas. Agrégalas con + Máquina.</td></tr>'}</tbody></table></div>
     <p class="hint">Acumulado = suma de (final − inicial) de todos los recibos. Un salto es un recibo que no empieza donde terminó el anterior de la misma máquina.</p></section>
     ${saltos.length ? `<section class="panel stack"><h3>Saltos para revisar</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Máquina</th><th class="r">Debía empezar en</th><th class="r">Empezó en</th><th class="r">Diferencia</th><th></th></tr></thead><tbody>
     ${saltos.map(s => `<tr><td>${X.fFecha(s.fecha)}</td><td>${esc(elem(s.elemento)?.nombre || '')}</td><td class="r mono">${cant(s.esperado)}</td><td class="r mono">${cant(s.ini)}</td><td class="r mono">${s.dif > 0 ? '+' : ''}${cant(s.dif)}</td><td class="r"><button class="sm" data-er="${s.registro_id}">Ver recibo</button></td></tr>`).join('')}</tbody></table></div></section>` : ''}
-    <section class="panel callout">Mantenimiento: se agrega en esta pantalla cuando definamos cómo se controla.</section>`;
+    <p class="hint">Mantenimiento preventivo: cuando falte el 10 % del intervalo (mínimo 10 h) y cuando se cumpla, llega el aviso a la campanita. Al hacerlo, regístralo con "PM hecho" y se programa el siguiente.</p>`;
+    m.querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { const e = elem(b.dataset.pm), p = estadoPM(e, registrosDe(t));
+      X.dialogo(`<h2>PM hecho · ${esc(e.nombre)}</h2><p class="hint">El siguiente se programa a las horas de este PM + ${cant(p.cada, 'h')}.</p>
+        <div class="grid2">${X.campo('horometro', 'Horómetro al hacer el PM *', p.actual != null ? String(p.actual).replace('.', ',') : '', 'required class="mono" inputmode="decimal"')}${X.campo('fecha', 'Fecha', X.hoy(), 'type="date" required')}</div>
+        ${X.campo('nota', 'Nota (opcional)', '', 'maxlength="200" placeholder="Ej.: cambio de aceite y filtros"')}${X.pie('Registrar PM')}`, async fd => {
+        const h = numIn(fd.get('horometro')); if (!(h > 0)) throw new Error('Escribe el horómetro.');
+        const pm = { ...e.datos.pm, base: h, hist: [...(e.datos.pm.hist || []), { fecha: fd.get('fecha'), horometro: h, nota: String(fd.get('nota') || '').trim() }] };
+        await guardar('op_elementos', { id: e.id, datos: { ...e.datos, pm } }); X.toast(`PM registrado. El siguiente es a las ${cant(h + p.cada)} h.`); X.route();
+      }); });
     const ir = () => { location.hash = `#/opmaquinas?desde=${X.$('mqD').value || desde}&hasta=${X.$('mqH').value || hasta}`; };
     X.$('mqD').onchange = X.$('mqH').onchange = ir;
     m.querySelectorAll('[data-maq]').forEach(a => a.onclick = () => { fr.maq = a.dataset.maq; fr.e = 'todos'; });
@@ -241,9 +252,23 @@ export function vMaquinas(m, q) {
     const form = e => X.dialogo(`<h2>${e ? 'Editar máquina' : 'Nueva máquina'}</h2>
       <div class="grid2">${X.campo('nombre', 'Nombre *', e?.nombre || '', 'required maxlength="80" placeholder="Motoniveladora 140 K"')}${X.campo('codigo', 'Código interno', e?.codigo || '', 'maxlength="20"')}</div>
       <div class="grid2">${X.campo('modelo', 'Modelo', e?.datos?.modelo || '', 'maxlength="60"')}${X.campo('serie', 'Serie o placa', e?.datos?.serie || '', 'maxlength="40"')}</div>
+      <h3>Mantenimiento preventivo (PM)</h3>
+      ${(() => { const pm = e?.datos?.pm, act = e ? horometroActual(e, registrosDe(t)) : null;
+        return pm ? `<div class="grid2">${X.campo('pm_cada', 'Hacer PM cada (horas)', String(pm.cada || ''), 'class="mono" inputmode="decimal"')}<p class="hint">Último PM a las ${cant(pm.base)} h${pm.hist?.length ? ' (' + X.fFecha(pm.hist.at(-1).fecha) + ')' : ''}. Próximo a las ${cant(X.num(pm.base) + X.num(pm.cada))} h.</p></div>`
+          : `<p class="hint">Se pregunta una sola vez: cuántas horas lleva desde el último PM. De ahí en adelante se programa solo cada tantas horas.</p>
+        <div class="grid2">${X.campo('pm_actual', 'Horómetro actual', act != null ? String(act).replace('.', ',') : '', 'class="mono" inputmode="decimal"')}${X.campo('pm_lleva', 'Horas acumuladas desde el último PM', '', 'class="mono" inputmode="decimal" placeholder="Ej.: 120"')}</div>
+        <div class="grid2">${X.campo('pm_cada', 'Hacer PM cada (horas)', '', 'class="mono" inputmode="decimal" placeholder="Ej.: 250"')}<div></div></div>`; })()}
       ${e ? X.check('activo', 'Activa (si no, no sale para nuevos recibos)', e.activo !== false) : ''}${X.pie()}`, async fd => {
       const nombre = String(fd.get('nombre') || '').trim(); if (!nombre) throw new Error('Escribe el nombre de la máquina.');
       const row = { empresa_id: X.S.eid, tipo_id: t.id, lista: 'equipos', nombre, codigo: String(fd.get('codigo') || '').trim(), datos: { ...(e?.datos || {}), modelo: String(fd.get('modelo') || '').trim(), serie: String(fd.get('serie') || '').trim() }, activo: e ? fd.get('activo') === 'on' : true };
+      const cada = numIn(fd.get('pm_cada')), pm0 = e?.datos?.pm;
+      if (pm0) { if (cada > 0) row.datos.pm = { ...pm0, cada }; else delete row.datos.pm; }
+      else if (cada > 0) {
+        const s0 = String(fd.get('pm_actual') ?? '').trim(); if (!s0) throw new Error('Para programar el PM escribe el horómetro actual.');
+        const actual = numIn(s0), lleva = numIn(fd.get('pm_lleva'));
+        if (lleva < 0) throw new Error('Las horas desde el último PM no pueden ser negativas.');
+        row.datos.pm = { cada, base: pmBase(actual, lleva), inicial: actual, hist: [] };
+      }
       await guardar('op_elementos', e ? { ...row, id: e.id } : row); X.toast('Máquina guardada.'); X.route();
     });
     X.$('mqN').onclick = () => form(null);
