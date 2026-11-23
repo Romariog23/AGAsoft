@@ -60,8 +60,15 @@ export function vOperacion(m) {
   ${tipos.length ? `<div class="op-cards">${tipos.map(tarjeta).join('')}</div>` : '<p class="muted">Todavía no hay tipos de operación. Empieza con una plantilla o desde cero.</p>'}
   <section class="stack"><h3>Agregar un tipo de operación</h3><div class="op-cards">${Object.entries(PLANTILLAS).map(([k, p]) => `<article class="op-card dash">${icono(p.icono)}<h3>${esc(p.nombre)}</h3><p class="hint">${esc(p.descripcion)}</p><div class="row"><button data-pl="${k}">${k === 'libre' ? 'Crear' : 'Usar plantilla'}</button></div></article>`).join('')}</div>
   <p class="hint">Las plantillas son un punto de partida: después cambias campos, fórmulas, tarifas y reglas en Configurar.</p></section>`;
+  // Un solo clic: el botón se bloquea mientras guarda (en el servidor tarda) y un nombre repetido sale numerado.
   m.querySelectorAll('[data-pl]').forEach(b => b.onclick = async () => {
-    try { const t = await guardar('op_tipos', { ...nuevoTipo(b.dataset.pl, X.S.eid), orden: tipos.length + 1 }); X.toast('Tipo de operación creado. Revisa listas y tarifas.'); location.hash = '#/opcfg/' + t.id; } catch (e) { X.fail(e); }
+    if (b.disabled) return;
+    const nt = nuevoTipo(b.dataset.pl, X.S.eid), usados = new Set(tiposOp().map(x => x.nombre.trim().toLowerCase()));
+    if (usados.has(nt.nombre.toLowerCase()) && !await X.confirmar('Ya tienes este tipo', `Ya existe <b>${esc(nt.nombre)}</b>. Un solo tipo maneja todas las máquinas, operadores y obras. ¿Crear otro de todas formas?`, 'Crear otro')) return;
+    let nombre = nt.nombre, i = 2; while (usados.has(nombre.toLowerCase())) nombre = `${nt.nombre} ${i++}`;
+    const txt = b.textContent; m.querySelectorAll('[data-pl]').forEach(x => { x.disabled = true; }); b.textContent = 'Creando…';
+    try { const t = await guardar('op_tipos', { ...nt, nombre, orden: tipos.length + 1 }); X.toast('Tipo de operación creado. Revisa listas y tarifas.'); location.hash = '#/opcfg/' + t.id; }
+    catch (e) { X.fail(e); m.querySelectorAll('[data-pl]').forEach(x => { x.disabled = false; }); b.textContent = txt; }
   });
 }
 
