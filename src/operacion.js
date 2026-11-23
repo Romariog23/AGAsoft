@@ -281,6 +281,13 @@ export function erroresTarifa(t) {
 }
 
 /* ---------- Corte de pago ---------- */
+// Un registro está cerrado cuando ya hizo todos los cierres que su tipo pide: programación (DS) si el tipo programa,
+// y factura si el tipo cobra con FV (los cargos solo se programan). Sin cierres configurados, cierra con su corte.
+export function estaCerrado(r, cfg, corte) {
+  const pago = cfg?.salidas?.pago && cfg.salidas.pago !== 'ninguno', cobro = cfg?.salidas?.cobro === 'fv' && !esCargo(r);
+  if (!pago && !cobro) return corte?.estado === 'cerrado';
+  return (!pago || !!r.cierre_pago) && (!cobro || !!r.cierre_cobro);
+}
 export const esPendiente = (r, tipo) => { const p = cfgTipo(tipo).pendiente; return !!(p?.campo && (p.valores || []).includes(r.datos?.[p.campo])); };
 // Registros que pueden entrar a un corte nuevo: del periodo, sin pagar y sin otro corte.
 export const elegiblesCorte = (registros, tipo, desde, hasta, incluirPendientes = false) =>
