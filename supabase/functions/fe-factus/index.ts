@@ -82,6 +82,13 @@ function leerFactus(resp: any) {
   const ok = (de.is_validated === true || d0.is_validated === true) && !!cufe;
   return { ok, cufe, numero: String(data.number || ''), pdf: data.links?.public_url || '', data };
 }
+// Rango de numeración: el del prefijo escogido en Configuración › Numeraciones; sin prefijo, el primero activo.
+// null = no hay ninguno; false = hay, pero ninguno con ese prefijo.
+const elegirRango = (rangos: any[], prefijo?: string) => {
+  const pre = String(prefijo || '').trim().toUpperCase();
+  if (!pre) return rangos[0] || null;
+  return rangos.find((r: any) => String(r.prefix || '').toUpperCase() === pre) || (rangos.length ? false : null);
+};
 const esFactura = (r: any) => /factura/i.test(String(r.document ?? '')) || String(r.document) === '21';
 const esTipo = (r: any, tipo: string) => {
   const d = String(r.document ?? '');
@@ -130,10 +137,10 @@ Deno.serve(async req => {
       };
       let t;
       try { t = await token(c); } catch (e) { return json({ hab: await guardar({ estado: 'error', mensaje: (e as Error).message, rangos: [] }) }); }
-      const [ce, rg] = await Promise.all([factus(t, '/v2/companies'), factus(t, '/v2/numbering-ranges?filter[is_active]=1')]);
+      const [ce, rg, rgn] = await Promise.all([factus(t, '/v2/companies'), factus(t, '/v2/numbering-ranges?filter[is_active]=1'), factus(t, '/v2/numbering-ranges/payrolls')]);
       const co = ce.data?.data || {};
       const nitF = digitos(co.nit ?? co.identification ?? co.company?.nit ?? '');
-      const rangos = lista(rg.data).map((r: any) => ({ id: r.id, documento: String(r.document ?? ''), prefijo: String(r.prefix ?? ''), resolucion: String(r.resolution_number ?? ''), desde: r.from, hasta: r.to, actual: r.current, vence: r.end_date || '', activo: r.is_active !== false && !r.is_expired }));
+      const rangos = [...lista(rg.data), ...lista(rgn.data).filter((r: any) => r.is_active !== false && r.is_active !== 0 && !r.deleted_at)].map((r: any) => ({ id: r.id, documento: String(r.document ?? ''), prefijo: String(r.prefix ?? ''), resolucion: String(r.resolution_number ?? ''), desde: r.from, hasta: r.to, actual: r.current, vence: r.end_date || '', activo: r.is_active !== false && !r.is_expired }));
       const empresa_factus = { nit: nitF, nombre: String(co.company ?? co.name ?? co.business_name ?? co.trade_name ?? '') };
       // En producción la cuenta debe ser de la misma empresa (el sandbox de Factus es compartido y usa otra empresa).
       if (c.ambiente === 'produccion' && nitF && nitF !== digitos(emp.nit)) return json({ hab: await guardar({ estado: 'error', mensaje: `La cuenta de Factus es del NIT ${nitF}, no del de esta empresa (${emp.nit}).`, empresa_factus, rangos }) });
@@ -144,6 +151,26 @@ Deno.serve(async req => {
       }
       const msg = c.ambiente === 'produccion' ? 'La cuenta funciona, pero Factus todavía no tiene una numeración de facturas activa. Cuando Factus termine la habilitación y asocie tu resolución, vuelve a probar.' : 'Conectado al ambiente de pruebas de Factus (compartido). Sirve para ensayar envíos; para facturar de verdad cambia a producción cuando Factus active tu cuenta.';
       return json({ hab: await guardar({ estado: c.ambiente === 'produccion' ? 'pendiente' : 'pruebas', mensaje: msg, empresa_factus, rangos }) });
+    }
+
+    // Crea en Factus la numeración de documento soporte, nota de ajuste o nómina con el prefijo escogido en AGAsoft.
+    if (p.accion === 'crear_rango') {
+      const eid = p.empresa_id;
+      const [{ data: dueno }, { data: admin }] = await Promise.all([sb.rpc('es_dueno', { eid }), sb.rpc('es_admin')]);
+      if (!dueno && !admin) return json({ error: 'Solo el dueño de la empresa puede crear numeraciones en Factus.' }, 403);
+      const cod: Record<string, string> = { DS: '24', NA: '25', NIE: '26', NIAE: '27' };
+      if (!cod[p.tipo]) return json({ error: 'Tipo de documento no válido.' }, 400);
+      const prefix = String(p.prefijo || '').trim().toUpperCase();
+      if (!/^[A-Z0-9]{1,4}$/.test(prefix)) return json({ error: 'El prefijo lleva de 1 a 4 letras o números.' }, 400);
+      if (p.tipo === 'DS' && !String(p.resolucion || '').trim()) return json({ error: 'El documento soporte necesita el número de resolución de la DIAN.' }, 400);
+      const cu = await leerCuenta(eid);
+      if (!cu) return json({ error: 'La empresa no tiene cuenta de Factus. Conéctala en Facturación electrónica.' }, 400);
+      const t = await token(cu), nomina = p.tipo === 'NIE' || p.tipo === 'NIAE';
+      const body: Record<string, string> = { document: cod[p.tipo], prefix, current: String(Math.max(1, Math.round(Number(p.actual) || 1))) };
+      if (p.tipo === 'DS') body.resolution_number = String(p.resolucion).trim();
+      const r = await factus(t, nomina ? '/v2/numbering-ranges/payrolls' : '/v2/numbering-ranges', { method: 'POST', body: JSON.stringify(body) });
+      if (r.status >= 300) return json({ error: `Factus no creó la numeración: ${[r.data?.message, ...errores(r.data)].filter(Boolean).join(' · ') || 'HTTP ' + r.status}` }, 400);
+      return json({ ok: true, rango: r.data?.data || null });
     }
 
     if (p.accion === 'enviar') {
@@ -209,7 +236,9 @@ Deno.serve(async req => {
       if (mu?.ciudad) { const m = municipio(mu.ciudad, mu.departamento); if (m) body.provider.municipality_code = m; else avisos.push(`No encontré el municipio ${mu.ciudad} en el catálogo DANE.`); }
       // Rango de numeración del tipo (24 documento soporte, 25 nota de ajuste): el primero activo.
       const rangos = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, c.tipo));
-      if (rangos[0]) body.numbering_range_id = rangos[0].id;
+      const rgC = elegirRango(rangos, p.prefijo);
+      if (rgC === false) return json({ error: `En Factus no hay una numeración activa de ${c.tipo === 'DS' ? 'documento soporte' : 'nota de ajuste'} con el prefijo ${p.prefijo}. Revisa el prefijo en Configuración › Numeraciones o pídele a Factus que la asocie.` }, 400);
+      if (rgC) body.numbering_range_id = rgC.id;
       else return json({ error: `En Factus no hay una numeración activa de ${c.tipo === 'DS' ? 'documento soporte' : 'nota de ajuste al documento soporte'}. Pídele a Factus que la asocie (la resolución DIAN del documento soporte).` }, 400);
       let r = await factus(t, RUTA[c.tipo], { method: 'POST', body: JSON.stringify(body) });
       // 409: quedó uno pendiente con la misma referencia. Se borra (v2; algunas notas usan v1) y se crea de nuevo.
@@ -239,8 +268,12 @@ Deno.serve(async req => {
       const mu = body.worker?._municipio; if (body.worker) delete body.worker._municipio;
       if (mu?.ciudad) { const m = municipio(mu.ciudad, mu.departamento); if (m) body.worker.municipality_code = m; else avisos.push(`No encontré el municipio ${mu.ciudad} en el catálogo DANE.`); }
       // Rango de numeración (26 nómina electrónica, 27 nota de ajuste de nómina): el primero activo.
-      const rangos = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, n.tipo));
-      if (rangos[0]) body.numbering_range_id = rangos[0].id;
+      // La nómina tiene sus rangos aparte (/v2/numbering-ranges/payrolls); por si acaso también se miran los generales.
+      const rangos = [...lista((await factus(t, '/v2/numbering-ranges/payrolls')).data), ...lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data)]
+        .filter((r: any) => esTipo(r, n.tipo) && r.is_active !== false && r.is_active !== 0 && !r.deleted_at);
+      const rgN = elegirRango(rangos, p.prefijo);
+      if (rgN === false) return json({ error: `En Factus no hay una numeración activa de ${n.tipo === 'NIE' ? 'nómina electrónica' : 'nota de ajuste de nómina'} con el prefijo ${p.prefijo}. Revisa el prefijo en Configuración › Numeraciones.` }, 400);
+      if (rgN) body.numbering_range_id = rgN.id;
       else return json({ error: `En Factus no hay una numeración activa de ${n.tipo === 'NIE' ? 'nómina electrónica' : 'nota de ajuste de nómina'}. Pídele a Factus que la asocie.` }, 400);
       let r = await factus(t, RUTA[n.tipo], { method: 'POST', body: JSON.stringify(body) });
       if (r.status === 409) {
