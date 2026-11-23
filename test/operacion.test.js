@@ -195,3 +195,15 @@ test('ajuste al operador desde la cotización (proyecto): se suma a la tarifa ba
   const otro = calcular({ tipo_id: 'T', tercero_id: 'ana', fecha: '2026-11-20', cotizacion_id: 'c2', datos: {} }, t, tar);
   assert.equal(otro.valor, 56000);
 });
+
+test('avance de la cotización y acumulado por máquina', async () => {
+  const { avanceCotizacion, acumuladoMaquinas, nuevoTipo } = await import('../src/operacion.js');
+  const t = { id: 'T', ...nuevoTipo('maquinaria') };
+  const cot = { id: 'c1', op_tipo_id: 'T', estado: 'aceptada', criterios: { obra: 'o1' }, lineas: [{ descripcion: 'Hora máquina', cantidad: 12, op: true, criterios: {}, adiciones: [{ cantidad: 2 }] }, { descripcion: 'Movilización', cantidad: 1, op: 'fijo' }] };
+  const reg = (id, fecha, ini, fin, eq = 'm1') => ({ id, tipo_id: 'T', fecha, tercero_id: 'a', cotizacion_id: 'c1', datos: { equipo: eq, obra: 'o1', horometro: { ini, fin } } });
+  const regs = [reg('1', '2026-11-01', 1000, 1008), reg('2', '2026-11-02', 1008, 1014), reg('3', '2026-11-03', 1020, 1022)];
+  const av = avanceCotizacion(cot, regs, t, [cot]);
+  assert.equal(av[0].ejecutado, 16); assert.equal(av[0].saldo, -4); assert.equal(av[0].adicionado, 2); assert.equal(av[1].horas, false);
+  const mq = acumuladoMaquinas(regs, t, { desde: '2026-11-02', hasta: '2026-11-30' });
+  assert.equal(mq.length, 1); assert.equal(mq[0].ultimo, 1022); assert.equal(mq[0].total, 16); assert.equal(mq[0].periodo, 8); assert.equal(mq[0].saltos.length, 1); assert.equal(mq[0].saltos[0].dif, 6);
+});

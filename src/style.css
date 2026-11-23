@@ -609,3 +609,9 @@ button.cfg-main:hover{background:none}
 .kpi small{display:block;color:var(--muted,#6b7280);font-size:.78rem}
 .op-cerrados summary{cursor:pointer;padding:8px 0}
 .op-cerrados .op-cards{margin-top:8px}
+.op-proy .hint{margin-top:4px}
+.op-bar{height:8px;border-radius:99px;background:var(--line,#e5e0d8);overflow:hidden;margin-top:4px}
+.op-bar i{display:block;height:100%;background:var(--ok,#3c7a4a);border-radius:99px}
+.op-bar i.warn{background:#c58b1b}
+.op-bar i.over{background:#b4442b}
+.op-bar-row+.op-bar-row{margin-top:10px}
