@@ -183,3 +183,15 @@ test('estaCerrado: abierto hasta hacer todos los cierres del tipo', () => {
   assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, { estado: 'cerrado' }), true);
   assert.equal(estaCerrado({}, { salidas: { pago: 'ninguno', cobro: 'ninguno' } }, null), false);
 });
+
+test('ajuste al operador desde la cotización (proyecto): se suma a la tarifa base', async () => {
+  const { calcular, nuevoTipo, ajustesDeCotizaciones } = await import('../src/operacion.js');
+  const t = { id: 'T', ...nuevoTipo('maquinaria') }; t.config = { ...t.config, formulas: { cantidad: '8', valor: 'pagadas * tarifa' }, reglas: [] };
+  const tar = [{ tipo_id: 'T', uso: 'pago', modo: 'unidad', valor: 7000, criterios: { tercero: 'ana' } },
+    ...ajustesDeCotizaciones([{ id: 'c1', numero: 4, op_tipo_id: 'T', ajuste_op: 1000 }, { id: 'c2', numero: 5, op_tipo_id: 'T', ajuste_op: 0 }], 'T')];
+  const enProy = calcular({ tipo_id: 'T', tercero_id: 'ana', fecha: '2026-11-20', cotizacion_id: 'c1', datos: {} }, t, tar);
+  assert.equal(enProy.base, 56000); assert.equal(enProy.valor, 64000); assert.equal(enProy.recargos[0].nombre, 'Ajuste proyecto N.º 4');
+  assert.equal(enProy.tarifa.valor, 7000);
+  const otro = calcular({ tipo_id: 'T', tercero_id: 'ana', fecha: '2026-11-20', cotizacion_id: 'c2', datos: {} }, t, tar);
+  assert.equal(otro.valor, 56000);
+});

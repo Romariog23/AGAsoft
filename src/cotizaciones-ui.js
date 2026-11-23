@@ -15,7 +15,7 @@ const elem = id => (X.S.d.op_elementos || []).find(e => e.id === id);
 const tipoById = id => (X.S.d.op_tipos || []).find(t => t.id === id);
 const camposEl = t => t ? cfgTipo(t).campos.filter(f => f.tipo === 'elemento') : [];
 const elementosDe = (t, lista) => (X.S.d.op_elementos || []).filter(e => e.tipo_id === t.id && e.lista === lista && e.activo !== false).sort((a, b) => a.nombre.localeCompare(b.nombre));
-const faltaSql = e => /cotizaciones|schema cache|does not exist/i.test(e?.message || '') ? new Error('Falta correr en Supabase el archivo supabase/038_cotizaciones.sql.') : e;
+const faltaSql = e => /ajuste_op/i.test(e?.message || '') ? new Error('Para el ajuste al operador falta correr en Supabase el archivo supabase/039_op_ajuste.sql.') : /cotizaciones|schema cache|does not exist/i.test(e?.message || '') ? new Error('Falta correr en Supabase el archivo supabase/038_cotizaciones.sql.') : e;
 const ESTADO_TAG = { abierta: 'demo', aceptada: 'ok', rechazada: 'bad', cerrada: '' };
 const nomEstado = e => (ESTADOS_COT.find(x => x[0] === e) || [e, e])[1];
 const amarre = c => { const t = tipoById(c.op_tipo_id); if (!t) return ''; const els = Object.values(c.criterios || {}).filter(Boolean).map(id => elem(id)?.nombre).filter(Boolean); return [t.nombre, ...els].join(' · '); };
@@ -59,7 +59,9 @@ export function vCotizacion(m, id) {
       <div><label for="cqE">Estado</label><select id="cqE">${X.opts(ESTADOS_COT, c.estado)}</select></div></div></section>
     ${opOn ? `<section class="panel stack"><h3>Amarrar a Operación</h3><p class="hint">Las horas registradas en Operación con estos datos se facturan con los precios de esta cotización. Deja "Todas" para que aplique a cualquiera.</p>
       <div class="cq-grid"><div><label for="cqT">Tipo de operación</label><select id="cqT"><option value="">No se amarra</option>${tiposOp().map(x => `<option value="${x.id}" ${x.id === c.op_tipo_id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
-      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></div>`).join('')}</div></section>` : ''}
+      ${cel.map(f => `<div><label for="cqC_${f.k}">${esc(f.nombre)}</label><select id="cqC_${f.k}" data-crit="${f.k}"><option value="">Todas</option>${elementosDe(t, f.lista).map(e => `<option value="${e.id}" ${e.id === c.criterios[f.k] ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select></div>`).join('')}</div>
+      ${t ? `<div class="cq-grid"><div><label for="cqA">Ajuste adicional al operador por ${esc(cfgTipo(t).unidad || 'unidad')} (opcional)</label><input id="cqA" class="mono" inputmode="decimal" value="${X.num(c.ajuste_op) ? X.num(c.ajuste_op) : ''}" placeholder="0"></div></div>
+      <p class="hint">Se suma a la tarifa de programación de cada operador, solo en los registros de este proyecto. Sale como línea aparte en el volante y el documento soporte. No cambia lo que se le cobra al cliente.</p>` : ''}</section>` : ''}
     <section class="panel stack"><h3>Líneas</h3><div class="tbl-wrap"><table class="tbl cq-lineas"><thead><tr><th>Producto o servicio</th><th>Descripción</th>${t ? libres.map(f => `<th>${esc(f.nombre)}</th>`).join('') : ''}<th class="r">Cant.</th><th>Unidad</th><th class="r">Precio</th><th class="r">Desc. %</th><th class="r">IVA %</th>${t ? '<th title="Con horas: por las horas registradas. Una vez: en la primera factura (movilización). No: se agrega a mano.">Cobro desde Operación</th>' : ''}<th class="r">Total</th><th></th></tr></thead><tbody>
       ${c.lineas.map((l, i) => `<tr data-i="${i}"><td><select data-k="producto_id"><option value="">—</option>${prods.map(p => `<option value="${p.id}" ${p.id === l.producto_id ? 'selected' : ''}>${esc(p.codigo)} · ${esc(p.nombre)}</option>`).join('')}</select></td>
         <td><input data-k="descripcion" value="${esc(l.descripcion)}" maxlength="300"></td>
@@ -75,6 +77,7 @@ export function vCotizacion(m, id) {
     X.$('cqCli').onchange = e => { c.tercero_id = e.target.value; };
     X.$('cqF').onchange = e => { c.fecha = e.target.value; }; X.$('cqV').onchange = e => { c.vence = e.target.value; }; X.$('cqE').onchange = e => { c.estado = e.target.value; };
     X.$('cqO').oninput = e => { c.observaciones = e.target.value; }; X.$('cqK').oninput = e => { c.condiciones = e.target.value; };
+    if (X.$('cqA')) X.$('cqA').oninput = e => { c.ajuste_op = X.num(e.target.value); };
     if (X.$('cqT')) X.$('cqT').onchange = e => { c.op_tipo_id = e.target.value || null; c.criterios = {}; c.lineas.forEach(l => { l.criterios = {}; }); pintar(); };
     m.querySelectorAll('[data-crit]').forEach(s => s.onchange = () => {
       c.criterios[s.dataset.crit] = s.value || undefined; if (!s.value) delete c.criterios[s.dataset.crit];
@@ -116,6 +119,8 @@ export function vCotizacion(m, id) {
     const err = X.$('cqErr'); err.hidden = true;
     const lineas = c.lineas.filter(l => String(l.descripcion).trim() || X.num(l.precio)).map(l => ({ ...l, descripcion: String(l.descripcion).trim(), cantidad: X.num(l.cantidad), precio: X.num(l.precio), descuento_pct: X.num(l.descuento_pct), iva_pct: X.num(l.iva_pct), producto_id: l.producto_id || null, op: c.op_tipo_id ? (l.op === 'fijo' ? 'fijo' : l.op !== false) : false, criterios: c.op_tipo_id ? l.criterios : {} }));
     const row = { ...c, lineas, criterios: c.op_tipo_id ? c.criterios : {}, op_tipo_id: c.op_tipo_id || null, vence: c.vence || null };
+    // ajuste_op (039_op_ajuste.sql): solo se envía si tiene valor o ya existía, para no romper el guardado antes de correr el SQL.
+    if (c.op_tipo_id && X.num(c.ajuste_op) > 0) row.ajuste_op = X.num(c.ajuste_op); else if (prev && 'ajuste_op' in prev) row.ajuste_op = 0; else delete row.ajuste_op;
     const errores = erroresCotizacion(row); if (errores.length) { err.textContent = errores[0]; err.hidden = false; return; }
     const tt = totales(lineas, {});
     Object.assign(row, { bruto: tt.bruto, descuento: tt.descuento, base: tt.base, iva: tt.iva, total: tt.total, empresa_id: X.S.eid });

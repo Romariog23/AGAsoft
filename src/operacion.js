@@ -151,11 +151,18 @@ export function variables(r, cfg) {
   }
   return v;
 }
-const valorCriterio = (r, k) => k === 'tercero' ? r.tercero_id : r.datos?.[k];
+const valorCriterio = (r, k) => k === 'tercero' ? r.tercero_id : k === 'cotizacion' ? r.cotizacion_id : r.datos?.[k];
 // La tarifa más específica que aplica al registro: todos sus criterios coinciden; gana la que tenga más criterios y, si empatan, la más reciente.
+const tarifasQueAplican = (r, tarifas, uso) => (tarifas || []).filter(t => t.tipo_id === r.tipo_id && (t.uso || 'pago') === uso && (!t.desde || t.desde <= r.fecha) && (!t.hasta || r.fecha <= t.hasta)
+  && Object.entries(t.criterios || {}).every(([k, val]) => !val || valorCriterio(r, k) === val));
+// Ajuste adicional al operador escrito en la cotización (proyecto): +valor por unidad liquidada, solo en los registros de ese proyecto.
+// Se vuelve una tarifa interna 'adicional' que se suma a la tarifa base del operador; no se guarda en op_tarifas.
+export const ajustesDeCotizaciones = (cotizaciones, tipoId) => (cotizaciones || []).filter(c => c.op_tipo_id === tipoId && n(c.ajuste_op) > 0)
+  .map(c => ({ id: 'aj-' + c.id, sintetica: true, tipo_id: tipoId, uso: 'pago', modo: 'adicional', valor: n(c.ajuste_op), criterios: { cotizacion: c.id }, nota: `Ajuste proyecto N.º ${c.numero}`, producto_id: null }));
+// Ajustes adicionales de programación: se suman a la tarifa base, no la reemplazan.
+export const ajustesPara = (r, tarifas) => tarifasQueAplican(r, tarifas, 'pago').filter(t => t.modo === 'adicional');
 export function tarifaPara(r, tarifas, uso = 'pago') {
-  const ok = (tarifas || []).filter(t => t.tipo_id === r.tipo_id && (t.uso || 'pago') === uso && (!t.desde || t.desde <= r.fecha) && (!t.hasta || r.fecha <= t.hasta)
-    && Object.entries(t.criterios || {}).every(([k, val]) => !val || valorCriterio(r, k) === val));
+  const ok = tarifasQueAplican(r, tarifas, uso).filter(t => t.modo !== 'adicional');
   const peso = t => Object.values(t.criterios || {}).filter(Boolean).length;
   return ok.sort((a, b) => peso(b) - peso(a) || String(b.desde || '').localeCompare(String(a.desde || '')))[0] || null;
 }
@@ -176,6 +183,7 @@ export function calcular(r, tipo, tarifas, uso = 'pago') {
   else if (t && modo === 'registro') base = r2(tarifa);
   const recargos = uso !== 'pago' ? [] : cfg.reglas.filter(g => aplicaDia(g.cuando, dia) && (!g.terceros?.length || g.terceros.includes(r.tercero_id)) && pagadas > 0)
     .map(g => { let x = 0; try { x = r2(evaluar(g.formula, vv)); } catch (_) { x = 0; } return { nombre: g.nombre, valor: x }; }).filter(x => x.valor);
+  if (uso === 'pago' && pagadas > 0) for (const a of ajustesPara(r, tarifas)) recargos.push({ nombre: a.nota || 'Ajuste adicional', valor: r2(pagadas * n(a.valor)), producto_id: a.producto_id || null });
   const valor = r2(base + recargos.reduce((s, x) => s + x.valor, 0));
   return { cantidad, pagadas, dia, tarifa: t, modo, base, recargos, valor, fijo: modo === 'fijo' };
 }
@@ -314,7 +322,7 @@ export function volantes(registros, tipo, tarifas, { elementos = [], centros = [
     l.partes.push({ dist, valor: c.fijo ? c.pagadas || 1 : c.base });
     v.lineas.set(kt, l);
     for (const g of c.recargos) {
-      const k = 'regla:' + g.nombre, x = v.lineas.get(k) || { clave: k, regla: g.nombre, producto_id: c.tarifa?.producto_id || null, cantidad: 0, registros: 0, valor: 0, partes: [] };
+      const k = 'regla:' + g.nombre, x = v.lineas.get(k) || { clave: k, regla: g.nombre, producto_id: g.producto_id || c.tarifa?.producto_id || null, cantidad: 0, registros: 0, valor: 0, partes: [] };
       x.cantidad = r2(x.cantidad + c.pagadas); x.registros++; x.valor = r2(x.valor + g.valor); x.partes.push({ dist, valor: g.valor }); v.lineas.set(k, x);
     }
     v.registros.push({ id: r.id, cargo: c.cargo || undefined, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
@@ -353,6 +361,8 @@ export function dsDeVolante(v, { empresa_id, fecha, periodo, tipoNombre, product
 // La cotización fija el precio de cobro. Se amarra a un tipo de operación y, si quiere, a elementos (obra, equipo…);
 // cada línea puede pedir más elementos. Sin cotización que coincida se usa la tarifa de cobro, si existe.
 export const ESTADOS_COT = [['abierta', 'Abierta'], ['aceptada', 'Aceptada'], ['rechazada', 'Rechazada'], ['cerrada', 'Cerrada']];
+// Nombre corto del proyecto (cotización) para listas.
+export const nombreProyecto = (c, nomT, nomEl) => [`N.º ${c.numero}`, ...Object.values(c.criterios || {}).filter(Boolean).map(nomEl).filter(Boolean), nomT(c.tercero_id)].join(' · ');
 export const cotizacionVigente = c => !!c && (c.estado === 'abierta' || c.estado === 'aceptada');
 const coincide = (criterios, r) => Object.entries(criterios || {}).every(([k, v]) => !v || r.datos?.[k] === v);
 const pesoCrit = c => Object.values(c || {}).filter(Boolean).length;
