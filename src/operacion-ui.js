@@ -9,6 +9,8 @@ export const iniciarOperacion = ctx => { X = ctx; };
 
 /* ---------- Datos ---------- */
 export const operacionActiva = () => X?.emp()?.contabilidad?.operacion?.activo === true;
+// Modo escogido al activar. Las empresas que activaron antes de existir el modo quedan en maquinaria.
+export const modoOperacion = () => operacionActiva() ? (X.emp().contabilidad.operacion.modo || 'maquinaria') : null;
 export const tiposOp = () => [...(X?.S.d?.op_tipos || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0) || a.nombre.localeCompare(b.nombre));
 const tipoById = id => (X.S.d.op_tipos || []).find(t => t.id === id);
 const elementosDe = (tipo, lista, todos) => (X.S.d.op_elementos || []).filter(e => e.tipo_id === tipo.id && e.lista === lista && (todos || e.activo !== false)).sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)) || a.nombre.localeCompare(b.nombre));
@@ -43,10 +45,13 @@ export function vOperacion(m) {
   const { esc, money } = X;
   if (operacionActiva()) { location.hash = '#/oprecibos'; return; }
   if (!operacionActiva()) {
-    m.innerHTML = `<header class="vhead"><div><h2>Operación</h2><p class="sub">Horas máquina por operador, proyecto y máquina. No mueve la contabilidad hasta que programes (documento soporte) o factures.</p></div></header>
-    <section class="panel callout stack"><b>Operación está apagada para esta empresa.</b><p>Es opcional: actívala si alquilas maquinaria con operador: recibos de horas, valor hora de cada operador, horómetro por máquina, documento soporte al operador y factura al cliente con la cotización.</p>
-    <div class="row"><button class="primary" id="opOn">Activar Operación</button></div></section>`;
-    X.$('opOn').onclick = async () => { try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true }); X.toast('Operación activada.'); location.hash = '#/oprecibos'; } catch (e) { X.fail(e); } };
+    // Al activar se escoge el modo. Por ahora solo Maquinaria amarilla; los demás quedan anunciados.
+    m.innerHTML = `<header class="vhead"><div><h2>Operación</h2><p class="sub">Es opcional y no mueve la contabilidad hasta que programes (documento soporte) o factures. Escoge el modo de tu empresa para activarla.</p></div></header>
+    <div class="op-cards op-modos">
+      <article class="op-card">${icono('maquina')}<h3>Maquinaria amarilla</h3><p class="hint">Alquiler de maquinaria con operador: recibos de horas con horómetro, valor hora de cada operador, recargo dominical y festivo, horómetro acumulado por máquina, cotización de maquinaria como proyecto, documento soporte al operador y factura al cliente.</p><div class="row"><button class="primary" data-modo="maquinaria">Activar Maquinaria amarilla</button></div></article>
+      <article class="op-card dash">${icono('camion')}<h3>Transporte y otras actividades</h3><p class="hint">Viajes, servicios por día u otros registros operativos.</p><div class="row"><span class="tag">Próximamente</span></div></article></div>`;
+    m.querySelectorAll('[data-modo]').forEach(b => b.onclick = async () => { if (b.disabled) return; b.disabled = true;
+      try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true, modo: b.dataset.modo }); X.toast('Operación activada: Maquinaria amarilla.'); location.hash = '#/oprecibos'; } catch (e) { b.disabled = false; X.fail(e); } });
     return;
   }
   const tipos = tiposOp(), desde = mesActual(), hasta = X.hoy();
