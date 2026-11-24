@@ -1107,8 +1107,12 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   };
   const pintarRef = () => {
     if (!$('ref')) return;
-    const fs = facturasCliente($('cli').value || null);
-    $('ref').innerHTML = `<option value="">Escoge la factura…</option>` + fs.map(f => `<option value="${f.id}" ${f.id === doc.ref_id ? 'selected' : ''}>${esc(numDoc(f))} · ${fFecha(f.fecha)} · ${money(f.total)}${$('cli').value ? '' : ' · ' + esc(terc(f.tercero_id)?.nombre)}</option>`).join('');
+    // Solo las facturas del cliente escogido; en NC, sin las que ya están acreditadas por completo.
+    const cli = $('cli').value;
+    if (!cli) { $('ref').innerHTML = '<option value="">Escoge primero el cliente…</option>'; $('ref').disabled = true; return; }
+    const fs = facturasCliente(cli).filter(f => tipo !== 'NC' || f.id === doc.ref_id || num(f.total) - acreditado(S.d.documentos, f.id, doc.id) > 0.009);
+    $('ref').disabled = false;
+    $('ref').innerHTML = `<option value="">${fs.length ? 'Escoge la factura…' : 'Este cliente no tiene facturas para corregir'}</option>` + fs.map(f => `<option value="${f.id}" ${f.id === doc.ref_id ? 'selected' : ''}>${esc(numDoc(f))} · ${fFecha(f.fecha)} · ${money(f.total)}${tipo === 'NC' && acreditado(S.d.documentos, f.id, doc.id) > 0.009 ? ` · pendiente ${money(num(f.total) - acreditado(S.d.documentos, f.id, doc.id))}` : ''}</option>`).join('');
   };
 
   // Electrónico: borrador y Emitir. Los demás: un solo botón Guardar que contabiliza.

@@ -198,6 +198,7 @@ Deno.serve(async req => {
       const rg = rangos.find((r: any) => String(r.prefix || '') === String(doc.prefijo || '')) || (c.ambiente === 'pruebas' ? rangos[0] : null);
       if (rg) body.numbering_range_id = rg.id;
       else if (rangos.length) return json({ error: `En Factus no hay una numeración activa con el prefijo ${doc.prefijo || '(sin prefijo)'}. Pídele a Factus que asocie esa resolución o ajusta el prefijo en Numeraciones.` }, 400);
+      else if (doc.tipo === 'FV') return json({ error: `Tu cuenta de Factus no tiene una numeración activa de facturas de venta. Créala en el panel de Factus (o pídesela a Factus), dale "Volver a probar" en Configuración › Factura electrónica y vuelve a enviar.` }, 400);
       // Si un envío anterior quedó marcado como rechazado pero Factus sí lo validó (respuesta anidada), se recupera sin reenviar.
       const { data: previos } = await sb.from('fe_envios').select('respuesta, ambiente').eq('documento_id', doc.id).order('creado_en', { ascending: false }).limit(5);
       const rec = (previos || []).map((e: any) => ({ e, x: leerFactus(e.respuesta) })).find(o => o.x.ok);
