@@ -290,3 +290,23 @@ test('horómetro encadenado: arranca en la máquina y sigue el final del recibo 
   q = quitarDeCadena(regs[1], regs, maq); assert.match(q.errores.join(), /programado o facturado/);
   assert.deepEqual(quitarDeCadena(regs[2], regs, maq), { errores: [], actualizar: [] });
 });
+
+import { excesoRecibo, excesosCotizacion } from '../src/operacion.js';
+test('tope de horas cotizadas: recibo y facturar', () => {
+  const t = { id: 'maq', ...nuevoTipo('maquinaria', 'e1') };
+  const cot = { id: 'q1', estado: 'aceptada', op_tipo_id: 'maq', tercero_id: 'cli', criterios: {}, lineas: [{ descripcion: 'Hora', cantidad: 20, precio: 1 }, { descripcion: 'Movilización', op: 'fijo', cantidad: 1 }] };
+  const rc = (id, ini, fin, datos = {}) => ({ id, tipo_id: 'maq', fecha: '2026-11-10', tercero_id: 'a', cotizacion_id: 'q1', datos: { equipo: 'm', horometro: { ini, fin }, ...datos } });
+  const regs = [rc('a', 0, 12)];
+  assert.equal(excesoRecibo(rc(null, 12, 20), regs, t, [cot]), null);
+  const ex = excesoRecibo(rc(null, 12, 23), regs, t, [cot]);
+  assert.deepEqual([ex.tope, ex.otras, ex.este, ex.exceso], [20, 12, 11, 3]);
+  // El stand by cuenta; las horas no aceptadas no.
+  assert.equal(excesoRecibo(rc(null, 12, 20, { standby: 2, obs_standby: 'x' }), regs, t, [cot]).exceso, 2);
+  assert.equal(excesoRecibo(rc(null, 12, 23, { h_cliente: 8, obs_cliente: 'x' }), regs, t, [cot]), null);
+  // Editar el mismo recibo no se cuenta dos veces.
+  assert.equal(excesoRecibo(rc('a', 0, 20), regs, t, [cot]), null);
+  // Línea sin cantidad: sin tope. Después de adicionar (cantidad 25), pasa.
+  assert.equal(excesoRecibo(rc(null, 12, 40), regs, t, [{ ...cot, lineas: [{ ...cot.lineas[0], cantidad: 0 }] }]), null);
+  assert.equal(excesoRecibo(rc(null, 12, 23), regs, t, [{ ...cot, lineas: [{ ...cot.lineas[0], cantidad: 25 }] }]), null);
+  assert.deepEqual(excesosCotizacion(cot, [rc('a', 0, 12), rc('b', 12, 24)], t, [cot]).map(x => x.exceso), [4]);
+});

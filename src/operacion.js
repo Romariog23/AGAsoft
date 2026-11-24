@@ -614,3 +614,20 @@ export function quitarDeCadena(r, registros, maq, { baseMaq } = {}) {
   else actualizar.push(conIni(next, ini));
   return { errores, actualizar };
 }
+
+/* ---------- Tope de horas cotizadas ---------- */
+// Las horas de una línea de la cotización (cantidad, que ya incluye las adiciones) son el tope: ni los recibos ni lo que se
+// factura pueden pasarlo hasta que se adicione en el proyecto. Una línea sin cantidad no tiene tope. El stand by cuenta.
+const qCobro = (r, tipo) => { const k = calcular(r, tipo, [], 'cobro'); return cfgTipo(tipo).salidas.cobrar === 'pagadas' ? k.pagadas : k.cobro; };
+export function excesoRecibo(row, registros, tipo, cotizaciones) {
+  if (esCargo(row)) return null;
+  const cot = cotizacionPara(row, cotizaciones || []), lc = cot && lineaCotPara(row, cot); if (!lc) return null;
+  const tope = n(cot.lineas[lc.i].cantidad); if (!(tope > 0)) return null;
+  const otras = avanceCotizacion(cot, (registros || []).filter(r => r.id !== row.id), tipo, cotizaciones)[lc.i].ejecutado, este = qCobro(row, tipo);
+  const total = r2(otras + este);
+  return total > tope + 0.001 ? { cotizacion: cot, i: lc.i, descripcion: lc.descripcion || '', tope, otras, este, exceso: r2(total - tope) } : null;
+}
+export function excesosCotizacion(cot, registros, tipo, cotizaciones) {
+  return avanceCotizacion(cot, registros, tipo, cotizaciones).filter(x => x.horas && x.proyectado > 0 && x.ejecutado > x.proyectado + 0.001)
+    .map(x => ({ i: x.i, descripcion: x.descripcion || '', tope: x.proyectado, ejecutado: x.ejecutado, exceso: r2(x.ejecutado - x.proyectado) }));
+}
