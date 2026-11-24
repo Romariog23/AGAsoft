@@ -538,3 +538,49 @@ export function estadoPM(maq, registros) {
   const margen = Math.max(10, r2(n(pm.cada) * 0.1)); // aviso previo: 10 % del intervalo, mínimo 10 h
   return { actual, proximo, cada: n(pm.cada), usadas, faltan, estado: faltan <= 0 ? 'vencido' : faltan <= margen ? 'pronto' : 'ok', ultimo: (pm.hist || []).slice(-1)[0] || null };
 }
+
+/* ---------- Horas facturadas contra horas de los recibos ---------- */
+// Al crear la factura desde Operación, los recibos quedan marcados con ella. Si en Ventas se cambia la cantidad (o se borra la
+// línea), las horas de los recibos y las de la factura ya no cuadran. Aquí se comparan, por factura y línea de la cotización.
+// Lo que falte facturar y ya se haya llevado a otra factura queda anotado en la línea de la cotización: lineas[i].pendientes
+// = [{ origen: factura con la diferencia, horas, doc: factura que la cobró }].
+const itemsDeLinea = (its, lc) => {
+  const d = String(lc.descripcion || '').trim().toLowerCase();
+  const porDesc = d ? its.filter(it => String(it.descripcion || '').trim().toLowerCase().startsWith(d) && !/horas pendientes de la factura/i.test(it.descripcion || '')) : [];
+  return porDesc.length ? porDesc : its.filter(it => lc.producto_id && it.producto_id === lc.producto_id && n(it.precio) === n(lc.precio) && !/horas pendientes de la factura/i.test(it.descripcion || ''));
+};
+export function diferenciasFactura(registros, tipo, { cotizaciones = [], tarifas = [], documentos = [], items = [] } = {}) {
+  const cfg = cfgTipo(tipo), g = new Map(), vivo = id => { const d = documentos.find(x => x.id === id); return d && d.estado !== 'anulado' ? d : null; };
+  for (const r of registros || []) {
+    if (r.tipo_id !== tipo.id || esCargo(r) || !r.cierre_cobro) continue;
+    const doc = vivo(r.cierre_cobro); if (!doc) continue;
+    const cot = cotizacionPara(r, cotizaciones), lc = cot && lineaCotPara(r, cot); if (!lc || (lc.modo && lc.modo !== 'unidad')) continue;
+    const k = calcular(r, tipo, tarifas), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
+    const key = `${doc.id}|${cot.id}|${lc.i}`, x = g.get(key) || { doc, cot, i: lc.i, linea: lc, horas: 0, registros: 0 };
+    x.horas = r2(x.horas + q); x.registros++; g.set(key, x);
+  }
+  const out = [];
+  for (const x of g.values()) {
+    const its = items.filter(it => it.documento_id === x.doc.id);
+    const facturado = r2(itemsDeLinea(its, x.linea).reduce((s, it) => s + n(it.cantidad), 0));
+    const ajustado = r2(((x.cot.lineas?.[x.i]?.pendientes) || []).filter(p => p.origen === x.doc.id && vivo(p.doc)).reduce((s, p) => s + n(p.horas), 0));
+    const faltan = r2(x.horas - facturado - ajustado);
+    if (Math.abs(faltan) >= 0.01) out.push({ doc: x.doc, cotizacion: x.cot, i: x.i, descripcion: x.linea.descripcion || '', unidad: x.linea.unidad || 'UND', precio: n(x.linea.precio), horas: x.horas, facturado, ajustado, faltan, borrador: x.doc.estado === 'borrador' });
+  }
+  return out.sort((a, b) => String(a.doc.fecha || '').localeCompare(String(b.doc.fecha || '')));
+}
+// Lleva a la siguiente factura de cada cotización las horas que faltaron en facturas ya emitidas (no las de un borrador:
+// esas se corrigen en el mismo borrador). Si la cotización no tiene recibos nuevos, arma una factura solo con lo pendiente.
+export function conPendientes(grupos, difs, { nombreDoc = d => d.numero || '' } = {}) {
+  const gs = grupos.map(g => ({ ...g, lineas: [...g.lineas] }));
+  for (const x of difs.filter(d => d.faltan > 0 && !d.borrador)) {
+    const l = x.cotizacion.lineas[x.i];
+    const linea = { clave: `p${x.doc.id}|${x.i}`, pendiente: { origen: x.doc.id, i: x.i, horas: x.faltan }, producto_id: l.producto_id || null, codigo: l.codigo || '', descripcion: `${l.descripcion || ''} · horas pendientes de la factura ${nombreDoc(x.doc)}`.trim(),
+      unidad: l.unidad || 'UND', precio: n(l.precio), descuento_pct: n(l.descuento_pct), iva_pct: n(l.iva_pct), modo: 'unidad', cantidad: x.faltan, registros: 0, cc: [] };
+    linea.valor = totalLineaCot(linea);
+    let g = gs.find(y => y.cotizacion?.id === x.cotizacion.id);
+    if (!g) { g = { clave: 'c:' + x.cotizacion.id, tercero_id: x.cotizacion.tercero_id, cotizacion: x.cotizacion, lineas: [], registros: [], desde: x.doc.fecha, hasta: x.doc.fecha, cantidad: 0, total: 0 }; gs.push(g); }
+    g.lineas.push(linea); g.total = r2(g.lineas.reduce((s, y) => s + y.valor, 0));
+  }
+  return gs;
+}

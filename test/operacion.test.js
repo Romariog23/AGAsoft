@@ -235,3 +235,36 @@ test('mantenimiento preventivo por horas', async () => {
   const e = estadoPM(maq, regs); assert.equal(e.estado, 'vencido'); assert.equal(e.faltan, -10);
   assert.equal(estadoPM({ id: 'x', datos: {} }, regs), null);
 });
+
+import { diferenciasFactura, conPendientes } from '../src/operacion.js';
+test('horas facturadas contra horas de los recibos: faltante se lleva a la siguiente factura', () => {
+  const t = { id: 'maq', ...nuevoTipo('maquinaria', 'e1') };
+  const cot = { id: 'q1', estado: 'aceptada', op_tipo_id: 'maq', tercero_id: 'cli', criterios: {}, lineas: [{ descripcion: 'Hora máquina', precio: 150000, iva_pct: 19 }] };
+  const regs = [
+    { id: 'a', tipo_id: 'maq', fecha: '2026-11-10', tercero_id: 'op', cotizacion_id: 'q1', cierre_cobro: 'fv1', datos: { equipo: 'm1', horometro: { ini: 1000, fin: 1120 } } },
+    { id: 'b', tipo_id: 'maq', fecha: '2026-11-11', tercero_id: 'op', cotizacion_id: 'q1', cierre_cobro: 'fv1', datos: { equipo: 'm1', horometro: { ini: 1120, fin: 1200 } } },
+  ];
+  const fv = { id: 'fv1', estado: 'emitida', numero: 7, fecha: '2026-11-15' };
+  const items = [{ documento_id: 'fv1', descripcion: 'Hora máquina · del 10 al 11', cantidad: 195, precio: 150000 }];
+  let difs = diferenciasFactura(regs, t, { cotizaciones: [cot], documentos: [fv], items });
+  assert.equal(difs.length, 1);
+  assert.deepEqual([difs[0].horas, difs[0].facturado, difs[0].faltan, difs[0].borrador], [200, 195, 5, false]);
+  // La siguiente factura trae las 5 h, aunque no haya recibos nuevos.
+  const gs = conPendientes([], difs, { nombreDoc: d => 'FV ' + d.numero });
+  assert.equal(gs.length, 1); assert.equal(gs[0].lineas[0].cantidad, 5); assert.equal(gs[0].total, 750000);
+  assert.match(gs[0].lineas[0].descripcion, /horas pendientes de la factura FV 7/);
+  // En borrador solo se avisa, no se lleva.
+  const bor = diferenciasFactura(regs, t, { cotizaciones: [cot], documentos: [{ ...fv, estado: 'borrador' }], items });
+  assert.equal(bor[0].borrador, true); assert.equal(conPendientes([], bor).length, 0);
+  // Una vez cobradas en la factura fv2, ya no hay diferencia; si fv2 se anula, vuelve.
+  const cot2 = { ...cot, lineas: [{ ...cot.lineas[0], pendientes: [{ origen: 'fv1', horas: 5, doc: 'fv2' }] }] };
+  difs = diferenciasFactura(regs, t, { cotizaciones: [cot2], documentos: [fv, { id: 'fv2', estado: 'emitida' }], items });
+  assert.equal(difs.length, 0);
+  difs = diferenciasFactura(regs, t, { cotizaciones: [cot2], documentos: [fv, { id: 'fv2', estado: 'anulado' }], items });
+  assert.equal(difs[0].faltan, 5);
+  // Facturado de más: sobran (negativo) y no se lleva.
+  difs = diferenciasFactura(regs, t, { cotizaciones: [cot], documentos: [fv], items: [{ ...items[0], cantidad: 210 }] });
+  assert.equal(difs[0].faltan, -10); assert.equal(conPendientes([], difs).length, 0);
+  // Factura anulada: los recibos no cuentan.
+  assert.equal(diferenciasFactura(regs, t, { cotizaciones: [cot], documentos: [{ ...fv, estado: 'anulado' }], items }).length, 0);
+});

@@ -3,7 +3,7 @@
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
 import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, diaDe, NOMBRE_DIA } from './operacion.js';
-import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC } from './operacion-ui.js';
+import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC, difsDe } from './operacion-ui.js';
 
 let X = null;
 export const iniciarMaquinaria = ctx => { X = ctx; };
@@ -154,14 +154,14 @@ function formRecibo(t, r) {
 let fp = 'abiertos';
 export function vProyectos(m) {
   conTipo(m, t => {
-    const { esc, money } = X, todos = proyectosDe(t), regs = X.S.d.op_registros || [], cots = X.S.d.cotizaciones || [];
+    const { esc, money } = X, todos = proyectosDe(t), regs = X.S.d.op_registros || [], cots = X.S.d.cotizaciones || [], difs = difsDe(t);
     const ls = todos.filter(c => fp === 'todos' || (fp === 'abiertos') === cotizacionVigente(c));
     const fila = c => {
       const av = avanceCotizacion(c, regs, t, cots).filter(x => x.horas), pro = av.reduce((s, x) => s + x.proyectado, 0), eje = av.reduce((s, x) => s + x.ejecutado, 0), pct = pro > 0 ? Math.round(eje / pro * 100) : 0;
       const sinFac = regs.filter(r => r.tipo_id === t.id && !esCargo(r) && !r.cierre_cobro && cotizacionPara(r, cots)?.id === c.id).length;
       return `<tr class="click" data-c="${c.id}"><td class="mono">${c.numero}</td><td><b>${esc(obraDe(c) || '—')}</b><br><small class="hint">${esc(nomT(c.tercero_id))}</small></td>
         <td style="min-width:180px">${pro > 0 ? `<div class="mono">${cant(eje)} de ${cant(pro, 'h')}</div><div class="op-bar"><i style="width:${Math.min(100, pct)}%" class="${eje >= pro ? 'over' : pct >= 80 ? 'warn' : ''}"></i></div>` : `<span class="mono">${cant(eje, 'h')}</span>`}</td>
-        <td class="r">${sinFac ? nRec(sinFac) : ''}</td><td class="r mono">${money(c.total)}</td><td>${cotizacionVigente(c) ? '<span class="tag ok">Abierto</span>' : `<span class="tag">${c.estado === 'cerrada' ? 'Cerrado' : esc(c.estado)}</span>`}</td>
+        <td class="r">${sinFac ? nRec(sinFac) : ''}${(() => { const f = difs.filter(d => d.cotizacion.id === c.id).reduce((s, d) => s + d.faltan, 0); return Math.abs(f) >= 0.01 ? `<br><span class="tag ${f > 0 ? 'demo' : 'bad'}" title="Diferencia entre los recibos y lo facturado">${f > 0 ? 'Faltan' : 'Sobran'} ${cant(Math.abs(f), 'h')}</span>` : ''; })()}</td><td class="r mono">${money(c.total)}</td><td>${cotizacionVigente(c) ? '<span class="tag ok">Abierto</span>' : `<span class="tag">${c.estado === 'cerrada' ? 'Cerrado' : esc(c.estado)}</span>`}</td>
         <td class="r nowrap"><a class="btn sm ghost" href="#/oprecibos?cot=${c.id}" data-stop>Recibos</a>${cotizacionVigente(c) ? `<button class="sm ghost" data-cerrar="${c.id}">Cerrar</button>` : `<button class="sm ghost" data-reab="${c.id}">Reabrir</button>`}</td></tr>`;
     };
     m.innerHTML = encabezado('Proyectos', 'Cada proyecto es una cotización: cliente, obra, condiciones, ítems a facturar y horas proyectadas. Se cierra cuando tú lo cierras.', '<a class="btn primary" href="#/cotizacion/nueva-maq">+ Nuevo proyecto</a>') + `
