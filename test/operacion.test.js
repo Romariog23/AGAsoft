@@ -261,3 +261,32 @@ test('horas con el cliente (no aceptadas y stand by) y ajuste de horas del opera
   assert.equal(v.cantidad, 11); assert.equal(v.total, 77000); assert.equal(v.lineas.length, 1);
   assert.equal(facturables([r, aj], t, { cotizaciones: [cot], tarifas: tar }).grupos[0].lineas[0].cantidad, 11);
 });
+
+import { encadenar, quitarDeCadena, horometroInicialMaq } from '../src/operacion.js';
+test('horómetro encadenado: arranca en la máquina y sigue el final del recibo anterior', () => {
+  const maq = { id: 'm1', nombre: 'Retro', datos: { horometro_inicial: 1000 } };
+  const rc = (id, fecha, ini, fin, extra = {}) => ({ id, tipo_id: 'maq', fecha, tercero_id: 'a', datos: { equipo: 'm1', horometro: { ini, fin } }, ...extra });
+  assert.equal(horometroInicialMaq(maq), 1000);
+  assert.equal(horometroInicialMaq({ datos: { pm: { inicial: 800 } } }), 800);
+  assert.equal(horometroInicialMaq({ datos: {} }), null);
+  // Primer recibo: arranca en el inicial de la máquina.
+  let e = encadenar(rc(null, '2026-11-10', '', 1008), [], maq);
+  assert.equal(e.ini, 1000); assert.deepEqual(e.errores, []);
+  const regs = [rc('a', '2026-11-10', 1000, 1008), rc('b', '2026-11-11', 1008, 1014), rc('c', '2026-11-12', 1014, 1020, { cierre_pago: 'ds1' })];
+  // Nuevo al final: arranca en 1020.
+  assert.equal(encadenar(rc(null, '2026-11-13', '', 1025), regs, maq).ini, 1020);
+  assert.match(encadenar(rc(null, '2026-11-13', '', 1010), regs, maq).errores.join(), /menor que el inicial/);
+  // Corregir el final de 'a' a 1006: 'b' pasa a empezar en 1006.
+  e = encadenar(rc('a', '2026-11-10', 1000, 1006), regs, maq);
+  assert.deepEqual(e.errores, []); assert.equal(e.actualizar[0].id, 'b'); assert.equal(e.actualizar[0].datos.horometro.ini, 1006);
+  // No puede pasar el final del siguiente.
+  assert.match(encadenar(rc('a', '2026-11-10', 1000, 1015), regs, maq).errores.join(), /no puede pasar el final/);
+  // El siguiente ya programado: no se puede mover su inicial.
+  assert.match(encadenar(rc('b', '2026-11-11', 1008, 1016), regs, maq).errores.join(), /programado o facturado/);
+  // Sin horómetro inicial en la máquina.
+  assert.match(encadenar(rc(null, '2026-11-10', '', 5), [], { id: 'm1', nombre: 'X', datos: {} }).errores.join(), /no tiene horómetro inicial/);
+  // Borrar 'a': 'b' arranca en el inicial de la máquina; borrar 'b' choca con 'c' programado.
+  let q = quitarDeCadena(regs[0], regs, maq); assert.equal(q.actualizar[0].datos.horometro.ini, 1000);
+  q = quitarDeCadena(regs[1], regs, maq); assert.match(q.errores.join(), /programado o facturado/);
+  assert.deepEqual(quitarDeCadena(regs[2], regs, maq), { errores: [], actualizar: [] });
+});
