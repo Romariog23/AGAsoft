@@ -56,7 +56,7 @@ function conTipo(m, pintar) {
   m.innerHTML = '<p class="muted">Preparando Operación…</p>';
   asegurar().then(() => X.route()).catch(e => { m.innerHTML = `<section class="panel callout">${X.esc(e.message)}</section>`; });
 }
-const encabezado = (titulo, sub, acciones = '') => `<header class="vhead"><div><h2>${titulo}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${acciones ? `<div class="row">${acciones}</div>` : ''}</header>`;
+const encabezado = (titulo, sub, acciones = '') => `<header class="vhead"><div><a class="back" href="#/operacion">← Operación</a><h2>${titulo}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${acciones ? `<div class="row">${acciones}</div>` : ''}</header>`;
 const diaTag = f => { const d = diaDe(f); return d === 'domingo' || d === 'festivo' ? ` <span class="tag demo">${NOMBRE_DIA[d]}</span>` : ''; };
 
 /* ---------- 1. Recibos ---------- */
@@ -343,7 +343,7 @@ export function vProgramar(m, q) {
     <div class="kpis"><div class="kpi"><span>Operadores</span><b>${vs.length}</b></div><div class="kpi"><span>Horas</span><b>${cant(vs.reduce((s, v) => s + v.cantidad, 0), 'h')}</b></div><div class="kpi"><span>Por programar</span><b>${money(total)}</b></div></div>
     <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Operador</th><th class="r">Horas</th><th class="r">Valor horas</th><th class="r">Recargos y ajustes</th><th class="r">Otros</th><th class="r">Total</th><th></th></tr></thead><tbody>
     ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${(() => { const k = v.registros.filter(r => !r.cargo && !r.ajuste).length, n0 = recDe(v.tercero_id).length; return k === n0 ? nRec(k) : `<b>${k} de ${n0} recibos</b>`; })()}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
-      <td class="r nowrap">${recDe(v.tercero_id).length ? `<button class="sm ghost" data-esc="${v.tercero_id}">Escoger recibos</button>` : ''}<button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
+      <td class="r nowrap">${recDe(v.tercero_id).length ? `<button class="sm" data-esc="${v.tercero_id}">Escoger recibos</button>` : ''}<button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
     ${vs.length ? `<tr class="grp"><td colspan="5">Total</td><td class="r mono"><b>${money(total)}</b></td><td></td></tr>` : ''}</tbody></table></div></section>
     ${otros.length ? `<section class="panel stack"><h3>Otros conceptos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${otros.map(r => { const aj = esAjusteHoras(r); return `<tr><td>${X.fFecha(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}</td><td>${aj ? `<b>Ajuste de horas</b> ${Number(r.datos.horas) > 0 ? '+' : ''}${cant(r.datos.horas, 'h')}` : esc(r.datos?.concepto || '')}${r.nota ? ` <small class="hint">${esc(r.nota)}</small>` : ''}</td><td class="r mono">${money(aj ? calcular(r, t, tar).valor : r.datos?.valor)}</td><td class="r"><button class="sm ghost" data-bo="${r.id}">Quitar</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
     ${hechos.size ? `<section class="panel stack"><h3>Ya programado en estas fechas</h3><div class="tbl-wrap"><table class="tbl"><tbody>${[...hechos.entries()].map(([id, rs]) => { const cp = compra(id); return `<tr><td>${cp ? `<a href="#/compra/${cp.id}">DS ${cp.numero}</a>${cp.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}` : '<span class="tag demo">Documento eliminado</span>'}</td><td>${esc(nomT(rs[0].tercero_id))}</td><td>${nRec(rs.filter(r => !esCargo(r)).length)}</td><td class="r mono">${cp ? money(cp.total ?? cp.base ?? 0) : ''}</td><td class="r">${!cp || cp.estado === 'anulado' ? `<button class="sm" data-lib="${id}">Liberar recibos</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}`;
@@ -419,5 +419,32 @@ export function vHorasCliente(m, q) {
       X.$('print').innerHTML = [...grupos.entries()].map(([id, xs]) => `<article class="desprendible">${X.cabInforme('Horas no aceptadas y stand by', `${esc(titulo(cots.find(c => c.id === id)))}<br><small>Del ${X.fFecha(fh.desde)} al ${X.fFecha(fh.hasta)}</small>`)}${tabla(xs)}</article>`).join('');
       const tt = document.title; document.title = `Horas no aceptadas ${fh.desde} a ${fh.hasta} - ${X.emp().nombre}`; window.print(); document.title = tt;
     };
+  });
+}
+
+/* ---------- Inicio de Operación ---------- */
+// Tarjetas con cada sección y lo pendiente. Es a donde lleva "← Operación".
+export function vInicioOp(m) {
+  conTipo(m, t => {
+    const regs = recibosDe(t), cots = proyectosDe(t), maqs = maquinasDe(t), plural = (k, a, b) => `${k} ${k === 1 ? a : b}`;
+    const abiertos = regs.filter(r => !r.cierre_pago || !r.cierre_cobro).length, porProg = regs.filter(r => !r.cierre_pago).length, porFac = regs.filter(r => !r.cierre_cobro).length;
+    const pm = maqs.map(e => estadoPM(e, registrosDe(t))).filter(p => p && p.estado !== 'ok'), vencidos = pm.filter(p => p.estado === 'vencido').length;
+    const noAcep = regs.filter(r => { const k = calcular(r, t, []); return k.noAceptadas || k.standby; }).length;
+    X.tarjetas(m, 'Operación', 'Maquinaria amarilla: recibos de horas, proyectos, operadores y máquinas. Escoge una sección.', [
+      ['Día a día', [
+        ['rec', 'lista', 'Recibos', abiertos ? `${plural(abiertos, 'recibo abierto', 'recibos abiertos')}` : 'Todo cerrado', '#/oprecibos'],
+        ['proy', 'normal', 'Proyectos', plural(cots.filter(cotizacionVigente).length, 'proyecto abierto', 'proyectos abiertos'), '#/opproyectos'],
+        ['maq', 'capas', 'Máquinas', plural(maqs.length, 'máquina', 'máquinas'), '#/opmaquinas', null, pm.length ? [vencidos ? 'bad' : 'warn', vencidos ? 'PM vencido' : 'PM pronto'] : null],
+        ['ope', 'usuarios', 'Operadores', `${new Set(valoresDe(t).map(x => x.criterios.tercero)).size} con valor hora`, '#/opoperadores'],
+      ]],
+      ['Cortes', [
+        ['prog', 'pago', 'Programar', porProg ? `${plural(porProg, 'recibo', 'recibos')} por programar al operador` : 'Nada por programar', '#/opprogramar'],
+        ['fac', 'dian', 'Facturar', porFac ? `${plural(porFac, 'recibo', 'recibos')} por facturar al cliente` : 'Nada por facturar', '#/opfacturar'],
+      ]],
+      ['Informes', [
+        ['hc', 'balanza', 'Horas no aceptadas', noAcep ? `${plural(noAcep, 'recibo', 'recibos')} con ajuste del cliente` : 'Horas no aceptadas y stand by', '#/ophorascliente'],
+        ['pc', 'flujo', 'Horas por cerrar', 'Lo que falta pagar y facturar', '#/opporcerrar'],
+      ]],
+    ], 'Buscar una sección…');
   });
 }

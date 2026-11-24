@@ -23,7 +23,7 @@ import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
 import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
-import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente } from './maquinaria-ui.js';
+import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente, vInicioOp } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -266,7 +266,7 @@ function renderNav(actual) {
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['ophorascliente', 'Horas no aceptadas'], ['opporcerrar', 'Horas por cerrar']] }; }
+    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Inicio'], ['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['ophorascliente', 'Horas no aceptadas'], ['opporcerrar', 'Horas por cerrar']] }; }
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -297,7 +297,7 @@ function route() {
     const mod = moduloDeRuta(v);
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
-    if (v === 'operacion') return vOperacion(m);
+    if (v === 'operacion') return operacionActiva() ? vInicioOp(m) : vOperacion(m);
     if (v === 'opcfg' || v === 'opregistros') { location.hash = '#/oprecibos'; return; }
     if (v === 'oprecibos') return operacionActiva() ? vRecibos(m, q) : vOperacion(m);
     if (v === 'opproyectos') return operacionActiva() ? vProyectos(m) : vOperacion(m);
@@ -4945,6 +4945,6 @@ async function vCalendario(m) {
 
 // Operación (módulo opcional): sus pantallas usan las mismas utilidades de esta página.
 const ctxOp = { S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
-  cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
+  tarjetas: (...a) => pintarTarjetas(...a), cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
   bodegaVenta: pid => { const p = S.d.productos.find(x => x.id === pid); return p && esInventariable(p) && conInv() ? bodegaVentaDe(p, bodegas()) : null; } };
 iniciarOperacion(ctxOp); iniciarMaquinaria(ctxOp); iniciarCotizaciones(ctxOp);
