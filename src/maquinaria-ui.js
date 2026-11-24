@@ -3,7 +3,7 @@
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
 import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, diaDe, NOMBRE_DIA } from './operacion.js';
-import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC } from './operacion-ui.js';
+import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC, escogerRecibos } from './operacion-ui.js';
 
 let X = null;
 export const iniciarMaquinaria = ctx => { X = ctx; };
@@ -75,7 +75,7 @@ export function vRecibos(m, q) {
     const av = avisos(regs, t, tar).map(a => a.clase === 'tarifa' ? { ...a, texto: `${nomT(regs.find(r => r.id === a.registro_id)?.tercero_id)} no tiene valor hora: ponlo en Operadores.` } : a);
     const avDe = new Map(); for (const a of av) avDe.set(a.registro_id, [...(avDe.get(a.registro_id) || []), a.texto]);
     const horas = regs.reduce((s, r) => s + calc.get(r.id).cantidad, 0), valor = regs.reduce((s, r) => s + calc.get(r.id).valor, 0);
-    const estado = r => `${r.cierre_pago ? '<span class="tag ok">Programado</span>' : '<span class="tag">Por programar</span>'}<br>${r.cierre_cobro ? '<span class="tag ok">Facturado</span>' : '<span class="tag">Por facturar</span>'}`;
+    const estado = r => `${r.cierre_pago ? '<span class="tag ok">Programado</span>' : '<span class="tag">Por programar</span>'}<br>${r.cierre_cobro ? `<span class="tag ok">Facturado</span>${r.datos?.acta ? `<br><small class="hint">Acta ${X.esc(r.datos.acta)}</small>` : ''}` : '<span class="tag">Por facturar</span>'}`;
     const editable = r => !r.cierre_pago && !r.cierre_cobro;
     const lect = r => { const h = r.datos?.horometro; return h && h.ini !== '' && h.ini != null ? `${cant(h.ini)} → ${cant(h.fin)}` : '—'; };
     m.innerHTML = encabezado('Recibos', 'Las horas máquina de cada operador. Cada recibo va con su proyecto y su máquina.', '<button class="primary" id="mqNuevo">+ Recibo</button>') + `
@@ -315,7 +315,7 @@ export function vMaquinas(m, q) {
 }
 
 /* ---------- 5. Programar ---------- */
-const fg = {};
+const fg = {}, exclP = new Set();
 const CONCEPTOS = ['Transporte', 'Auxilio de alimentación', 'Movilización del operador', 'Ajuste de horas', 'Otro'];
 export function vProgramar(m, q) {
   conTipo(m, t => {
@@ -324,7 +324,12 @@ export function vProgramar(m, q) {
     if (!fg.desde) fg.desde = pend.map(r => r.fecha).sort()[0] || mesActual();
     if (!fg.hasta) fg.hasta = X.hoy();
     const regs = pend.filter(r => r.fecha >= fg.desde && r.fecha <= fg.hasta);
-    const vs = volantes(regs, t, tar, ctxCC()).sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id)));
+    for (const x of [...exclP]) if (!regs.some(r => r.id === x)) exclP.delete(x);
+    // Recibos escogidos para este corte (los cargos y ajustes siempre entran). Los demás siguen pendientes.
+    const recDe = tid => regs.filter(r => r.tercero_id === tid && !esCargo(r));
+    const sel = volantes(regs.filter(r => esCargo(r) || !exclP.has(r.id)), t, tar, ctxCC());
+    const vs = [...new Set(regs.map(r => r.tercero_id))].map(tid => sel.find(v => v.tercero_id === tid) || { tercero_id: tid, lineas: [], registros: [], cantidad: 0, total: 0 })
+      .sort((a, b) => nomT(a.tercero_id).localeCompare(nomT(b.tercero_id)));
     const per = { desde: fg.desde, hasta: fg.hasta };
     const suma = (v, fn) => v.lineas.filter(fn).reduce((s, l) => s + l.valor, 0);
     const sinValor = regs.filter(r => !esCargo(r) && !calcular(r, t, tar).tarifa);
@@ -337,8 +342,8 @@ export function vProgramar(m, q) {
     ${sinValor.length ? `<section class="panel callout">${nRec(sinValor.length)} de ${[...new Set(sinValor.map(r => nomT(r.tercero_id)))].map(esc).join(', ')} no tiene${sinValor.length === 1 ? '' : 'n'} valor hora y queda${sinValor.length === 1 ? '' : 'n'} en $0. <a href="#/opoperadores">Ponlo en Operadores</a>.</section>` : ''}
     <div class="kpis"><div class="kpi"><span>Operadores</span><b>${vs.length}</b></div><div class="kpi"><span>Horas</span><b>${cant(vs.reduce((s, v) => s + v.cantidad, 0), 'h')}</b></div><div class="kpi"><span>Por programar</span><b>${money(total)}</b></div></div>
     <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Operador</th><th class="r">Horas</th><th class="r">Valor horas</th><th class="r">Recargos y ajustes</th><th class="r">Otros</th><th class="r">Total</th><th></th></tr></thead><tbody>
-    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${nRec(v.registros.filter(r => !r.cargo && !r.ajuste).length)}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
-      <td class="r nowrap"><button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
+    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${(() => { const k = v.registros.filter(r => !r.cargo && !r.ajuste).length, n0 = recDe(v.tercero_id).length; return k === n0 ? nRec(k) : `<b>${k} de ${n0} recibos</b>`; })()}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
+      <td class="r nowrap">${recDe(v.tercero_id).length ? `<button class="sm ghost" data-esc="${v.tercero_id}">Escoger recibos</button>` : ''}<button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
     ${vs.length ? `<tr class="grp"><td colspan="5">Total</td><td class="r mono"><b>${money(total)}</b></td><td></td></tr>` : ''}</tbody></table></div></section>
     ${otros.length ? `<section class="panel stack"><h3>Otros conceptos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${otros.map(r => { const aj = esAjusteHoras(r); return `<tr><td>${X.fFecha(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}</td><td>${aj ? `<b>Ajuste de horas</b> ${Number(r.datos.horas) > 0 ? '+' : ''}${cant(r.datos.horas, 'h')}` : esc(r.datos?.concepto || '')}${r.nota ? ` <small class="hint">${esc(r.nota)}</small>` : ''}</td><td class="r mono">${money(aj ? calcular(r, t, tar).valor : r.datos?.valor)}</td><td class="r"><button class="sm ghost" data-bo="${r.id}">Quitar</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
     ${hechos.size ? `<section class="panel stack"><h3>Ya programado en estas fechas</h3><div class="tbl-wrap"><table class="tbl"><tbody>${[...hechos.entries()].map(([id, rs]) => { const cp = compra(id); return `<tr><td>${cp ? `<a href="#/compra/${cp.id}">DS ${cp.numero}</a>${cp.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}` : '<span class="tag demo">Documento eliminado</span>'}</td><td>${esc(nomT(rs[0].tercero_id))}</td><td>${nRec(rs.filter(r => !esCargo(r)).length)}</td><td class="r mono">${cp ? money(cp.total ?? cp.base ?? 0) : ''}</td><td class="r">${!cp || cp.estado === 'anulado' ? `<button class="sm" data-lib="${id}">Liberar recibos</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}`;
@@ -348,7 +353,8 @@ export function vProgramar(m, q) {
     if (X.$('pgImp')) X.$('pgImp').onclick = () => imp(vs);
     if (X.$('pgRes')) X.$('pgRes').onclick = () => { X.$('print').innerHTML = hojaResumen(vs, per, t); window.print(); };
     m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => imp(vs.filter(v => v.tercero_id === b.dataset.v)));
-    if (X.$('pgGen')) X.$('pgGen').onclick = () => generarDS(per, t, aGen);
+    if (X.$('pgGen')) X.$('pgGen').onclick = async () => { await generarDS(per, t, aGen); if ((X.S.d.op_registros || []).some(r => r.cierre_pago && aGen.some(v => v.registros.some(x => x.id === r.id)))) { for (const v of aGen) for (const r of recDe(v.tercero_id)) exclP.delete(r.id); X.route(); } };
+    m.querySelectorAll('[data-esc]').forEach(b => b.onclick = () => escogerRecibos(`Recibos a programar · ${nomT(b.dataset.esc)}`, recDe(b.dataset.esc), exclP, t, () => vProgramar(m)));
     X.$('pgOtro').onclick = () => formOtro(t, '');
     m.querySelectorAll('[data-otro]').forEach(b => b.onclick = () => formOtro(t, b.dataset.otro));
     m.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => formAjuste(t, b.dataset.aj));
