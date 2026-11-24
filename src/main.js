@@ -23,7 +23,7 @@ import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
 import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
-import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente } from './maquinaria-ui.js';
+import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente, vInicioOp } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -225,7 +225,7 @@ const MENU = [
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
-  { t: 'Operación', i: 'operacion', op: true, l: [] },
+  { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
   { k: 'config', t: 'Configuración', i: 'config' },
@@ -249,6 +249,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
+  operacion: ['oprecibos', 'opproyectos', 'opoperadores', 'opmaquinas', 'opprogramar', 'opfacturar', 'ophorascliente', 'opporcerrar', 'opcorte'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
@@ -265,8 +266,8 @@ function renderNav(actual) {
   actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
-    // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['ophorascliente', 'Horas no aceptadas'], ['opporcerrar', 'Horas por cerrar']] }; }
+    // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un solo enlace a sus tarjetas.
+    if (x.op && !operacionActiva()) return '';
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -297,7 +298,7 @@ function route() {
     const mod = moduloDeRuta(v);
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
-    if (v === 'operacion') return vOperacion(m);
+    if (v === 'operacion') return operacionActiva() ? vInicioOp(m) : vOperacion(m);
     if (v === 'opcfg' || v === 'opregistros') { location.hash = '#/oprecibos'; return; }
     if (v === 'oprecibos') return operacionActiva() ? vRecibos(m, q) : vOperacion(m);
     if (v === 'opproyectos') return operacionActiva() ? vProyectos(m) : vOperacion(m);
@@ -4945,6 +4946,6 @@ async function vCalendario(m) {
 
 // Operación (módulo opcional): sus pantallas usan las mismas utilidades de esta página.
 const ctxOp = { S, store, $, esc, emp, money: v => money(v), num, cabInforme: (a, b) => cabInforme(a, b), docId: t => docId(t), param: () => param(), fFecha, hoy, sumarDias, opts, dialogo, pie, confirmar, campo, campoSel, check, toast, fail,
-  cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
+  tarjetas: (...a) => pintarTarjetas(...a), cargarEmpresa: () => cargarEmpresa(), route: () => route(), guardarContab: (k, v) => guardarContab(k, v),
   bodegaVenta: pid => { const p = S.d.productos.find(x => x.id === pid); return p && esInventariable(p) && conInv() ? bodegaVentaDe(p, bodegas()) : null; } };
 iniciarOperacion(ctxOp); iniciarMaquinaria(ctxOp); iniciarCotizaciones(ctxOp);
