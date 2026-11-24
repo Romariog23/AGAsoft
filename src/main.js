@@ -225,7 +225,7 @@ const MENU = [
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
-  { t: 'Operación', i: 'operacion', op: true, l: [] },
+  { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
   { k: 'config', t: 'Configuración', i: 'config' },
@@ -249,6 +249,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
+  operacion: ['oprecibos', 'opproyectos', 'opoperadores', 'opmaquinas', 'opprogramar', 'opfacturar', 'ophorascliente', 'opporcerrar', 'opcorte'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
@@ -265,8 +266,8 @@ function renderNav(actual) {
   actual = Object.keys(HUB).find(h => HUB[h].includes(actual)) || actual;
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
-    // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['operacion', 'Inicio'], ['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['ophorascliente', 'Horas no aceptadas'], ['opporcerrar', 'Horas por cerrar']] }; }
+    // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un solo enlace a sus tarjetas.
+    if (x.op && !operacionActiva()) return '';
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);

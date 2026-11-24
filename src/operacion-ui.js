@@ -51,7 +51,7 @@ export function vOperacion(m) {
       <article class="op-card">${icono('maquina')}<h3>Maquinaria amarilla</h3><p class="hint">Alquiler de maquinaria con operador: recibos de horas con horómetro, valor hora de cada operador, recargo dominical y festivo, horómetro acumulado por máquina, cotización de maquinaria como proyecto, documento soporte al operador y factura al cliente.</p><div class="row"><button class="primary" data-modo="maquinaria">Activar Maquinaria amarilla</button></div></article>
       <article class="op-card dash">${icono('camion')}<h3>Transporte y otras actividades</h3><p class="hint">Viajes, servicios por día u otros registros operativos.</p><div class="row"><span class="tag">Próximamente</span></div></article></div>`;
     m.querySelectorAll('[data-modo]').forEach(b => b.onclick = async () => { if (b.disabled) return; b.disabled = true;
-      try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true, modo: b.dataset.modo }); X.toast('Operación activada: Maquinaria amarilla.'); location.hash = '#/oprecibos'; } catch (e) { b.disabled = false; X.fail(e); } });
+      try { await X.guardarContab('operacion', { ...(X.emp()?.contabilidad?.operacion || {}), activo: true, modo: b.dataset.modo }); X.toast('Operación activada: Maquinaria amarilla.'); location.hash = '#/operacion'; } catch (e) { b.disabled = false; X.fail(e); } });
     return;
   }
   const tipos = tiposOp(), desde = mesActual(), hasta = X.hoy();
