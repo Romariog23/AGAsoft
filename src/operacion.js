@@ -194,7 +194,8 @@ export function calcular(r, tipo, tarifas, uso = 'pago') {
   // Horas con el cliente: las que acepta (vacío = todas las trabajadas) más las de stand by. El stand by también se le paga a la persona.
   const { aceptadas, standby } = horasCliente(r, cantidad);
   // Cantidad pagada vacía o en 0 = la de la fórmula (horómetro). Solo un número mayor que cero la reemplaza.
-  const pagadas = r2((cfg.editar_pagadas && n(r.cantidad_pagada) > 0 ? r2(n(r.cantidad_pagada)) : cantidad) + standby);
+  // Al operador no se le pagan más horas de las que se le facturan al cliente: las aceptadas + stand by (Romario, 2026-11-24).
+  const pagadas = r2((cfg.editar_pagadas && n(r.cantidad_pagada) > 0 ? Math.min(r2(n(r.cantidad_pagada)), aceptadas) : aceptadas) + standby);
   const t = tarifaPara(r, tarifas, uso), tarifa = t ? n(t.valor) : 0, modo = t?.modo || 'unidad';
   const vv = { ...v, cantidad, pagadas, tarifa };
   let base = 0;
@@ -244,7 +245,7 @@ export function avisos(registros, tipo, tarifas) {
   }
   for (const r of registros) {
     const c = calcular(r, tipo, tarifas), v = variables(r, cfg);
-    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.standby - c.cantidad) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se liquidan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
+    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.standby - c.cantidad + c.noAceptadas) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se liquidan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
     if (cfg.pendiente?.campo && (cfg.pendiente.valores || []).includes(r.datos?.[cfg.pendiente.campo])) out.push({ clase: 'pendiente', registro_id: r.id, fecha: r.fecha, texto: `Soporte pendiente: ${r.datos[cfg.pendiente.campo]}.` });
     if (!c.tarifa && c.pagadas > 0) out.push({ clase: 'tarifa', registro_id: r.id, fecha: r.fecha, texto: 'No hay tarifa de programación que aplique a este registro.' });
     for (const k of cfg.campos.filter(x => x.tipo === 'lectura')) { const x = r.datos?.[k.k]; if (x && x.ini !== '' && x.fin !== '' && x.ini != null && x.fin != null && v[k.k] < 0) out.push({ clase: 'lectura', registro_id: r.id, fecha: r.fecha, texto: `${k.nombre}: la lectura final es menor que la inicial.` }); }
@@ -630,4 +631,12 @@ export function excesoRecibo(row, registros, tipo, cotizaciones) {
 export function excesosCotizacion(cot, registros, tipo, cotizaciones) {
   return avanceCotizacion(cot, registros, tipo, cotizaciones).filter(x => x.horas && x.proyectado > 0 && x.ejecutado > x.proyectado + 0.001)
     .map(x => ({ i: x.i, descripcion: x.descripcion || '', tope: x.proyectado, ejecutado: x.ejecutado, exceso: r2(x.ejecutado - x.proyectado) }));
+}
+
+// Horas que se le pagan a cada operador en un volante contra las que se le facturan al cliente por esos mismos recibos.
+// Un ajuste de horas positivo no puede dejar el pago por encima de lo facturable.
+export function excesoPago(v, tipo, registros) {
+  const ids = new Set((v.registros || []).filter(x => !x.cargo && !x.ajuste).map(x => x.id));
+  const facturable = r2((registros || []).filter(r => ids.has(r.id)).reduce((s, r) => s + calcular(r, tipo, [], 'cobro').cobro, 0));
+  return v.cantidad > facturable + 0.001 ? { pagadas: v.cantidad, facturable, exceso: r2(v.cantidad - facturable) } : null;
 }

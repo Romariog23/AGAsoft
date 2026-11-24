@@ -236,7 +236,7 @@ test('mantenimiento preventivo por horas', async () => {
   assert.equal(estadoPM({ id: 'x', datos: {} }, regs), null);
 });
 
-import { volantes as volantesX, horasCliente, esAjusteHoras } from '../src/operacion.js';
+import { volantes as volantesX, horasCliente, esAjusteHoras, excesoPago } from '../src/operacion.js';
 test('horas con el cliente (no aceptadas y stand by) y ajuste de horas del operador', () => {
   const t = { id: 'maq', ...nuevoTipo('maquinaria', 'e1') };
   const tar = [{ id: 'va', tipo_id: 'maq', uso: 'pago', criterios: { tercero: 'ana' }, modo: 'unidad', valor: 7000, desde: '2026-11-01' }];
@@ -244,7 +244,7 @@ test('horas con el cliente (no aceptadas y stand by) y ajuste de horas del opera
   // Martes 17 de noviembre de 2026: 10 h trabajadas, el cliente acepta 8 y reconoce 3 de stand by.
   const r = { id: 'a', tipo_id: 'maq', fecha: '2026-11-17', tercero_id: 'ana', cotizacion_id: 'q1', datos: { equipo: 'm1', obra: 'o', horometro: { ini: 100, fin: 110 }, h_cliente: 8, obs_cliente: 'Máquina varada 2 h', standby: 3, obs_standby: 'Esperando frente de obra' } };
   const k = calcular(r, t, tar);
-  assert.deepEqual([k.cantidad, k.cobro, k.noAceptadas, k.standby, k.pagadas, k.valor], [10, 11, 2, 3, 13, 91000]);
+  assert.deepEqual([k.cantidad, k.cobro, k.noAceptadas, k.standby, k.pagadas, k.valor], [10, 11, 2, 3, 11, 77000]);
   assert.deepEqual(erroresRegistro(r, t), []);
   assert.match(erroresRegistro({ ...r, datos: { ...r.datos, obs_cliente: '' } }, t).join(), /observación/);
   assert.match(erroresRegistro({ ...r, datos: { ...r.datos, h_cliente: 12 } }, t).join(), /más horas de las trabajadas/);
@@ -258,7 +258,10 @@ test('horas con el cliente (no aceptadas y stand by) y ajuste de horas del opera
   assert.ok(esAjusteHoras(aj)); assert.deepEqual(erroresRegistro(aj, t), []);
   assert.match(erroresRegistro({ ...aj, nota: '' }, t).join(), /nota/);
   const [v] = volantesX([r, aj], t, tar);
-  assert.equal(v.cantidad, 11); assert.equal(v.total, 77000); assert.equal(v.lineas.length, 1);
+  assert.equal(v.cantidad, 9); assert.equal(v.total, 63000); assert.equal(v.lineas.length, 1);
+  assert.equal(excesoPago(v, t, [r, aj]), null);
+  const aj2 = { ...aj, id: 'y', datos: { concepto: 'Ajuste de horas', horas: 3 } };
+  assert.equal(excesoPago(volantesX([r, aj2], t, tar)[0], t, [r, aj2]).exceso, 3);
   assert.equal(facturables([r, aj], t, { cotizaciones: [cot], tarifas: tar }).grupos[0].lineas[0].cantidad, 11);
 });
 

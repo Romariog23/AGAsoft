@@ -175,6 +175,7 @@ main:focus{outline:none}
 }
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
 .panel.callout{border-color:var(--lime);background:color-mix(in srgb,var(--lime) 9%,var(--surface))}
+.panel.callout.bad{border-color:var(--bad,#c0392b);background:color-mix(in srgb,var(--bad,#c0392b) 8%,var(--surface))}
 .panel.danger h3{color:var(--bad)}
 .vhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
 .back{font-size:.85rem;color:var(--muted);text-decoration:none}
