@@ -158,7 +158,7 @@ Deno.serve(async req => {
       const eid = p.empresa_id;
       const [{ data: dueno }, { data: admin }] = await Promise.all([sb.rpc('es_dueno', { eid }), sb.rpc('es_admin')]);
       if (!dueno && !admin) return json({ error: 'Solo el dueño de la empresa puede crear numeraciones en Factus.' }, 403);
-      const cod: Record<string, string> = { DS: '24', NA: '25', NIE: '26', NIAE: '27' };
+      const cod: Record<string, string> = { NC: '22', ND: '23', DS: '24', NA: '25', NIE: '26', NIAE: '27' };
       if (!cod[p.tipo]) return json({ error: 'Tipo de documento no válido.' }, 400);
       const prefix = String(p.prefijo || '').trim().toUpperCase();
       if (!/^[A-Z0-9]{1,4}$/.test(prefix)) return json({ error: 'El prefijo lleva de 1 a 4 letras o números.' }, 400);
@@ -195,7 +195,15 @@ Deno.serve(async req => {
       }
       // Rango de numeración: el de Factus con el mismo prefijo; en pruebas, el primero activo del tipo.
       const rangos = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, doc.tipo));
-      const rg = rangos.find((r: any) => String(r.prefix || '') === String(doc.prefijo || '')) || (c.ambiente === 'pruebas' ? rangos[0] : null);
+      let rg = rangos.find((r: any) => String(r.prefix || '') === String(doc.prefijo || '')) || (c.ambiente === 'pruebas' ? rangos[0] : null);
+      // Notas crédito y débito no llevan resolución de la DIAN: si la cuenta de Factus no tiene su numeración, se crea sola con el prefijo de AGAsoft.
+      if (!rg && (doc.tipo === 'NC' || doc.tipo === 'ND')) {
+        const prefix = String(doc.prefijo || doc.tipo).trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || doc.tipo;
+        const nr = await factus(t, '/v2/numbering-ranges', { method: 'POST', body: JSON.stringify({ document: doc.tipo === 'NC' ? '22' : '23', prefix, current: String(Math.max(1, Number(doc.numero) || 1)) }) });
+        if (nr.status >= 300) return json({ error: `Tu cuenta de Factus no tiene numeración de ${doc.tipo === 'NC' ? 'notas crédito' : 'notas débito'} y no se pudo crear: ${[nr.data?.message, ...errores(nr.data)].filter(Boolean).join(' · ') || 'HTTP ' + nr.status}` }, 400);
+        rg = nr.data?.data || null;
+        if (!rg?.id) rg = lista((await factus(t, '/v2/numbering-ranges?filter[is_active]=1')).data).filter((r: any) => esTipo(r, doc.tipo)).find((r: any) => String(r.prefix || '').toUpperCase() === prefix) || null;
+      }
       if (rg) body.numbering_range_id = rg.id;
       else if (rangos.length) return json({ error: `En Factus no hay una numeración activa con el prefijo ${doc.prefijo || '(sin prefijo)'}. Pídele a Factus que asocie esa resolución o ajusta el prefijo en Numeraciones.` }, 400);
       else if (doc.tipo === 'FV') return json({ error: `Tu cuenta de Factus no tiene una numeración activa de facturas de venta. Créala en el panel de Factus (o pídesela a Factus), dale "Volver a probar" en Configuración › Factura electrónica y vuelve a enviar.` }, 400);
