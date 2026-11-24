@@ -23,7 +23,7 @@ import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
 import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
 import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
-import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar } from './maquinaria-ui.js';
+import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
 import { calendarioConfigurado, sesionCalendario, entrarCalendario, salirCalendario, cargarCalendario, vencimientos, empresaPorNit, URL_APP_CALENDARIO } from './calendario.js';
 import { resumenMensual, carteraEdades, cierreAnual, auxiliarRango, saldosPorTercero, asiento, asientoComprobante, erroresComprobante, TIPOS_COMP, movimientos, balancePrueba, libroAuxiliar, estadoResultados, situacionFinanciera, rubroDe } from './contab.js';
@@ -266,7 +266,7 @@ function renderNav(actual) {
   const av = avisosNav();
   $('nav').innerHTML = MENU.map(x => {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un enlace por tipo de operación.
-    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['opporcerrar', 'Horas por cerrar']] }; }
+    if (x.op) { if (!operacionActiva()) return ''; x = { ...x, l: [['oprecibos', 'Recibos'], ['opproyectos', 'Proyectos'], ['opoperadores', 'Operadores'], ['opmaquinas', 'Máquinas'], ['opprogramar', 'Programar'], ['opfacturar', 'Facturar'], ['ophorascliente', 'Horas no aceptadas'], ['opporcerrar', 'Horas por cerrar']] }; }
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
@@ -304,6 +304,7 @@ function route() {
     if (v === 'opoperadores') return operacionActiva() ? vOperadores(m) : vOperacion(m);
     if (v === 'opmaquinas') return operacionActiva() ? vMaquinas(m, q) : vOperacion(m);
     if (v === 'opprogramar') return operacionActiva() ? vProgramar(m, q) : vOperacion(m);
+    if (v === 'ophorascliente') return operacionActiva() ? vHorasCliente(m, q) : vOperacion(m);
     if (v === 'opcortes') { location.hash = '#/opprogramar'; return; }
     if (v === 'opcorte') return operacionActiva() ? vOpCorte(m, arg) : vOperacion(m);
     if (v === 'opfacturar') return operacionActiva() ? vOpFacturar(m, arg || tipoMaq()?.id, q) : vOperacion(m);

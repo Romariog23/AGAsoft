@@ -173,14 +173,28 @@ export function tarifaPara(r, tarifas, uso = 'pago') {
 }
 // Cantidad, horas pagadas, tarifa, valor y recargos de un registro (lo que se le paga a la persona).
 export const esCargo = r => r?.clase === 'cargo';
+export const esAjusteHoras = r => r?.clase === 'cargo' && r.datos?.horas != null && r.datos.horas !== '';
+const vacio = x => x === '' || x == null;
+// datos.h_cliente = horas que el cliente acepta (vacío = todas); datos.obs_cliente = por qué no acepta las demás.
+// datos.standby = horas de stand by acordadas con el cliente; datos.obs_standby = observación.
+export function horasCliente(r, trabajadas) {
+  const d = r?.datos || {}, aceptadas = vacio(d.h_cliente) ? trabajadas : r2(Math.min(trabajadas, Math.max(0, n(d.h_cliente))));
+  return { trabajadas, aceptadas, noAceptadas: r2(trabajadas - aceptadas), standby: r2(Math.max(0, n(d.standby))), obs: String(d.obs_cliente || '').trim(), obsStandby: String(d.obs_standby || '').trim() };
+}
 export function calcular(r, tipo, tarifas, uso = 'pago') {
   const dia0 = diaDe(r.fecha);
   // Cargo suelto (transporte, auxilio…): un valor fijo para la persona, sin cantidad ni recargos. Solo cuenta para el pago.
-  if (esCargo(r)) { const val = uso === 'pago' ? r2(n(r.datos?.valor)) : 0; return { cantidad: 0, pagadas: 0, dia: dia0, tarifa: null, modo: 'cargo', base: val, recargos: [], valor: val, fijo: false, cargo: String(r.datos?.concepto || 'Cargo') }; }
+  // Ajuste de horas del operador (desde Programar): horas de más o de menos al valor hora de la persona, sin recargos.
+  // Se suma a la línea de horas del volante y del documento soporte. No va al cliente.
+  if (esAjusteHoras(r)) { const h = uso === 'pago' ? r2(n(r.datos.horas)) : 0, t = h ? tarifaPara(r, tarifas, 'pago') : null, base = t && (t.modo || 'unidad') === 'unidad' ? r2(h * n(t.valor)) : 0;
+    return { cantidad: 0, pagadas: h, cobro: 0, standby: 0, noAceptadas: 0, dia: dia0, tarifa: t, modo: 'unidad', base, recargos: [], valor: base, fijo: false, ajuste: true }; }
+  if (esCargo(r)) { const val = uso === 'pago' ? r2(n(r.datos?.valor)) : 0; return { cantidad: 0, pagadas: 0, cobro: 0, standby: 0, noAceptadas: 0, dia: dia0, tarifa: null, modo: 'cargo', base: val, recargos: [], valor: val, fijo: false, cargo: String(r.datos?.concepto || 'Cargo') }; }
   const cfg = cfgTipo(tipo), v = variables(r, cfg), dia = dia0;
   let cantidad = 0; try { cantidad = r2(evaluar(cfg.formulas.cantidad, v)); } catch (_) { cantidad = 0; }
+  // Horas con el cliente: las que acepta (vacío = todas las trabajadas) más las de stand by. El stand by también se le paga a la persona.
+  const { aceptadas, standby } = horasCliente(r, cantidad);
   // Cantidad pagada vacía o en 0 = la de la fórmula (horómetro). Solo un número mayor que cero la reemplaza.
-  const pagadas = cfg.editar_pagadas && n(r.cantidad_pagada) > 0 ? r2(n(r.cantidad_pagada)) : cantidad;
+  const pagadas = r2((cfg.editar_pagadas && n(r.cantidad_pagada) > 0 ? r2(n(r.cantidad_pagada)) : cantidad) + standby);
   const t = tarifaPara(r, tarifas, uso), tarifa = t ? n(t.valor) : 0, modo = t?.modo || 'unidad';
   const vv = { ...v, cantidad, pagadas, tarifa };
   let base = 0;
@@ -190,7 +204,7 @@ export function calcular(r, tipo, tarifas, uso = 'pago') {
     .map(g => { let x = 0; try { x = r2(evaluar(g.formula, vv)); } catch (_) { x = 0; } return { nombre: g.nombre, valor: x }; }).filter(x => x.valor);
   if (uso === 'pago' && pagadas > 0) for (const a of ajustesPara(r, tarifas)) recargos.push({ nombre: a.nota || 'Ajuste adicional', valor: r2(pagadas * n(a.valor)), producto_id: a.producto_id || null });
   const valor = r2(base + recargos.reduce((s, x) => s + x.valor, 0));
-  return { cantidad, pagadas, dia, tarifa: t, modo, base, recargos, valor, fijo: modo === 'fijo' };
+  return { cantidad, pagadas, cobro: r2(aceptadas + standby), standby, noAceptadas: r2(cantidad - aceptadas), dia, tarifa: t, modo, base, recargos, valor, fijo: modo === 'fijo' };
 }
 
 /* ---------- Resumen por persona (lo que será el volante) ---------- */
@@ -230,7 +244,7 @@ export function avisos(registros, tipo, tarifas) {
   }
   for (const r of registros) {
     const c = calcular(r, tipo, tarifas), v = variables(r, cfg);
-    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.cantidad) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se liquidan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
+    if (cfg.editar_pagadas && Math.abs(c.pagadas - c.standby - c.cantidad) > 0.001 && !String(r.nota || '').trim()) out.push({ clase: 'pagadas', registro_id: r.id, fecha: r.fecha, texto: `Se liquidan ${fx(c.pagadas)} y la fórmula da ${fx(c.cantidad)}: escribe una nota con el motivo.` });
     if (cfg.pendiente?.campo && (cfg.pendiente.valores || []).includes(r.datos?.[cfg.pendiente.campo])) out.push({ clase: 'pendiente', registro_id: r.id, fecha: r.fecha, texto: `Soporte pendiente: ${r.datos[cfg.pendiente.campo]}.` });
     if (!c.tarifa && c.pagadas > 0) out.push({ clase: 'tarifa', registro_id: r.id, fecha: r.fecha, texto: 'No hay tarifa de programación que aplique a este registro.' });
     for (const k of cfg.campos.filter(x => x.tipo === 'lectura')) { const x = r.datos?.[k.k]; if (x && x.ini !== '' && x.fin !== '' && x.ini != null && x.fin != null && v[k.k] < 0) out.push({ clase: 'lectura', registro_id: r.id, fecha: r.fecha, texto: `${k.nombre}: la lectura final es menor que la inicial.` }); }
@@ -276,6 +290,7 @@ export function erroresRegistro(r, tipo) {
   const c = cfgTipo(tipo), e = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(r.fecha || '')) e.push('Escribe la fecha.');
   if (!r.tercero_id) e.push(`Escoge el ${c.persona.toLowerCase()}.`);
+  if (esAjusteHoras(r)) { if (!n(r.datos.horas)) e.push('Escribe las horas del ajuste (con signo menos si son de menos).'); if (!String(r.nota || '').trim()) e.push('Escribe la nota del ajuste: por qué se ajustan las horas.'); return e; }
   if (esCargo(r)) { if (!String(r.datos?.concepto || '').trim()) e.push('Escribe el concepto del cargo.'); if (!(n(r.datos?.valor) > 0)) e.push('El valor del cargo debe ser mayor que cero.'); return e; }
   for (const f of c.campos) {
     const x = r.datos?.[f.k];
@@ -283,6 +298,15 @@ export function erroresRegistro(r, tipo) {
     if (f.obligatorio && f.tipo !== 'sino' && (x == null || String(x).trim() === '')) e.push(`${f.nombre} es obligatorio.`);
   }
   if (c.editar_pagadas && r.cantidad_pagada != null && r.cantidad_pagada !== '' && n(r.cantidad_pagada) < 0) e.push('Las cantidades pagadas no pueden ser negativas.');
+  const d = r.datos || {};
+  if (!vacio(d.h_cliente) || n(d.standby)) {
+    const trab = calcular(r, tipo, []).cantidad, hc = n(d.h_cliente);
+    if (!vacio(d.h_cliente) && hc < 0) e.push('Las horas que acepta el cliente no pueden ser negativas.');
+    else if (!vacio(d.h_cliente) && hc > trab + 0.001) e.push(`El cliente no puede aceptar más horas de las trabajadas (${fx(trab)}). Las de más van como stand by.`);
+    else if (!vacio(d.h_cliente) && hc < trab - 0.001 && !String(d.obs_cliente || '').trim()) e.push('Escribe la observación: por qué el cliente no acepta esas horas.');
+    if (n(d.standby) < 0) e.push('Las horas de stand by no pueden ser negativas.');
+    else if (n(d.standby) > 0 && !String(d.obs_standby || '').trim()) e.push('Escribe la observación del stand by.');
+  }
   return e;
 }
 export function erroresTarifa(t) {
@@ -330,7 +354,7 @@ export function volantes(registros, tipo, tarifas, { elementos = [], centros = [
       const k = 'regla:' + g.nombre, x = v.lineas.get(k) || { clave: k, regla: g.nombre, producto_id: g.producto_id || c.tarifa?.producto_id || null, cantidad: 0, registros: 0, valor: 0, partes: [] };
       x.cantidad = r2(x.cantidad + c.pagadas); x.registros++; x.valor = r2(x.valor + g.valor); x.partes.push({ dist, valor: g.valor }); v.lineas.set(k, x);
     }
-    v.registros.push({ id: r.id, cargo: c.cargo || undefined, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
+    v.registros.push({ id: r.id, cargo: c.cargo || undefined, ajuste: c.ajuste || undefined, standby: c.standby || 0, fecha: r.fecha, dia: c.dia, datos: r.datos, nota: r.nota || '', cantidad: c.cantidad, pagadas: c.pagadas, valor: c.fijo ? 0 : c.valor, fijo: c.fijo, recargo: r2(c.recargos.reduce((s, x) => s + x.valor, 0)) });
     out.set(r.tercero_id, v);
   }
   return [...out.values()].map(v => {
@@ -391,7 +415,7 @@ export const cobroDeLinea = l => l.op === 'fijo' ? 'fijo' : l.op === false ? 'no
 export function facturables(registros, tipo, { cotizaciones = [], tarifas = [], elementos = [], centros = [], productos = [], fijoPendiente = (cot, i) => !cot.lineas?.[i]?.facturado } = {}) {
   const cfg = cfgTipo(tipo), grupos = new Map(), sinPrecio = [];
   for (const r of [...registros].filter(x => x.tipo_id === tipo.id && !x.cierre_cobro && !esCargo(x)).sort((a, b) => a.fecha.localeCompare(b.fecha))) {
-    const k = calcular(r, tipo, tarifas), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
+    const k = calcular(r, tipo, tarifas), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cobro;
     const cot = cotizacionPara(r, cotizaciones), lc = cot && lineaCotPara(r, cot);
     let cliente = null, clave = null, linea = null, motivo = '';
     if (lc) {
@@ -469,7 +493,7 @@ export function avanceCotizacion(cot, registros, tipo, cotizaciones) {
   for (const r of (registros || []).filter(x => x.tipo_id === tipo?.id && !esCargo(x))) {
     if (cotizacionPara(r, cotizaciones || [cot])?.id !== cot.id) continue;
     const lc = lineaCotPara(r, cot); if (!lc) continue;
-    const k = calcular(r, tipo, [], 'cobro'), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cantidad;
+    const k = calcular(r, tipo, [], 'cobro'), q = cfg.salidas.cobrar === 'pagadas' ? k.pagadas : k.cobro;
     out[lc.i].ejecutado = r2(out[lc.i].ejecutado + q); out[lc.i].registros++;
   }
   return out.map(x => ({ ...x, saldo: r2(x.proyectado - x.ejecutado), pct: x.proyectado > 0 ? Math.round(x.ejecutado / x.proyectado * 100) : 0 }));
