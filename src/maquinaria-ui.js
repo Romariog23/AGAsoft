@@ -2,7 +2,7 @@
 // Diseño aprobado por Romario el 2026-11-22: sin constructor genérico. Recibo = operador + proyecto (cotización) + máquina + horómetro;
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
-import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, diaDe, NOMBRE_DIA } from './operacion.js';
+import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, excesoRecibo, diaDe, NOMBRE_DIA } from './operacion.js';
 import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC, escogerRecibos } from './operacion-ui.js';
 
 let X = null;
@@ -109,6 +109,10 @@ export function vRecibos(m, q) {
   });
 }
 
+// Aviso de tope: las horas pasan lo cotizado. Botón para ir a adicionar en el proyecto.
+const msgTope = ex => `Con este recibo, "${ex.descripcion || 'la línea'}" del proyecto N.º ${ex.cotizacion.numero} llega a ${cant(ex.otras + ex.este, 'h')} y lo cotizado es ${cant(ex.tope, 'h')}: faltan ${cant(ex.exceso, 'h')} por cubrir. Adiciona en el proyecto las horas reales o las nuevas acordadas y vuelve a guardar.`;
+const avisoTope = (el, ex) => { if (!el) return; el.hidden = !ex; el.innerHTML = ex ? `${X.esc(msgTope(ex))} <button type="button" class="sm primary" data-ir-cot="${ex.cotizacion.id}">Adicionar en el proyecto</button>` : '';
+  const b = el.querySelector('[data-ir-cot]'); if (b) b.onclick = () => { document.getElementById('dlg')?.close(); location.hash = '#/cotizacion/' + b.dataset.irCot; }; };
 // Recibo ya programado al operador (tiene documento soporte) pero aún sin facturar: solo se cambian las horas con el cliente.
 function formCliente(t, r) {
   const { esc } = X, k = calcular(r, t, []);
@@ -119,6 +123,7 @@ function formCliente(t, r) {
     const v = k => String(fd.get(k) ?? '').trim();
     const datos = { ...r.datos, h_cliente: v('h_cliente') === '' ? '' : numIn(v('h_cliente')), obs_cliente: v('obs_cliente'), standby: v('standby') === '' ? '' : numIn(v('standby')), obs_standby: v('obs_standby') };
     const errs = erroresRegistro({ ...r, datos }, t); if (errs.length) throw new Error(errs.join(' '));
+    const ex = excesoRecibo({ ...r, datos }, registrosDe(t), t, X.S.d.cotizaciones || []); if (ex) throw new Error(msgTope(ex));
     await guardar('op_registros', { id: r.id, datos }); X.toast('Horas con el cliente guardadas.'); X.route();
   });
 }
@@ -144,7 +149,7 @@ function formRecibo(t, r) {
     <div class="grid2"><div><label for="f_eq">Máquina *</label><select id="f_eq" name="equipo" required><option value="">Escoge…</option>${maqs.map(e => `<option value="${e.id}" ${e.id === r.datos?.equipo ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select>${maqs.length ? '' : '<p class="hint">No hay máquinas: agrégalas en <a href="#/opmaquinas">Máquinas</a>.</p>'}</div>
       ${X.campo('recibo', 'N.º de recibo', r.datos?.recibo || '', 'maxlength="40"')}</div>
     <div class="grid2">${X.campo('ini', 'Horómetro inicial (sale solo)', h.ini ?? '', 'class="mono" readonly tabindex="-1" title="Es el final del recibo anterior de esta máquina, o el horómetro inicial de la máquina si es el primero"')}${X.campo('fin', 'Horómetro final *', h.fin ?? '', 'class="mono" inputmode="decimal" required')}</div>
-    <p class="hint err" id="mqIni"></p><p class="op-prev" id="mqPrev"></p>
+    <p class="hint err" id="mqIni"></p><p class="callout" id="mqTope" hidden></p><p class="op-prev" id="mqPrev"></p>
     <details class="op-cli" ${hcAbierto ? 'open' : ''}><summary>Horas con el cliente: no aceptadas y stand by</summary>
       <p class="hint">Si el cliente no acepta todas las horas del recibo, escribe las que sí acepta y por qué. El stand by acordado se factura al precio de la cotización y se le paga al operador.</p>
       <div class="grid2">${X.campo('h_cliente', 'Horas que acepta el cliente (vacío = todas)', r.datos?.h_cliente ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_cliente', 'Observación (por qué no las acepta)', r.datos?.obs_cliente || '', 'maxlength="300"')}</div>
@@ -154,6 +159,7 @@ function formRecibo(t, r) {
     if (!row.cotizacion_id) throw new Error('Escoge el proyecto del recibo.');
     const maq = elem(row.datos.equipo), enc = encadenar(row, registrosDe(t), maq);
     const errs = [...enc.errores, ...erroresRegistro(row, t)]; if (errs.length) throw new Error([...new Set(errs)].join(' '));
+    const ex = excesoRecibo(row, registrosDe(t), t, cots); avisoTope(X.$('mqTope'), ex); if (ex) throw new Error('Las horas pasan lo cotizado: mira el aviso de arriba.');
     await guardar('op_registros', row);
     for (const u of enc.actualizar) await X.store.save('op_registros', u);
     if (enc.actualizar.length) await X.cargarEmpresa();
@@ -162,6 +168,7 @@ function formRecibo(t, r) {
   const prev = () => {
     const el = X.$('mqPrev'); if (!el) return;
     const row = { ...leer(new FormData(f)), id: r.id || 'nuevo' }, k = calcular(row, t, tar), d = diaDe(row.fecha), v = valorHora(t, row.tercero_id, row.fecha);
+    try { avisoTope(X.$('mqTope'), row.cotizacion_id ? excesoRecibo(row, registrosDe(t), t, cots) : null); } catch (_) { /* sin datos completos */ }
     const cli = k.noAceptadas || k.standby ? `<br>Al cliente: <b>${cant(k.cobro, 'h')}</b>${k.noAceptadas ? ` (${cant(k.noAceptadas)} no aceptadas)` : ''}${k.standby ? ` (incluye ${cant(k.standby)} de stand by)` : ''}` : '';
     el.innerHTML = `${NOMBRE_DIA[d] && (d === 'domingo' || d === 'festivo') ? `<span class="tag demo">${NOMBRE_DIA[d]}</span> ` : ''}<b>${cant(k.cantidad, 'h')}</b>${row.tercero_id ? (v ? ` · ${esc(nomT(row.tercero_id))}: ${cant(k.pagadas)} × ${money(v.valor)}${k.recargos.length ? ' + ' + k.recargos.map(x => `${esc(x.nombre.toLowerCase())} ${money(x.valor)}`).join(' + ') : ''} = <b>${money(k.valor)}</b>` : ` · <span class="tag demo">Este operador no tiene valor hora</span>`) : ''}${cli}`;
   };
