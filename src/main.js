@@ -1349,6 +1349,15 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
   </article>`;
 }
 /* ---------- Habilitación ante la DIAN ---------- */
+// Rangos de Factus que son de facturas de venta (código 21), no notas ni documento soporte.
+const esRangoFactura = r => String(r.documento) === '21' || (/factura/i.test(r.documento) && !/nota|soporte|ajuste|n[oó]mina/i.test(r.documento));
+const numFVDe = r => S.d.numeraciones.find(n => n.tipo === 'FV' && n.electronica && (n.prefijo || '').toUpperCase() === String(r.prefijo || '').toUpperCase());
+// Abre la numeración de facturas electrónicas con los datos del rango de Factus (nueva, o la del mismo prefijo).
+function traerRango(r) {
+  const ya = numFVDe(r), sig = Math.max(num(r.actual) || num(r.desde) || 1, ya?.siguiente || 0);
+  formNumeracion({ ...(ya || {}), tipo: 'FV', electronica: true, prefijo: String(r.prefijo || '').toUpperCase(), resolucion: String(r.resolucion || ''),
+    desde: num(r.desde) || 1, hasta: num(r.hasta) || '', siguiente: sig, vigencia_hasta: r.vence ? String(r.vence).slice(0, 10) : (ya?.vigencia_hasta || null), activa: true });
+}
 const HAB_ESTADO = { '': ['Sin conectar', ''], pruebas: ['Conectada en pruebas', 'warn'], pendiente: ['Esperando habilitación', 'warn'], error: ['Error de conexión', 'bad'], aprobado: ['Habilitada', 'ok'] };
 function vHabilitacion(m) {
   const e = emp(), h = e.contabilidad?.fe_hab?.proveedor === 'factus' ? e.contabilidad.fe_hab : {}, hab = feHabilitada(), est = hab ? 'aprobado' : (h.estado || '');
@@ -1371,8 +1380,9 @@ function vHabilitacion(m) {
   <section class="panel stack"><h3>3. Estado</h3>
     ${h.mensaje ? `<p class="${est === 'error' ? 'err' : est === 'aprobado' ? 'ok-txt' : ''}">${esc(h.mensaje)}</p>` : '<p class="muted">Todavía no has conectado la cuenta.</p>'}
     ${h.empresa_factus?.nombre || h.empresa_factus?.nit ? `<dl class="kv"><dt>Empresa en Factus</dt><dd>${esc(h.empresa_factus.nombre || '')}${h.empresa_factus.nit ? ` · NIT <span class="mono">${esc(h.empresa_factus.nit)}</span>` : ''}</dd><dt>Ambiente</dt><dd>${h.ambiente === 'produccion' ? 'Producción' : 'Pruebas'}</dd></dl>` : ''}
-    ${rangos.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Numeración en Factus</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Va en</th><th>Vence</th></tr></thead><tbody>
-      ${rangos.map(r => `<tr><td>${esc(r.documento)}</td><td class="mono">${esc(r.prefijo)}</td><td class="mono">${esc(r.resolucion)}</td><td class="r mono">${r.desde ?? ''}–${r.hasta ?? ''}</td><td class="r mono">${r.actual ?? ''}</td><td>${r.vence ? fFecha(String(r.vence).slice(0, 10)) : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${rangos.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Numeración en Factus</th><th>Prefijo</th><th>Resolución</th><th class="r">Rango</th><th class="r">Va en</th><th>Vence</th><th></th></tr></thead><tbody>
+      ${rangos.map((r, i) => `<tr><td>${esc(r.documento)}</td><td class="mono">${esc(r.prefijo)}</td><td class="mono">${esc(r.resolucion)}</td><td class="r mono">${r.desde ?? ''}–${r.hasta ?? ''}</td><td class="r mono">${r.actual ?? ''}</td><td>${r.vence ? fFecha(String(r.vence).slice(0, 10)) : ''}</td><td>${esRangoFactura(r) ? `<button class="sm" data-traer="${i}">${numFVDe(r) ? 'Actualizar en AGAsoft' : 'Traer a AGAsoft'}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+    <p class="hint">"Traer a AGAsoft" copia la numeración de facturas de Factus (prefijo, resolución, rango y siguiente número) a tus numeraciones; revisas y guardas.</p>` : ''}
     ${!prefijoOk && h.ambiente === 'produccion' ? `<p class="err">Tu numeración de facturas en AGAsoft usa el prefijo <b>${esc(fv.prefijo)}</b>, pero en Factus no hay uno igual. Revisa el prefijo en <a href="#/numeraciones">Numeraciones</a> o pídele a Factus que asocie esa resolución.</p>` : ''}
     <p class="hint">Cuando pruebes una cuenta de <b>producción</b> con una numeración de facturas activa, la empresa queda <b>habilitada sola</b>: la numeración electrónica pasa a Activa y aparece el botón "Enviar a la DIAN" en cada factura.</p></section>`;
   $('hAmb').value = h.ambiente === 'produccion' ? 'produccion' : 'pruebas';
@@ -1381,6 +1391,7 @@ function vHabilitacion(m) {
     try { const r = await store.fe(a, { empresa_id: S.eid, ...datos }); await recargar(); if (r.habilitada) toast('¡Listo! Tu empresa ya factura electrónicamente.'); else if (r.hab?.estado === 'error') toast(r.hab.mensaje, true); vHabilitacion(m); }
     catch (err) { fail(err); b.disabled = false; b.textContent = t; }
   };
+  m.querySelectorAll('[data-traer]').forEach(bt => bt.onclick = () => traerRango(rangos[+bt.dataset.traer]));
   $('hGuardar').onclick = () => accion('hGuardar', 'cuenta', { ambiente: $('hAmb').value, usuario: $('hUs').value.trim(), clave: $('hPw').value });
   if ($('hProbar')) $('hProbar').onclick = () => accion('hProbar', 'probar');
 }
