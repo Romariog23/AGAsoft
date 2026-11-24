@@ -2,7 +2,7 @@
 // Diseño aprobado por Romario el 2026-11-22: sin constructor genérico. Recibo = operador + proyecto (cotización) + máquina + horómetro;
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
-import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, diaDe, NOMBRE_DIA } from './operacion.js';
+import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, diaDe, NOMBRE_DIA } from './operacion.js';
 import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC } from './operacion-ui.js';
 
 let X = null;
@@ -91,9 +91,9 @@ export function vRecibos(m, q) {
     ${regs.map(r => { const k = calc.get(r.id), cot = cotizacionPara(r, cots); return `<tr class="${diaDe(r.fecha) === 'domingo' || diaDe(r.fecha) === 'festivo' ? 'op-fest' : ''}">
       <td class="nowrap">${X.fFecha(r.fecha)}${diaTag(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}${avDe.has(r.id) ? ` <span class="tag demo" title="${esc(avDe.get(r.id).join(' '))}">Revisar</span>` : ''}${r.nota ? `<br><small class="hint">${esc(r.nota)}</small>` : ''}</td>
       <td>${cot ? `<span class="nowrap"><a href="#/cotizacion/${cot.id}">N.º ${cot.numero}</a> ${esc(obraDe(cot) || nomT(cot.tercero_id))}</span>` : '<span class="tag demo">Sin proyecto</span>'}</td>
-      <td>${esc(elem(r.datos?.equipo)?.nombre || '')}${r.datos?.recibo ? `<br><small class="hint">Recibo ${esc(r.datos.recibo)}</small>` : ''}</td><td class="mono nowrap">${lect(r)}</td><td class="r mono">${cant(k.cantidad)}</td>
+      <td>${esc(elem(r.datos?.equipo)?.nombre || '')}${r.datos?.recibo ? `<br><small class="hint">Recibo ${esc(r.datos.recibo)}</small>` : ''}</td><td class="mono nowrap">${lect(r)}</td><td class="r mono">${cant(k.cantidad)}${k.noAceptadas || k.standby ? `<br><small class="hint" title="${esc([r.datos?.obs_cliente, r.datos?.obs_standby].filter(Boolean).join(' · '))}">Cliente ${cant(k.cobro)}${k.standby ? ` · ${cant(k.standby)} stand by` : ''}</small>` : ''}</td>
       <td class="r mono">${money(k.valor)}${k.recargos.length ? `<br><small class="hint">con recargo</small>` : ''}</td><td class="nowrap">${estado(r)}</td>
-      <td class="r nowrap">${editable(r) ? `<button class="sm" data-er="${r.id}">Editar</button><button class="sm ghost" data-cr="${r.id}" title="Siguiente recibo de la misma máquina">Copiar</button><button class="sm ghost" data-br="${r.id}">Borrar</button>` : ''}</td></tr>`; }).join('') || `<tr><td colspan="9" class="muted">${fr.e === 'abiertos' ? 'No hay recibos abiertos en estas fechas.' : 'No hay recibos en estas fechas.'}</td></tr>`}</tbody></table></div></section>`;
+      <td class="r nowrap">${editable(r) ? `<button class="sm" data-er="${r.id}">Editar</button><button class="sm ghost" data-cr="${r.id}" title="Siguiente recibo de la misma máquina">Copiar</button><button class="sm ghost" data-br="${r.id}">Borrar</button>` : !r.cierre_cobro ? `<button class="sm ghost" data-hc="${r.id}" title="Horas que acepta el cliente y stand by">Horas cliente</button>` : ''}</td></tr>`; }).join('') || `<tr><td colspan="9" class="muted">${fr.e === 'abiertos' ? 'No hay recibos abiertos en estas fechas.' : 'No hay recibos en estas fechas.'}</td></tr>`}</tbody></table></div></section>`;
     const filtrar = () => { Object.assign(fr, { e: X.$('rcE').value, desde: X.$('rcD').value || fr.desde, hasta: X.$('rcH').value || fr.hasta, p: X.$('rcP').value, cot: X.$('rcC').value, maq: X.$('rcM').value }); history.replaceState(null, '', '#/oprecibos'); vRecibos(m); };
     ['rcD', 'rcH', 'rcP', 'rcC', 'rcM'].forEach(k => { X.$(k).onchange = filtrar; });
     X.$('rcE').onchange = () => { fr.e = X.$('rcE').value; fr.desde = ''; history.replaceState(null, '', '#/oprecibos'); vRecibos(m); };
@@ -101,20 +101,36 @@ export function vRecibos(m, q) {
     m.querySelectorAll('[data-er]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.er); if (r) formRecibo(t, r); });
     m.querySelectorAll('[data-cr]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.cr);
       formRecibo(t, { fecha: X.sumarDias(r.fecha, 1), tercero_id: r.tercero_id, cotizacion_id: r.cotizacion_id, datos: { equipo: r.datos?.equipo, horometro: { ini: r.datos?.horometro?.fin ?? '', fin: '' } } }); });
+    m.querySelectorAll('[data-hc]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.hc); if (r) formCliente(t, r); });
     m.querySelectorAll('[data-br]').forEach(b => b.onclick = async () => { if (!await X.confirmar('Borrar recibo', 'El recibo se borra. No afecta la contabilidad.', 'Borrar')) return; try { await borrar('op_registros', b.dataset.br); X.toast('Recibo borrado.'); X.route(); } catch (e) { X.fail(e); } });
   });
 }
 
+// Recibo ya programado al operador (tiene documento soporte) pero aún sin facturar: solo se cambian las horas con el cliente.
+function formCliente(t, r) {
+  const { esc } = X, k = calcular(r, t, []);
+  X.dialogo(`<h2>Horas con el cliente</h2><p class="hint">Recibo ${esc(r.datos?.recibo || '')} del ${X.fFecha(r.fecha)} · ${esc(nomT(r.tercero_id))} · ${cant(k.cantidad, 'h')} trabajadas.
+      Este recibo ya está programado: el stand by que agregues aquí se factura al cliente, pero no entra al documento soporte ya hecho. Si hay que pagárselo al operador, usa <b>Ajustar horas</b> en Programar.</p>
+    <div class="grid2">${X.campo('h_cliente', 'Horas que acepta el cliente (vacío = todas)', r.datos?.h_cliente ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_cliente', 'Observación (por qué no las acepta)', r.datos?.obs_cliente || '', 'maxlength="300"')}</div>
+    <div class="grid2">${X.campo('standby', 'Horas de stand by', r.datos?.standby ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_standby', 'Observación del stand by', r.datos?.obs_standby || '', 'maxlength="300"')}</div>${X.pie('Guardar')}`, async fd => {
+    const v = k => String(fd.get(k) ?? '').trim();
+    const datos = { ...r.datos, h_cliente: v('h_cliente') === '' ? '' : numIn(v('h_cliente')), obs_cliente: v('obs_cliente'), standby: v('standby') === '' ? '' : numIn(v('standby')), obs_standby: v('obs_standby') };
+    const errs = erroresRegistro({ ...r, datos }, t); if (errs.length) throw new Error(errs.join(' '));
+    await guardar('op_registros', { id: r.id, datos }); X.toast('Horas con el cliente guardadas.'); X.route();
+  });
+}
 function formRecibo(t, r) {
   const { esc, money } = X, cots = X.S.d.cotizaciones || [], tar = tarifasDe(t);
   const proys = proyectosDe(t).filter(c => cotizacionVigente(c) || c.id === r.cotizacion_id), maqs = maquinasDe(t).concat(r.datos?.equipo && !maquinasDe(t).some(e => e.id === r.datos.equipo) && elem(r.datos.equipo) ? [elem(r.datos.equipo)] : []);
-  const h = r.datos?.horometro || {};
+  const h = r.datos?.horometro || {}, hcAbierto = (r.datos?.h_cliente ?? '') !== '' || Number(r.datos?.standby) > 0;
   const conValor = new Set(valoresDe(t).map(x => x.criterios.tercero));
   const ops = personas().sort((a, b) => (conValor.has(b.id) ? 1 : 0) - (conValor.has(a.id) ? 1 : 0) || a.nombre.localeCompare(b.nombre));
   const leer = fd => {
     const cot = proys.find(c => c.id === fd.get('cotizacion_id'));
     const ini = String(fd.get('ini') ?? '').trim(), fin = String(fd.get('fin') ?? '').trim();
-    const datos = { ...(r.datos || {}), ...(cot?.criterios || {}), equipo: fd.get('equipo') || '', recibo: String(fd.get('recibo') || '').trim(), horometro: { ini: ini === '' ? '' : numIn(ini), fin: fin === '' ? '' : numIn(fin) } };
+    const datos = { ...(r.datos || {}), ...(cot?.criterios || {}), equipo: fd.get('equipo') || '', recibo: String(fd.get('recibo') || '').trim(), horometro: { ini: ini === '' ? '' : numIn(ini), fin: fin === '' ? '' : numIn(fin) },
+      h_cliente: String(fd.get('h_cliente') ?? '').trim() === '' ? '' : numIn(fd.get('h_cliente')), obs_cliente: String(fd.get('obs_cliente') || '').trim(),
+      standby: String(fd.get('standby') ?? '').trim() === '' ? '' : numIn(fd.get('standby')), obs_standby: String(fd.get('obs_standby') || '').trim() };
     return { ...r, empresa_id: X.S.eid, tipo_id: t.id, clase: 'registro', fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id') || null, cotizacion_id: fd.get('cotizacion_id') || null, datos, cantidad_pagada: null, nota: String(fd.get('nota') || '').trim() };
   };
   const f = X.dialogo(`<h2>${r.id ? 'Editar recibo' : 'Nuevo recibo'}</h2>
@@ -125,6 +141,10 @@ function formRecibo(t, r) {
       ${X.campo('recibo', 'N.º de recibo', r.datos?.recibo || '', 'maxlength="40"')}</div>
     <div class="grid2">${X.campo('ini', 'Horómetro inicial', h.ini ?? '', 'class="mono" inputmode="decimal" id="f_ini"')}${X.campo('fin', 'Horómetro final *', h.fin ?? '', 'class="mono" inputmode="decimal" required')}</div>
     <p class="op-prev" id="mqPrev"></p>
+    <details class="op-cli" ${hcAbierto ? 'open' : ''}><summary>Horas con el cliente: no aceptadas y stand by</summary>
+      <p class="hint">Si el cliente no acepta todas las horas del recibo, escribe las que sí acepta y por qué. El stand by acordado se factura al precio de la cotización y se le paga al operador.</p>
+      <div class="grid2">${X.campo('h_cliente', 'Horas que acepta el cliente (vacío = todas)', r.datos?.h_cliente ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_cliente', 'Observación (por qué no las acepta)', r.datos?.obs_cliente || '', 'maxlength="300"')}</div>
+      <div class="grid2">${X.campo('standby', 'Horas de stand by', r.datos?.standby ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_standby', 'Observación del stand by', r.datos?.obs_standby || '', 'maxlength="300"')}</div></details>
     ${X.campo('nota', 'Nota (opcional)', r.nota || '', 'maxlength="300"')}${X.pie('Guardar recibo')}`, async fd => {
     const row = leer(fd); delete row.creado_en;
     if (!row.cotizacion_id) throw new Error('Escoge el proyecto del recibo.');
@@ -134,7 +154,8 @@ function formRecibo(t, r) {
   const prev = () => {
     const el = X.$('mqPrev'); if (!el) return;
     const row = { ...leer(new FormData(f)), id: r.id || 'nuevo' }, k = calcular(row, t, tar), d = diaDe(row.fecha), v = valorHora(t, row.tercero_id, row.fecha);
-    el.innerHTML = `${NOMBRE_DIA[d] && (d === 'domingo' || d === 'festivo') ? `<span class="tag demo">${NOMBRE_DIA[d]}</span> ` : ''}<b>${cant(k.cantidad, 'h')}</b>${row.tercero_id ? (v ? ` · ${esc(nomT(row.tercero_id))}: ${cant(k.cantidad)} × ${money(v.valor)}${k.recargos.length ? ' + ' + k.recargos.map(x => `${esc(x.nombre.toLowerCase())} ${money(x.valor)}`).join(' + ') : ''} = <b>${money(k.valor)}</b>` : ` · <span class="tag demo">Este operador no tiene valor hora</span>`) : ''}`;
+    const cli = k.noAceptadas || k.standby ? `<br>Al cliente: <b>${cant(k.cobro, 'h')}</b>${k.noAceptadas ? ` (${cant(k.noAceptadas)} no aceptadas)` : ''}${k.standby ? ` (incluye ${cant(k.standby)} de stand by)` : ''}` : '';
+    el.innerHTML = `${NOMBRE_DIA[d] && (d === 'domingo' || d === 'festivo') ? `<span class="tag demo">${NOMBRE_DIA[d]}</span> ` : ''}<b>${cant(k.cantidad, 'h')}</b>${row.tercero_id ? (v ? ` · ${esc(nomT(row.tercero_id))}: ${cant(k.pagadas)} × ${money(v.valor)}${k.recargos.length ? ' + ' + k.recargos.map(x => `${esc(x.nombre.toLowerCase())} ${money(x.valor)}`).join(' + ') : ''} = <b>${money(k.valor)}</b>` : ` · <span class="tag demo">Este operador no tiene valor hora</span>`) : ''}${cli}`;
   };
   const info = () => {
     const el = X.$('mqInfo'); if (!el) return; const cot = proys.find(c => c.id === X.$('f_cot').value);
@@ -299,10 +320,10 @@ export function vProgramar(m, q) {
     ${sinValor.length ? `<section class="panel callout">${nRec(sinValor.length)} de ${[...new Set(sinValor.map(r => nomT(r.tercero_id)))].map(esc).join(', ')} no tiene${sinValor.length === 1 ? '' : 'n'} valor hora y queda${sinValor.length === 1 ? '' : 'n'} en $0. <a href="#/opoperadores">Ponlo en Operadores</a>.</section>` : ''}
     <div class="kpis"><div class="kpi"><span>Operadores</span><b>${vs.length}</b></div><div class="kpi"><span>Horas</span><b>${cant(vs.reduce((s, v) => s + v.cantidad, 0), 'h')}</b></div><div class="kpi"><span>Por programar</span><b>${money(total)}</b></div></div>
     <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Operador</th><th class="r">Horas</th><th class="r">Valor horas</th><th class="r">Recargos y ajustes</th><th class="r">Otros</th><th class="r">Total</th><th></th></tr></thead><tbody>
-    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${nRec(v.registros.filter(r => !r.cargo).length)}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
-      <td class="r nowrap"><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
+    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${nRec(v.registros.filter(r => !r.cargo && !r.ajuste).length)}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
+      <td class="r nowrap"><button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
     ${vs.length ? `<tr class="grp"><td colspan="5">Total</td><td class="r mono"><b>${money(total)}</b></td><td></td></tr>` : ''}</tbody></table></div></section>
-    ${otros.length ? `<section class="panel stack"><h3>Otros conceptos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${otros.map(r => `<tr><td>${X.fFecha(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}</td><td>${esc(r.datos?.concepto || '')}${r.nota ? ` <small class="hint">${esc(r.nota)}</small>` : ''}</td><td class="r mono">${money(r.datos?.valor)}</td><td class="r"><button class="sm ghost" data-bo="${r.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div></section>` : ''}
+    ${otros.length ? `<section class="panel stack"><h3>Otros conceptos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${otros.map(r => { const aj = esAjusteHoras(r); return `<tr><td>${X.fFecha(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}</td><td>${aj ? `<b>Ajuste de horas</b> ${Number(r.datos.horas) > 0 ? '+' : ''}${cant(r.datos.horas, 'h')}` : esc(r.datos?.concepto || '')}${r.nota ? ` <small class="hint">${esc(r.nota)}</small>` : ''}</td><td class="r mono">${money(aj ? calcular(r, t, tar).valor : r.datos?.valor)}</td><td class="r"><button class="sm ghost" data-bo="${r.id}">Quitar</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
     ${hechos.size ? `<section class="panel stack"><h3>Ya programado en estas fechas</h3><div class="tbl-wrap"><table class="tbl"><tbody>${[...hechos.entries()].map(([id, rs]) => { const cp = compra(id); return `<tr><td>${cp ? `<a href="#/compra/${cp.id}">DS ${cp.numero}</a>${cp.estado === 'anulado' ? ' <span class="tag bad">Anulado</span>' : ''}` : '<span class="tag demo">Documento eliminado</span>'}</td><td>${esc(nomT(rs[0].tercero_id))}</td><td>${nRec(rs.filter(r => !esCargo(r)).length)}</td><td class="r mono">${cp ? money(cp.total ?? cp.base ?? 0) : ''}</td><td class="r">${!cp || cp.estado === 'anulado' ? `<button class="sm" data-lib="${id}">Liberar recibos</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}`;
     const filtrar = () => { fg.desde = X.$('pgD').value || fg.desde; fg.hasta = X.$('pgH').value || fg.hasta; vProgramar(m); };
     X.$('pgD').onchange = X.$('pgH').onchange = filtrar;
@@ -313,9 +334,24 @@ export function vProgramar(m, q) {
     if (X.$('pgGen')) X.$('pgGen').onclick = () => generarDS(per, t, aGen);
     X.$('pgOtro').onclick = () => formOtro(t, '');
     m.querySelectorAll('[data-otro]').forEach(b => b.onclick = () => formOtro(t, b.dataset.otro));
+    m.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => formAjuste(t, b.dataset.aj));
     m.querySelectorAll('[data-bo]').forEach(b => b.onclick = async () => { try { await borrar('op_registros', b.dataset.bo); X.toast('Concepto quitado.'); X.route(); } catch (e) { X.fail(e); } });
     m.querySelectorAll('[data-lib]').forEach(b => b.onclick = async () => { try { for (const r of hechos.get(b.dataset.lib)) await X.store.save('op_registros', { id: r.id, cierre_pago: null }); await X.cargarEmpresa(); X.toast('Recibos liberados: se pueden volver a programar.'); X.route(); } catch (e) { X.fail(faltaSql(e)); } });
   });
+}
+// Diferencia con el operador: horas de más o de menos que salen en su volante y su documento soporte, con nota. El recibo no cambia.
+function formAjuste(t, tid) {
+  const { esc, money } = X, tar = tarifasDe(t);
+  const f = X.dialogo(`<h2>Ajustar horas · ${esc(nomT(tid))}</h2><p class="hint">Para una diferencia con el operador. Las horas se suman (o se restan, con signo menos) a su volante y a su documento soporte, a su valor hora. Los recibos y lo que se le factura al cliente no cambian.</p>
+    <div class="grid2">${X.campo('horas', 'Horas *', '', 'required class="mono" inputmode="decimal" placeholder="Ej.: 3 o -2"')}${X.campo('fecha', 'Fecha', fg.hasta || X.hoy(), 'type="date" required')}</div>
+    ${X.campo('nota', 'Nota * (por qué se ajusta)', '', 'required maxlength="200"')}<p class="op-prev" id="ajPrev"></p>${X.pie('Agregar ajuste')}`, async fd => {
+    const row = { empresa_id: X.S.eid, tipo_id: t.id, clase: 'cargo', fecha: fd.get('fecha'), tercero_id: tid, datos: { concepto: 'Ajuste de horas', horas: numIn(fd.get('horas')) }, nota: String(fd.get('nota') || '').trim() };
+    const errs = erroresRegistro(row, t); if (errs.length) throw new Error(errs.join(' '));
+    await guardar('op_registros', row); X.toast('Ajuste agregado al volante.'); X.route();
+  });
+  const prev = () => { const h = numIn(X.$('f_horas').value || '0'), k = calcular({ clase: 'cargo', tipo_id: t.id, tercero_id: tid, fecha: X.$('f_fecha')?.value || fg.hasta || X.hoy(), datos: { horas: h } }, t, tar);
+    X.$('ajPrev').innerHTML = !h ? '' : k.tarifa ? `${h > 0 ? '+' : ''}${cant(h, 'h')} × ${money(k.tarifa.valor)} = <b>${money(k.valor)}</b>` : '<span class="tag demo">Este operador no tiene valor hora: ponlo en Operadores.</span>'; };
+  f.addEventListener('input', prev);
 }
 function formOtro(t, tid) {
   const { esc } = X, servicios = (X.S.d.productos || []).filter(p => p.activo !== false && p.tipo === 'servicio');
@@ -328,5 +364,37 @@ function formOtro(t, tid) {
     const valor = numIn(fd.get('valor')); if (!(valor > 0)) throw new Error('El valor debe ser mayor que cero.');
     await guardar('op_registros', { empresa_id: X.S.eid, tipo_id: t.id, clase: 'cargo', fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id'), datos: { concepto: String(fd.get('concepto') || '').trim(), valor, producto_id: fd.get('producto_id') || null }, nota: String(fd.get('nota') || '').trim() });
     X.toast('Concepto agregado.'); X.route();
+  });
+}
+
+/* ---------- Horas no aceptadas y stand by (informe para el cliente) ---------- */
+// Por proyecto y fechas: cada recibo con horas que el cliente no aceptó o con stand by, con sus observaciones.
+const fh = {};
+export function vHorasCliente(m, q) {
+  conTipo(m, t => {
+    const { esc } = X, cots = X.S.d.cotizaciones || [], proys = proyectosDe(t);
+    Object.assign(fh, { cot: q?.get('cot') ?? fh.cot ?? '', desde: fh.desde || mesActual(), hasta: fh.hasta || X.hoy() });
+    const filas = recibosDe(t).filter(r => r.fecha >= fh.desde && r.fecha <= fh.hasta && (!fh.cot || cotizacionPara(r, cots)?.id === fh.cot))
+      .map(r => ({ r, cot: cotizacionPara(r, cots), k: calcular(r, t, []) })).filter(x => x.k.noAceptadas || x.k.standby)
+      .sort((a, b) => (a.cot?.numero || 0) - (b.cot?.numero || 0) || a.r.fecha.localeCompare(b.r.fecha));
+    const grupos = new Map(); for (const x of filas) { const k = x.cot?.id || ''; grupos.set(k, [...(grupos.get(k) || []), x]); }
+    const sum = (xs, f) => xs.reduce((s, x) => s + f(x.k), 0);
+    const tabla = xs => `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Recibo</th><th>Máquina</th><th>Operador</th><th class="r">Trabajadas</th><th class="r">No aceptadas</th><th class="r">Stand by</th><th class="r">A facturar</th><th>Observaciones</th></tr></thead><tbody>
+      ${xs.map(({ r, k }) => `<tr><td class="nowrap">${X.fFecha(r.fecha)}</td><td>${esc(r.datos?.recibo || '')}</td><td>${esc(elem(r.datos?.equipo)?.nombre || '')}</td><td>${esc(nomT(r.tercero_id))}</td><td class="r mono">${cant(k.cantidad)}</td><td class="r mono">${k.noAceptadas ? cant(k.noAceptadas) : ''}</td><td class="r mono">${k.standby ? cant(k.standby) : ''}</td><td class="r mono"><b>${cant(k.cobro)}</b></td>
+        <td>${[r.datos?.obs_cliente && k.noAceptadas ? `No aceptadas: ${esc(r.datos.obs_cliente)}` : '', r.datos?.obs_standby && k.standby ? `Stand by: ${esc(r.datos.obs_standby)}` : ''].filter(Boolean).join('<br>')}</td></tr>`).join('')}
+      <tr class="grp"><td colspan="4">Total</td><td class="r mono">${cant(sum(xs, k => k.cantidad))}</td><td class="r mono">${cant(sum(xs, k => k.noAceptadas))}</td><td class="r mono">${cant(sum(xs, k => k.standby))}</td><td class="r mono"><b>${cant(sum(xs, k => k.cobro))}</b></td><td></td></tr></tbody></table></div>`;
+    const titulo = c => c ? `Proyecto N.º ${c.numero}${obraDe(c) ? ' · ' + obraDe(c) : ''} · ${nomT(c.tercero_id)}` : 'Sin proyecto';
+    m.innerHTML = encabezado('Horas no aceptadas y stand by', 'Los recibos con horas que el cliente no aceptó o con stand by, y sus observaciones. Imprímelo o guárdalo en PDF para enviarlo al cliente. Las horas se ajustan en cada recibo (Horas con el cliente).',
+      filas.length ? '<button class="primary" id="hcImp">Imprimir o PDF</button>' : '') + `
+    <section class="panel row op-fil"><div><label for="hcC">Proyecto</label><select id="hcC"><option value="">Todos</option>${X.opts(proys.map(c => [c.id, `N.º ${c.numero} · ${obraDe(c) || nomT(c.tercero_id)}`]), fh.cot)}</select></div>
+      <div><label for="hcD">Desde</label><input type="date" id="hcD" value="${fh.desde}"></div><div><label for="hcH">Hasta</label><input type="date" id="hcH" value="${fh.hasta}"></div></section>
+    ${filas.length ? [...grupos.entries()].map(([id, xs]) => `<section class="panel stack"><h3>${esc(titulo(cots.find(c => c.id === id)))}</h3>${tabla(xs)}</section>`).join('')
+      : '<section class="panel"><p class="muted">No hay recibos con horas no aceptadas ni stand by en estas fechas.</p></section>'}`;
+    const filtrar = () => { Object.assign(fh, { cot: X.$('hcC').value, desde: X.$('hcD').value || fh.desde, hasta: X.$('hcH').value || fh.hasta }); history.replaceState(null, '', '#/ophorascliente'); vHorasCliente(m); };
+    ['hcC', 'hcD', 'hcH'].forEach(k => { X.$(k).onchange = filtrar; });
+    if (X.$('hcImp')) X.$('hcImp').onclick = () => {
+      X.$('print').innerHTML = [...grupos.entries()].map(([id, xs]) => `<article class="desprendible">${X.cabInforme('Horas no aceptadas y stand by', `${esc(titulo(cots.find(c => c.id === id)))}<br><small>Del ${X.fFecha(fh.desde)} al ${X.fFecha(fh.hasta)}</small>`)}${tabla(xs)}</article>`).join('');
+      const tt = document.title; document.title = `Horas no aceptadas ${fh.desde} a ${fh.hasta} - ${X.emp().nombre}`; window.print(); document.title = tt;
+    };
   });
 }

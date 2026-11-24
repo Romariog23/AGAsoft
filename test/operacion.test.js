@@ -235,3 +235,29 @@ test('mantenimiento preventivo por horas', async () => {
   const e = estadoPM(maq, regs); assert.equal(e.estado, 'vencido'); assert.equal(e.faltan, -10);
   assert.equal(estadoPM({ id: 'x', datos: {} }, regs), null);
 });
+
+import { volantes as volantesX, horasCliente, esAjusteHoras } from '../src/operacion.js';
+test('horas con el cliente (no aceptadas y stand by) y ajuste de horas del operador', () => {
+  const t = { id: 'maq', ...nuevoTipo('maquinaria', 'e1') };
+  const tar = [{ id: 'va', tipo_id: 'maq', uso: 'pago', criterios: { tercero: 'ana' }, modo: 'unidad', valor: 7000, desde: '2026-11-01' }];
+  const cot = { id: 'q1', estado: 'aceptada', op_tipo_id: 'maq', tercero_id: 'cli', criterios: {}, lineas: [{ descripcion: 'Hora máquina', precio: 150000 }] };
+  // Martes 17 de noviembre de 2026: 10 h trabajadas, el cliente acepta 8 y reconoce 3 de stand by.
+  const r = { id: 'a', tipo_id: 'maq', fecha: '2026-11-17', tercero_id: 'ana', cotizacion_id: 'q1', datos: { equipo: 'm1', obra: 'o', horometro: { ini: 100, fin: 110 }, h_cliente: 8, obs_cliente: 'Máquina varada 2 h', standby: 3, obs_standby: 'Esperando frente de obra' } };
+  const k = calcular(r, t, tar);
+  assert.deepEqual([k.cantidad, k.cobro, k.noAceptadas, k.standby, k.pagadas, k.valor], [10, 11, 2, 3, 13, 91000]);
+  assert.deepEqual(erroresRegistro(r, t), []);
+  assert.match(erroresRegistro({ ...r, datos: { ...r.datos, obs_cliente: '' } }, t).join(), /observación/);
+  assert.match(erroresRegistro({ ...r, datos: { ...r.datos, h_cliente: 12 } }, t).join(), /más horas de las trabajadas/);
+  assert.match(erroresRegistro({ ...r, datos: { ...r.datos, obs_standby: '' } }, t).join(), /stand by/);
+  assert.equal(horasCliente({ datos: {} }, 10).aceptadas, 10);
+  // Facturar toma aceptadas + stand by al precio de la cotización.
+  const { grupos } = facturables([r], t, { cotizaciones: [cot], tarifas: tar });
+  assert.equal(grupos[0].lineas[0].cantidad, 11); assert.equal(grupos[0].total, 1650000);
+  // Ajuste de horas en Programar: −2 h al valor hora, sumado a la línea de horas del volante. No va al cliente.
+  const aj = { id: 'x', tipo_id: 'maq', clase: 'cargo', fecha: '2026-11-20', tercero_id: 'ana', datos: { concepto: 'Ajuste de horas', horas: -2 }, nota: 'Diferencia con el operador' };
+  assert.ok(esAjusteHoras(aj)); assert.deepEqual(erroresRegistro(aj, t), []);
+  assert.match(erroresRegistro({ ...aj, nota: '' }, t).join(), /nota/);
+  const [v] = volantesX([r, aj], t, tar);
+  assert.equal(v.cantidad, 11); assert.equal(v.total, 77000); assert.equal(v.lineas.length, 1);
+  assert.equal(facturables([r, aj], t, { cotizaciones: [cot], tarifas: tar }).grupos[0].lineas[0].cantidad, 11);
+});
