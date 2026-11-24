@@ -2,7 +2,7 @@
 // Diseño aprobado por Romario el 2026-11-22: sin constructor genérico. Recibo = operador + proyecto (cotización) + máquina + horómetro;
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
-import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, excesoRecibo, diaDe, NOMBRE_DIA } from './operacion.js';
+import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, excesoRecibo, excesoPago, diaDe, NOMBRE_DIA } from './operacion.js';
 import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC, escogerRecibos } from './operacion-ui.js';
 
 let X = null;
@@ -117,13 +117,16 @@ const avisoTope = (el, ex) => { if (!el) return; el.hidden = !ex; el.innerHTML =
 function formCliente(t, r) {
   const { esc } = X, k = calcular(r, t, []);
   X.dialogo(`<h2>Horas con el cliente</h2><p class="hint">Recibo ${esc(r.datos?.recibo || '')} del ${X.fFecha(r.fecha)} · ${esc(nomT(r.tercero_id))} · ${cant(k.cantidad, 'h')} trabajadas.
-      Este recibo ya está programado: el stand by que agregues aquí se factura al cliente, pero no entra al documento soporte ya hecho. Si hay que pagárselo al operador, usa <b>Ajustar horas</b> en Programar.</p>
+      Este recibo ya está programado: el stand by que agregues aquí se factura al cliente, pero no entra al documento soporte ya hecho. Si hay que pagárselo al operador, anula el documento soporte, libera los recibos y vuelve a programar.</p>
     <div class="grid2">${X.campo('h_cliente', 'Horas que acepta el cliente (vacío = todas)', r.datos?.h_cliente ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_cliente', 'Observación (por qué no las acepta)', r.datos?.obs_cliente || '', 'maxlength="300"')}</div>
     <div class="grid2">${X.campo('standby', 'Horas de stand by', r.datos?.standby ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_standby', 'Observación del stand by', r.datos?.obs_standby || '', 'maxlength="300"')}</div>${X.pie('Guardar')}`, async fd => {
     const v = k => String(fd.get(k) ?? '').trim();
     const datos = { ...r.datos, h_cliente: v('h_cliente') === '' ? '' : numIn(v('h_cliente')), obs_cliente: v('obs_cliente'), standby: v('standby') === '' ? '' : numIn(v('standby')), obs_standby: v('obs_standby') };
     const errs = erroresRegistro({ ...r, datos }, t); if (errs.length) throw new Error(errs.join(' '));
     const ex = excesoRecibo({ ...r, datos }, registrosDe(t), t, X.S.d.cotizaciones || []); if (ex) throw new Error(msgTope(ex));
+    // Ya se le pagaron horas al operador por este recibo: al cliente no se le pueden facturar menos que eso.
+    const nuevo = calcular({ ...r, datos }, t, []);
+    if (r.cierre_pago && nuevo.cobro + 0.001 < k.pagadas) throw new Error(`Al operador ya se le programaron ${cant(k.pagadas, 'h')} por este recibo; al cliente no se le pueden facturar menos (quedarían ${cant(nuevo.cobro, 'h')}). Libera o anula primero el documento soporte, o agrega stand by.`);
     await guardar('op_registros', { id: r.id, datos }); X.toast('Horas con el cliente guardadas.'); X.route();
   });
 }
@@ -342,14 +345,17 @@ export function vProgramar(m, q) {
     const sinValor = regs.filter(r => !esCargo(r) && !calcular(r, t, tar).tarifa);
     const hechos = new Map(); for (const r of todos.filter(r => r.cierre_pago && r.fecha >= fg.desde && r.fecha <= fg.hasta)) hechos.set(r.cierre_pago, [...(hechos.get(r.cierre_pago) || []), r]);
     const otros = regs.filter(esCargo);
-    const total = vs.reduce((s, v) => s + v.total, 0), aGen = vs.filter(v => v.total > 0);
+    // Al operador no se le pagan más horas de las que se le facturan al cliente (aceptadas + stand by de sus recibos).
+    const exc = new Map(vs.map(v => [v.tercero_id, excesoPago(v, t, regs)]).filter(([, e]) => e));
+    const total = vs.reduce((s, v) => s + v.total, 0), aGen = vs.filter(v => v.total > 0 && !exc.has(v.tercero_id));
     m.innerHTML = encabezado('Programar', 'Escoge las fechas, revisa lo de cada operador, imprime los volantes y genera los documentos soporte. El pago se hace después con el egreso.',
       `<button id="pgOtro">+ Otro concepto</button>${vs.length ? '<button id="pgImp">Imprimir volantes</button><button id="pgRes">Imprimir resumen</button>' : ''}${aGen.length ? `<button class="primary" id="pgGen">Generar ${aGen.length} documento${aGen.length === 1 ? '' : 's'} soporte</button>` : ''}`) + `
     <section class="panel row op-fil"><div><label for="pgD">Desde</label><input type="date" id="pgD" value="${fg.desde}"></div><div><label for="pgH">Hasta</label><input type="date" id="pgH" value="${fg.hasta}"></div></section>
     ${sinValor.length ? `<section class="panel callout">${nRec(sinValor.length)} de ${[...new Set(sinValor.map(r => nomT(r.tercero_id)))].map(esc).join(', ')} no tiene${sinValor.length === 1 ? '' : 'n'} valor hora y queda${sinValor.length === 1 ? '' : 'n'} en $0. <a href="#/opoperadores">Ponlo en Operadores</a>.</section>` : ''}
+    ${exc.size ? `<section class="panel callout bad">No se le puede pagar al operador más horas de las que se le facturan al cliente: ${[...exc.entries()].map(([tid, e]) => `<b>${esc(nomT(tid))}</b> tiene ${cant(e.pagadas, 'h')} a pagar y sus recibos facturan ${cant(e.facturable, 'h')} (sobran ${cant(e.exceso, 'h')})`).join('; ')}. Corrige el ajuste de horas o las horas del cliente; su documento soporte no se genera mientras tanto.</section>` : ''}
     <div class="kpis"><div class="kpi"><span>Operadores</span><b>${vs.length}</b></div><div class="kpi"><span>Horas</span><b>${cant(vs.reduce((s, v) => s + v.cantidad, 0), 'h')}</b></div><div class="kpi"><span>Por programar</span><b>${money(total)}</b></div></div>
     <section class="panel stack"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Operador</th><th class="r">Horas</th><th class="r">Valor horas</th><th class="r">Recargos y ajustes</th><th class="r">Otros</th><th class="r">Total</th><th></th></tr></thead><tbody>
-    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${(() => { const k = v.registros.filter(r => !r.cargo && !r.ajuste).length, n0 = recDe(v.tercero_id).length; return k === n0 ? nRec(k) : `<b>${k} de ${n0} recibos</b>`; })()}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
+    ${vs.map(v => `<tr><td><b>${esc(nomT(v.tercero_id))}</b><br><small class="hint">${(() => { const k = v.registros.filter(r => !r.cargo && !r.ajuste).length, n0 = recDe(v.tercero_id).length; return k === n0 ? nRec(k) : `<b>${k} de ${n0} recibos</b>`; })()}${v.registros.some(r => r.ajuste) ? ` · ajuste ${cant(v.registros.filter(r => r.ajuste).reduce((s, r) => s + r.pagadas, 0), 'h')}` : ''}${exc.has(v.tercero_id) ? ` <span class="tag bad">Pasa lo facturable en ${cant(exc.get(v.tercero_id).exceso, 'h')}</span>` : ''}</small></td><td class="r mono">${cant(v.cantidad)}</td><td class="r mono">${money(suma(v, l => !l.regla && !l.cargo))}</td><td class="r mono">${money(suma(v, l => l.regla))}</td><td class="r mono">${money(suma(v, l => l.cargo))}</td><td class="r mono"><b>${money(v.total)}</b></td>
       <td class="r nowrap">${recDe(v.tercero_id).length ? `<button class="sm" data-esc="${v.tercero_id}">Escoger recibos</button>` : ''}<button class="sm ghost" data-aj="${v.tercero_id}" title="Agregar o quitar horas por una diferencia con el operador">Ajustar horas</button><button class="sm ghost" data-otro="${v.tercero_id}">+ Otro</button><button class="sm ghost" data-v="${v.tercero_id}">Volante</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No hay nada por programar en estas fechas.</td></tr>'}
     ${vs.length ? `<tr class="grp"><td colspan="5">Total</td><td class="r mono"><b>${money(total)}</b></td><td></td></tr>` : ''}</tbody></table></div></section>
     ${otros.length ? `<section class="panel stack"><h3>Otros conceptos</h3><div class="tbl-wrap"><table class="tbl"><tbody>${otros.map(r => { const aj = esAjusteHoras(r); return `<tr><td>${X.fFecha(r.fecha)}</td><td>${esc(nomT(r.tercero_id))}</td><td>${aj ? `<b>Ajuste de horas</b> ${Number(r.datos.horas) > 0 ? '+' : ''}${cant(r.datos.horas, 'h')}` : esc(r.datos?.concepto || '')}${r.nota ? ` <small class="hint">${esc(r.nota)}</small>` : ''}</td><td class="r mono">${money(aj ? calcular(r, t, tar).valor : r.datos?.valor)}</td><td class="r"><button class="sm ghost" data-bo="${r.id}">Quitar</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
@@ -364,19 +370,20 @@ export function vProgramar(m, q) {
     m.querySelectorAll('[data-esc]').forEach(b => b.onclick = () => escogerRecibos(`Recibos a programar · ${nomT(b.dataset.esc)}`, recDe(b.dataset.esc), exclP, t, () => vProgramar(m)));
     X.$('pgOtro').onclick = () => formOtro(t, '');
     m.querySelectorAll('[data-otro]').forEach(b => b.onclick = () => formOtro(t, b.dataset.otro));
-    m.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => formAjuste(t, b.dataset.aj));
+    m.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => formAjuste(t, b.dataset.aj, row => excesoPago(volantes([...regs.filter(r => esCargo(r) || !exclP.has(r.id)), row], t, tar, ctxCC()).find(v => v.tercero_id === b.dataset.aj) || { registros: [], cantidad: 0 }, t, regs)));
     m.querySelectorAll('[data-bo]').forEach(b => b.onclick = async () => { try { await borrar('op_registros', b.dataset.bo); X.toast('Concepto quitado.'); X.route(); } catch (e) { X.fail(e); } });
     m.querySelectorAll('[data-lib]').forEach(b => b.onclick = async () => { try { for (const r of hechos.get(b.dataset.lib)) await X.store.save('op_registros', { id: r.id, cierre_pago: null }); await X.cargarEmpresa(); X.toast('Recibos liberados: se pueden volver a programar.'); X.route(); } catch (e) { X.fail(faltaSql(e)); } });
   });
 }
 // Diferencia con el operador: horas de más o de menos que salen en su volante y su documento soporte, con nota. El recibo no cambia.
-function formAjuste(t, tid) {
+function formAjuste(t, tid, exceso) {
   const { esc, money } = X, tar = tarifasDe(t);
-  const f = X.dialogo(`<h2>Ajustar horas · ${esc(nomT(tid))}</h2><p class="hint">Para una diferencia con el operador. Las horas se suman (o se restan, con signo menos) a su volante y a su documento soporte, a su valor hora. Los recibos y lo que se le factura al cliente no cambian.</p>
+  const f = X.dialogo(`<h2>Ajustar horas · ${esc(nomT(tid))}</h2><p class="hint">Para una diferencia con el operador. Las horas se suman (o se restan, con signo menos) a su volante y a su documento soporte, a su valor hora. Los recibos y lo que se le factura al cliente no cambian, y al operador no se le pueden pagar más horas de las que se facturan: para sumar, primero agrega stand by al recibo.</p>
     <div class="grid2">${X.campo('horas', 'Horas *', '', 'required class="mono" inputmode="decimal" placeholder="Ej.: 3 o -2"')}${X.campo('fecha', 'Fecha', fg.hasta || X.hoy(), 'type="date" required')}</div>
     ${X.campo('nota', 'Nota * (por qué se ajusta)', '', 'required maxlength="200"')}<p class="op-prev" id="ajPrev"></p>${X.pie('Agregar ajuste')}`, async fd => {
     const row = { empresa_id: X.S.eid, tipo_id: t.id, clase: 'cargo', fecha: fd.get('fecha'), tercero_id: tid, datos: { concepto: 'Ajuste de horas', horas: numIn(fd.get('horas')) }, nota: String(fd.get('nota') || '').trim() };
     const errs = erroresRegistro(row, t); if (errs.length) throw new Error(errs.join(' '));
+    const ex = exceso?.(row); if (ex) throw new Error(`Con este ajuste se le pagarían ${cant(ex.pagadas, 'h')} y los recibos escogidos solo facturan ${cant(ex.facturable, 'h')} al cliente. Si hay que pagarle más, agrega esas horas como stand by en Horas cliente del recibo para que también se facturen.`);
     await guardar('op_registros', row); X.toast('Ajuste agregado al volante.'); X.route();
   });
   const prev = () => { const h = numIn(X.$('f_horas').value || '0'), k = calcular({ clase: 'cargo', tipo_id: t.id, tercero_id: tid, fecha: X.$('f_fecha')?.value || fg.hasta || X.hoy(), datos: { horas: h } }, t, tar);
