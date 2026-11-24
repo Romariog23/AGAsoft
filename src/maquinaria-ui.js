@@ -2,7 +2,7 @@
 // Diseño aprobado por Romario el 2026-11-22: sin constructor genérico. Recibo = operador + proyecto (cotización) + máquina + horómetro;
 // horas = final − inicial; valor = horas × valor hora del operador (+ recargo dominical y festivo si el operador lo tiene, + ajuste del proyecto).
 // Por dentro usa las mismas tablas (op_tipos con un solo tipo de maquinaria, op_registros, op_tarifas, op_elementos, cotizaciones).
-import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, diaDe, NOMBRE_DIA } from './operacion.js';
+import { cfgTipo, calcular, avisos, ultimaLectura, erroresRegistro, nuevoTipo, configMaquinaria, volantes, avanceCotizacion, acumuladoMaquinas, estadoPM, horometroActual, pmBase, cotizacionPara, cotizacionVigente, nombreProyecto, ajustesDeCotizaciones, esCargo, esAjusteHoras, horasCliente, encadenar, quitarDeCadena, horometroInicialMaq, diaDe, NOMBRE_DIA } from './operacion.js';
 import { operacionActiva, tiposOp, hojaVolante, hojaResumen, generarDS, ctxCC } from './operacion-ui.js';
 
 let X = null;
@@ -102,7 +102,10 @@ export function vRecibos(m, q) {
     m.querySelectorAll('[data-cr]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.cr);
       formRecibo(t, { fecha: X.sumarDias(r.fecha, 1), tercero_id: r.tercero_id, cotizacion_id: r.cotizacion_id, datos: { equipo: r.datos?.equipo, horometro: { ini: r.datos?.horometro?.fin ?? '', fin: '' } } }); });
     m.querySelectorAll('[data-hc]').forEach(b => b.onclick = () => { const r = todos.find(x => x.id === b.dataset.hc); if (r) formCliente(t, r); });
-    m.querySelectorAll('[data-br]').forEach(b => b.onclick = async () => { if (!await X.confirmar('Borrar recibo', 'El recibo se borra. No afecta la contabilidad.', 'Borrar')) return; try { await borrar('op_registros', b.dataset.br); X.toast('Recibo borrado.'); X.route(); } catch (e) { X.fail(e); } });
+    m.querySelectorAll('[data-br]').forEach(b => b.onclick = async () => { const r = todos.find(x => x.id === b.dataset.br), q = quitarDeCadena(r, registrosDe(t), elem(r.datos?.equipo));
+      if (q.errores.length) return X.toast(q.errores.join(' '), true);
+      if (!await X.confirmar('Borrar recibo', `El recibo se borra. No afecta la contabilidad.${q.actualizar.length ? ` El recibo siguiente de esta máquina pasa a empezar en ${cant(q.actualizar[0].datos.horometro.ini)}.` : ''}`, 'Borrar')) return;
+      try { for (const u of q.actualizar) await X.store.save('op_registros', u); await borrar('op_registros', b.dataset.br); X.toast('Recibo borrado.'); X.route(); } catch (e) { X.fail(e); } });
   });
 }
 
@@ -127,8 +130,9 @@ function formRecibo(t, r) {
   const ops = personas().sort((a, b) => (conValor.has(b.id) ? 1 : 0) - (conValor.has(a.id) ? 1 : 0) || a.nombre.localeCompare(b.nombre));
   const leer = fd => {
     const cot = proys.find(c => c.id === fd.get('cotizacion_id'));
-    const ini = String(fd.get('ini') ?? '').trim(), fin = String(fd.get('fin') ?? '').trim();
-    const datos = { ...(r.datos || {}), ...(cot?.criterios || {}), equipo: fd.get('equipo') || '', recibo: String(fd.get('recibo') || '').trim(), horometro: { ini: ini === '' ? '' : numIn(ini), fin: fin === '' ? '' : numIn(fin) },
+    const fin = String(fd.get('fin') ?? '').trim(), maq = elem(fd.get('equipo')), base = { ...r, fecha: fd.get('fecha'), datos: { ...(r.datos || {}), equipo: fd.get('equipo') || '', horometro: { ini: '', fin: fin === '' ? '' : numIn(fin) } } };
+    const enc = maq ? encadenar(base, registrosDe(t), maq) : { ini: null }, ini = enc.ini == null ? '' : String(enc.ini);
+    const datos = { ...(r.datos || {}), ...(cot?.criterios || {}), equipo: fd.get('equipo') || '', recibo: String(fd.get('recibo') || '').trim(), horometro: { ini: ini === '' ? '' : Number(ini), fin: fin === '' ? '' : numIn(fin) },
       h_cliente: String(fd.get('h_cliente') ?? '').trim() === '' ? '' : numIn(fd.get('h_cliente')), obs_cliente: String(fd.get('obs_cliente') || '').trim(),
       standby: String(fd.get('standby') ?? '').trim() === '' ? '' : numIn(fd.get('standby')), obs_standby: String(fd.get('obs_standby') || '').trim() };
     return { ...r, empresa_id: X.S.eid, tipo_id: t.id, clase: 'registro', fecha: fd.get('fecha'), tercero_id: fd.get('tercero_id') || null, cotizacion_id: fd.get('cotizacion_id') || null, datos, cantidad_pagada: null, nota: String(fd.get('nota') || '').trim() };
@@ -139,8 +143,8 @@ function formRecibo(t, r) {
       : '<p class="callout">No hay proyectos abiertos. Crea la cotización del proyecto en <a href="#/cotizacion/nueva-maq">Proyectos › Nuevo proyecto</a>.</p>'}
     <div class="grid2"><div><label for="f_eq">Máquina *</label><select id="f_eq" name="equipo" required><option value="">Escoge…</option>${maqs.map(e => `<option value="${e.id}" ${e.id === r.datos?.equipo ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}</select>${maqs.length ? '' : '<p class="hint">No hay máquinas: agrégalas en <a href="#/opmaquinas">Máquinas</a>.</p>'}</div>
       ${X.campo('recibo', 'N.º de recibo', r.datos?.recibo || '', 'maxlength="40"')}</div>
-    <div class="grid2">${X.campo('ini', 'Horómetro inicial', h.ini ?? '', 'class="mono" inputmode="decimal" id="f_ini"')}${X.campo('fin', 'Horómetro final *', h.fin ?? '', 'class="mono" inputmode="decimal" required')}</div>
-    <p class="op-prev" id="mqPrev"></p>
+    <div class="grid2">${X.campo('ini', 'Horómetro inicial (sale solo)', h.ini ?? '', 'class="mono" readonly tabindex="-1" title="Es el final del recibo anterior de esta máquina, o el horómetro inicial de la máquina si es el primero"')}${X.campo('fin', 'Horómetro final *', h.fin ?? '', 'class="mono" inputmode="decimal" required')}</div>
+    <p class="hint err" id="mqIni"></p><p class="op-prev" id="mqPrev"></p>
     <details class="op-cli" ${hcAbierto ? 'open' : ''}><summary>Horas con el cliente: no aceptadas y stand by</summary>
       <p class="hint">Si el cliente no acepta todas las horas del recibo, escribe las que sí acepta y por qué. El stand by acordado se factura al precio de la cotización y se le paga al operador.</p>
       <div class="grid2">${X.campo('h_cliente', 'Horas que acepta el cliente (vacío = todas)', r.datos?.h_cliente ?? '', 'class="mono" inputmode="decimal"')}${X.campo('obs_cliente', 'Observación (por qué no las acepta)', r.datos?.obs_cliente || '', 'maxlength="300"')}</div>
@@ -148,8 +152,12 @@ function formRecibo(t, r) {
     ${X.campo('nota', 'Nota (opcional)', r.nota || '', 'maxlength="300"')}${X.pie('Guardar recibo')}`, async fd => {
     const row = leer(fd); delete row.creado_en;
     if (!row.cotizacion_id) throw new Error('Escoge el proyecto del recibo.');
-    const errs = erroresRegistro(row, t); if (errs.length) throw new Error(errs.join(' '));
-    await guardar('op_registros', row); X.toast('Recibo guardado.'); X.route();
+    const maq = elem(row.datos.equipo), enc = encadenar(row, registrosDe(t), maq);
+    const errs = [...enc.errores, ...erroresRegistro(row, t)]; if (errs.length) throw new Error([...new Set(errs)].join(' '));
+    await guardar('op_registros', row);
+    for (const u of enc.actualizar) await X.store.save('op_registros', u);
+    if (enc.actualizar.length) await X.cargarEmpresa();
+    X.toast(enc.actualizar.length ? `Recibo guardado. El inicial del recibo siguiente quedó en ${cant(row.datos.horometro.fin)}.` : 'Recibo guardado.'); X.route();
   }, { ancho: true });
   const prev = () => {
     const el = X.$('mqPrev'); if (!el) return;
@@ -164,11 +172,15 @@ function formRecibo(t, r) {
     el.innerHTML = [`Factura a <b>${esc(nomT(cot.tercero_id))}</b>`, obraDe(cot) ? `Obra <b>${esc(obraDe(cot))}</b>` : '', ...av.map(x => `${esc(x.descripcion || 'Horas')}: ${cant(x.ejecutado)} de ${cant(x.proyectado, 'h')}${x.saldo <= 0 ? ' <span class="tag demo">Se acabaron: adiciona en el proyecto</span>' : ''}`)].filter(Boolean).join(' · ');
   };
   // Horómetro inicial: donde terminó el último recibo de esa máquina.
-  const sugerir = () => { const ini = X.$('f_ini'); if (!ini || ini.value) return; const u = ultimaLectura(registrosDe(t).filter(x => x.id !== r.id), t, X.$('f_eq').value, X.$('f_fecha')?.value || r.fecha); if (u != null) ini.value = String(u).replace('.', ','); };
+  const sugerir = () => { const ini = X.$('f_ini'); if (!ini) return; const maq = elem(X.$('f_eq').value);
+    const enc = maq ? encadenar({ ...r, fecha: X.$('f_fecha')?.value || r.fecha, datos: { ...(r.datos || {}), equipo: maq.id, horometro: { ini: '', fin: '' } } }, registrosDe(t), maq) : { ini: null };
+    ini.value = enc.ini == null ? '' : String(enc.ini).replace('.', ',');
+    const aviso = X.$('mqIni'); if (aviso) aviso.innerHTML = maq && enc.ini == null ? `La máquina no tiene horómetro inicial: ponlo en <a href="#/opmaquinas">Máquinas › Editar</a>.` : ''; };
   X.$('f_eq').addEventListener('change', () => { sugerir(); prev(); });
+  X.$('f_fecha')?.addEventListener('change', () => { sugerir(); prev(); });
   if (X.$('f_cot')) X.$('f_cot').addEventListener('change', info);
   f.addEventListener('input', prev); f.addEventListener('change', prev);
-  if (!r.id) sugerir(); info(); prev();
+  sugerir(); info(); prev();
 }
 
 /* ---------- 2. Proyectos ---------- */
@@ -273,19 +285,24 @@ export function vMaquinas(m, q) {
     const form = e => X.dialogo(`<h2>${e ? 'Editar máquina' : 'Nueva máquina'}</h2>
       <div class="grid2">${X.campo('nombre', 'Nombre *', e?.nombre || '', 'required maxlength="80" placeholder="Motoniveladora 140 K"')}${X.campo('codigo', 'Código interno', e?.codigo || '', 'maxlength="20"')}</div>
       <div class="grid2">${X.campo('modelo', 'Modelo', e?.datos?.modelo || '', 'maxlength="60"')}${X.campo('serie', 'Serie o placa', e?.datos?.serie || '', 'maxlength="40"')}</div>
+      ${(() => { const h0 = horometroInicialMaq(e), conRec = e && recibosDe(t).some(r => r.datos?.equipo === e.id);
+        return `<div class="grid2">${X.campo('hini', 'Horómetro inicial *', h0 != null ? String(h0).replace('.', ',') : '', `required class="mono" inputmode="decimal"${conRec ? ' readonly' : ''}`)}<p class="hint">${conRec ? 'Ya tiene recibos: el horómetro sigue la cadena de recibos y este dato no se cambia.' : 'El primer recibo de la máquina arranca aquí. Después, cada recibo arranca donde terminó el anterior.'}</p></div>`; })()}
       <h3>Mantenimiento preventivo (PM)</h3>
       ${(() => { const pm = e?.datos?.pm, act = e ? horometroActual(e, registrosDe(t)) : null;
         return pm ? `<div class="grid2">${X.campo('pm_cada', 'Hacer PM cada (horas)', String(pm.cada || ''), 'class="mono" inputmode="decimal"')}<p class="hint">Último PM a las ${cant(pm.base)} h${pm.hist?.length ? ' (' + X.fFecha(pm.hist.at(-1).fecha) + ')' : ''}. Próximo a las ${cant(X.num(pm.base) + X.num(pm.cada))} h.</p></div>`
           : `<p class="hint">Se pregunta una sola vez: cuántas horas lleva desde el último PM. De ahí en adelante se programa solo cada tantas horas.</p>
-        <div class="grid2">${X.campo('pm_actual', 'Horómetro actual', act != null ? String(act).replace('.', ',') : '', 'class="mono" inputmode="decimal"')}${X.campo('pm_lleva', 'Horas acumuladas desde el último PM', '', 'class="mono" inputmode="decimal" placeholder="Ej.: 120"')}</div>
+        <div class="grid2">${X.campo('pm_actual', e ? 'Horómetro actual' : 'Horómetro actual (vacío = el inicial)', act != null ? String(act).replace('.', ',') : '', 'class="mono" inputmode="decimal"')}${X.campo('pm_lleva', 'Horas acumuladas desde el último PM', '', 'class="mono" inputmode="decimal" placeholder="Ej.: 120"')}</div>
         <div class="grid2">${X.campo('pm_cada', 'Hacer PM cada (horas)', '', 'class="mono" inputmode="decimal" placeholder="Ej.: 250"')}<div></div></div>`; })()}
       ${e ? X.check('activo', 'Activa (si no, no sale para nuevos recibos)', e.activo !== false) : ''}${X.pie()}`, async fd => {
       const nombre = String(fd.get('nombre') || '').trim(); if (!nombre) throw new Error('Escribe el nombre de la máquina.');
       const row = { empresa_id: X.S.eid, tipo_id: t.id, lista: 'equipos', nombre, codigo: String(fd.get('codigo') || '').trim(), datos: { ...(e?.datos || {}), modelo: String(fd.get('modelo') || '').trim(), serie: String(fd.get('serie') || '').trim() }, activo: e ? fd.get('activo') === 'on' : true };
+      const shi = String(fd.get('hini') ?? '').trim(); if (!shi) throw new Error('Escribe el horómetro inicial de la máquina.');
+      const hini = numIn(shi); if (!(hini >= 0)) throw new Error('El horómetro inicial no puede ser negativo.');
+      row.datos.horometro_inicial = hini;
       const cada = numIn(fd.get('pm_cada')), pm0 = e?.datos?.pm;
       if (pm0) { if (cada > 0) row.datos.pm = { ...pm0, cada }; else delete row.datos.pm; }
       else if (cada > 0) {
-        const s0 = String(fd.get('pm_actual') ?? '').trim(); if (!s0) throw new Error('Para programar el PM escribe el horómetro actual.');
+        const s0 = String(fd.get('pm_actual') ?? '').trim() || (e ? '' : shi); if (!s0) throw new Error('Para programar el PM escribe el horómetro actual.');
         const actual = numIn(s0), lleva = numIn(fd.get('pm_lleva'));
         if (lleva < 0) throw new Error('Las horas desde el último PM no pueden ser negativas.');
         row.datos.pm = { cada, base: pmBase(actual, lleva), inicial: actual, hist: [] };

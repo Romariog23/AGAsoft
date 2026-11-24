@@ -562,3 +562,55 @@ export function estadoPM(maq, registros) {
   const margen = Math.max(10, r2(n(pm.cada) * 0.1)); // aviso previo: 10 % del intervalo, mínimo 10 h
   return { actual, proximo, cada: n(pm.cada), usadas, faltan, estado: faltan <= 0 ? 'vencido' : faltan <= margen ? 'pronto' : 'ok', ultimo: (pm.hist || []).slice(-1)[0] || null };
 }
+
+/* ---------- Horómetro encadenado por máquina ---------- */
+// El primer recibo de una máquina arranca en su horómetro inicial (datos.horometro_inicial, o el inicial del PM en máquinas viejas).
+// Cada recibo siguiente arranca donde terminó el anterior de esa máquina (por fecha; el mismo día, por lectura). El inicial no se escribe.
+export function horometroInicialMaq(maq) {
+  const d = maq?.datos || {}, v = !vacio(d.horometro_inicial) ? d.horometro_inicial : !vacio(d.pm?.inicial) ? d.pm.inicial : null;
+  return v == null ? null : n(v);
+}
+const lect = r => r?.datos?.horometro || {};
+const cerradoR = r => !!(r?.cierre_pago || r?.cierre_cobro);
+const nomRecibo = r => `recibo${r.datos?.recibo ? ' ' + r.datos.recibo : ''} del ${r.fecha.split('-').reverse().join('/')}`;
+const cadenaDe = (registros, maqId, sinId) => (registros || []).filter(r => !esCargo(r) && r.datos?.equipo === maqId && r.id !== sinId && !vacio(lect(r).fin))
+  .sort((a, b) => a.fecha.localeCompare(b.fecha) || n(lect(a).ini) - n(lect(b).ini) || String(a.id).localeCompare(String(b.id)));
+// Vecinos de una posición (fecha + lectura de desempate) dentro de la cadena.
+const vecinos = (lista, fecha, desempate) => {
+  const antes = x => x.fecha < fecha || (x.fecha === fecha && n(lect(x).ini) <= desempate);
+  return { prev: lista.filter(antes).at(-1) || null, next: lista.find(x => !antes(x)) || null };
+};
+const conIni = (r, ini) => ({ id: r.id, datos: { ...r.datos, horometro: { ...lect(r), ini } } });
+// Para guardar `row` (nuevo o editado): inicial que le toca, errores y los recibos vecinos que hay que reencadenar.
+export function encadenar(row, registros, maq) {
+  const errores = [], actualizar = [], orig = row.id ? (registros || []).find(r => r.id === row.id) : null;
+  const lista = cadenaDe(registros, maq?.id, row.id), base = horometroInicialMaq(maq);
+  const mismaPos = orig && orig.datos?.equipo === maq?.id && orig.fecha === row.fecha;
+  const { prev, next } = vecinos(lista, row.fecha, mismaPos ? n(lect(orig).ini) : Infinity);
+  const ini = prev ? n(lect(prev).fin) : base;
+  if (ini == null) { errores.push(`La máquina ${maq?.nombre || ''} no tiene horómetro inicial: ponlo en Máquinas › Editar.`.replace('  ', ' ')); return { ini, errores, actualizar }; }
+  const fin = vacio(lect(row).fin) ? null : n(lect(row).fin);
+  if (fin == null) errores.push('Escribe el horómetro final.');
+  else if (fin < ini) errores.push(`El horómetro final no puede ser menor que el inicial (${fx(ini)}).`);
+  else if (next) {
+    if (fin > n(lect(next).fin)) errores.push(`El final (${fx(fin)}) no puede pasar el final del ${nomRecibo(next)}, que sigue (${fx(lect(next).fin)}).`);
+    else if (n(lect(next).ini) !== fin) { if (cerradoR(next)) errores.push(`El ${nomRecibo(next)} ya está programado o facturado y empieza en ${fx(lect(next).ini)}: este recibo debe terminar en ${fx(lect(next).ini)}.`); else actualizar.push(conIni(next, fin)); }
+  }
+  // Si el recibo cambia de máquina o de fecha, el que lo seguía antes queda pegado a su anterior.
+  if (orig && !mismaPos && !vacio(lect(orig).fin)) {
+    const q = quitarDeCadena(orig, registros, orig.datos?.equipo === maq?.id ? maq : { id: orig.datos?.equipo, datos: {} }, { baseMaq: orig.datos?.equipo === maq?.id ? base : undefined });
+    errores.push(...q.errores); for (const u of q.actualizar) if (!actualizar.some(a => a.id === u.id) && !(next && u.id === next.id)) actualizar.push(u);
+  }
+  return { ini, errores, actualizar };
+}
+// Al borrar (o mover) un recibo: el siguiente arranca donde terminó el anterior.
+export function quitarDeCadena(r, registros, maq, { baseMaq } = {}) {
+  const lista = cadenaDe(registros, r.datos?.equipo, r.id), { prev, next } = vecinos(lista, r.fecha, n(lect(r).ini));
+  const errores = [], actualizar = []; if (!next) return { errores, actualizar };
+  const ini = prev ? n(lect(prev).fin) : baseMaq !== undefined ? baseMaq : horometroInicialMaq(maq);
+  if (ini == null || n(lect(next).ini) === ini) return { errores, actualizar };
+  if (ini > n(lect(next).fin)) errores.push(`No se puede: el ${nomRecibo(next)} quedaría con el final menor que el inicial.`);
+  else if (cerradoR(next)) errores.push(`No se puede: el ${nomRecibo(next)} ya está programado o facturado y tendría que empezar en ${fx(ini)}.`);
+  else actualizar.push(conIni(next, ini));
+  return { errores, actualizar };
+}
