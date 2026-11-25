@@ -618,3 +618,4 @@ button.cfg-main:hover{background:none}
 .op-bar i.warn{background:#c58b1b}
 .op-bar i.over{background:#b4442b}
 .op-bar-row+.op-bar-row{margin-top:10px}
+.tbl tr.grp-ini td{border-top:2px solid var(--line)}

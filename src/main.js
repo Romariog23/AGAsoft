@@ -15,7 +15,8 @@ import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalez
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
 import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
-import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA } from './reportes.js';
+import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
+import { xlsx } from './xlsx.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
@@ -248,7 +249,7 @@ const NAV_ICO = {
 const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
-  informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
+  informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'auxgeneral', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
   operacion: ['oprecibos', 'opproyectos', 'opoperadores', 'opmaquinas', 'opprogramar', 'opfacturar', 'ophorascliente', 'opporcerrar', 'opcorte'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg'],
 };
@@ -368,6 +369,7 @@ function route() {
     if (v === 'compeditar') return vCompEditor(m, { id: arg });
     if (v === 'balance') return vBalance(m);
     if (v === 'auxiliar') return vAuxiliar(m, q);
+    if (v === 'auxgeneral') return vAuxGeneral(m);
     if (v === 'informes') return vInformes(m);
     if (v === 'calendario') return vCalendario(m);
     if (v === 'esf') return vEsf(m);
@@ -632,6 +634,7 @@ function vInformes(m) {
       ['patrimonio', 'capas', 'Cambios en el patrimonio', 'Movimiento del capital y resultados', '#/patrimonio'],
       ['balance', 'lista', 'Balance de prueba', 'Saldos por cuenta y tercero', '#/balance'],
       ['auxiliar', 'puc', 'Libro auxiliar', 'Movimientos de una cuenta', '#/auxiliar'],
+      ['auxgeneral', 'lista', 'Auxiliar general detallado', 'Todos los comprobantes por fecha · Excel', '#/auxgeneral'],
     ]],
     ['Financieros', [
       ['ercomp', 'columnas', 'Resultados comparativo', 'Meses lado a lado', '#/ercomp'],
@@ -3651,6 +3654,37 @@ function vAuxiliar(m, q) {
   };
   for (const id of ['cta', 'cta2']) { $(id).onchange = () => ir(id); $(id).onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ir(id); } }; }
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
+  ligarCC(pintar);
+  pintar();
+}
+
+const linkDocTxt = g => { const h = g.origen === 'nomina' ? `#/nominadoc/${g.doc_id}` : g.origen === 'compra' ? `#/compra/${g.doc_id}` : g.origen === 'comp' ? `#/comp/${g.doc_id}` : TIPOS[g.tipo] ? `#/doc/${g.doc_id}` : ''; return h ? `<a class="mono" href="${h}">${esc(g.documento)}</a>` : `<span class="mono">${esc(g.documento)}</span>`; };
+// Excel en todos los planes: es la copia de la contabilidad que el dueño puede abrir sin AGAsoft.
+function descargarXlsx(nombre, hojas) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([xlsx(hojas)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function vAuxGeneral(m) {
+  let tercero = '', limite = 200;
+  m.innerHTML = `<header class="vhead"><h2>Auxiliar general detallado</h2><div class="row"><button id="xls">Descargar Excel</button><button class="ghost" onclick="print()">Imprimir</button></div></header>
+    <div class="row filters"><div class="grow"><label for="ter">Tercero</label><select id="ter"><option value="">Todos</option>${[...S.d.terceros].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(t => `<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}</select></div></div>
+    ${filtroFechas('fag', true, () => { limite = 200; pintar(); })}${filtroCC()}
+    <p class="hint">Todos los movimientos de todas las cuentas en orden de fecha del documento, con las partidas de cada comprobante juntas.</p>
+    <section class="panel" id="out"></section>`;
+  const calc = () => auxiliarGeneral(movs().filter(pasaCC), F.desde, F.hasta, { tercero });
+  const pintar = () => {
+    const r = calc(), gs = r.grupos.slice(0, limite);
+    $('out').innerHTML = cabInforme('Auxiliar contable general detallado', `${ccFiltroTxt() ? esc(ccFiltroTxt()) + '<br>' : ''}${tercero ? esc(terc(tercero)?.nombre || '') + '<br>' : ''}<small>${fFecha(F.desde)} a ${fFecha(F.hasta)} · ${r.grupos.length} comprobantes · ${r.partidas} partidas</small>`) + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Documento</th><th>Cuenta</th><th>Nombre de la cuenta</th><th>Tercero</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+      ${gs.map(g => g.filas.map((x, i) => `<tr${i === 0 ? ' class="grp-ini"' : ''}><td class="nowrap">${i === 0 ? fFecha(g.fecha) : ''}</td><td class="nowrap">${i === 0 ? linkDocTxt(g) : ''}</td><td class="mono"><a href="#/auxiliar?cuenta=${x.cuenta}">${x.cuenta}</a></td><td>${esc(nomCta(x.cuenta))}</td><td>${esc(x.tercero_id ? terc(x.tercero_id)?.nombre || '' : '')}</td><td>${esc(x.detalle || '')}${ccTxt(x) ? `<br><small class="muted">${esc(ccTxt(x))}</small>` : ''}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td></tr>`).join('')
+        + `<tr class="muted"><td colspan="6" class="r"><small>Total ${esc(g.documento)}</small></td><td class="r mono"><small>${money(g.debito)}</small></td><td class="r mono"><small>${money(g.credito)}</small></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Sin movimientos en el periodo.</td></tr>'}
+      ${r.grupos.length ? `<tr class="strong"><td colspan="6">Sumas iguales${r.grupos.length > limite ? ' (de todo el periodo)' : ''}</td><td class="r mono">${money(r.debito)}</td><td class="r mono">${money(r.credito)}</td></tr>` : ''}</tbody></table></div>
+      ${r.grupos.length > limite ? `<p class="center no-print"><button class="ghost" id="mas">Ver más (${r.grupos.length - limite} comprobantes más)</button></p><p class="hint">El Excel trae todo el periodo.</p>` : ''}`;
+    if ($('mas')) $('mas').onclick = () => { limite += 500; pintar(); };
+  };
+  $('ter').onchange = () => { tercero = $('ter').value; limite = 200; pintar(); };
+  $('xls').onclick = () => {
+    const r = calc(), e = emp();
+    descargarXlsx(`auxiliar-general-${e.nit || ''}-${F.desde || 'inicio'}-a-${F.hasta}.xlsx`, hojasAuxiliarGeneral(r, { empresa: e, desde: F.desde, hasta: F.hasta, nomCta, tercero: terc, generado: new Date().toLocaleString('es-CO') }));
+  };
   ligarCC(pintar);
   pintar();
 }
