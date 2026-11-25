@@ -1,7 +1,8 @@
 // Informes de ventas, compras y flujos (efectivo, patrimonio y caja). Funciones puras: no tocan la base de datos.
 // movs: movimientos contables de contab.movimientos ({ fecha, cuenta, debito, credito, tipo, origen, doc_id, ref }).
-import { r2, num, totales, linea } from './calc.js';
-import { totalesCompra } from './compras.js';
+import { r2, num, totales, linea, TIPOS } from './calc.js';
+import { totalesCompra, TIPOS_COMPRA } from './compras.js';
+import { TIPOS_COMP } from './contab.js';
 
 const enRango = (f, desde, hasta) => (!desde || f >= desde) && (!hasta || f <= hasta);
 const sumar = (o, k, v) => { o[k] = r2((o[k] || 0) + v); };
@@ -238,4 +239,45 @@ export function enlacesPagos({ documentos = [], aplicaciones = [], compras = [] 
     if (l.length) out[`compra|${c.id}`] = l;
   }
   return out;
+}
+
+// Nombre del documento de un movimiento en texto ('FV 12', 'CE 3', 'AI 1'...).
+export const etiquetaDoc = m => m.origen === 'nomina' ? m.ref : m.origen === 'compra' ? `${TIPOS_COMPRA[m.tipo]?.corto || m.tipo} ${String(m.ref).replace(/^\w+ /, '')}` : m.origen === 'comp' ? `${TIPOS_COMP[m.tipo]?.corto || m.tipo} ${String(m.ref).replace(/^\w+ /, '')}` : TIPOS[m.tipo] ? `${TIPOS[m.tipo].corto} ${m.ref}` : String(m.ref || '');
+
+// Auxiliar contable general detallado: todos los movimientos del periodo, en orden cronológico por fecha del documento,
+// con todas las partidas de cada comprobante juntas (en el orden en que se registraron).
+// etiqueta(m) da el nombre del documento ('FV 12', 'CE 3'...) para ordenar los del mismo día.
+const natural = new Intl.Collator('es', { numeric: true, sensitivity: 'base' });
+export function auxiliarGeneral(movs, desde, hasta, { tercero = '', etiqueta = etiquetaDoc } = {}) {
+  const grupos = new Map();
+  for (const m of movs) {
+    if (!enRango(m.fecha, desde, hasta) || (!m.debito && !m.credito)) continue;
+    // Por documento (doc_id): el costo de ventas del inventario queda junto a su factura.
+    const k = `${m.fecha}|${m.doc_id || `${m.origen}|${m.ref}`}`;
+    let g = grupos.get(k);
+    if (!g) grupos.set(k, g = { fecha: m.fecha, documento: etiqueta(m), origen: m.origen, tipo: m.tipo, doc_id: m.doc_id, ref: m.ref, filas: [], debito: 0, credito: 0 });
+    g.filas.push(m);
+  }
+  let out = [...grupos.values()];
+  // Con tercero se dejan solo sus partidas, pero el comprobante sigue agrupado.
+  if (tercero) out = out.map(g => ({ ...g, filas: g.filas.filter(m => m.tercero_id === tercero) })).filter(g => g.filas.length);
+  for (const g of out) { g.debito = r2(g.filas.reduce((s, m) => s + (m.debito || 0), 0)); g.credito = r2(g.filas.reduce((s, m) => s + (m.credito || 0), 0)); }
+  out.sort((a, b) => a.fecha.localeCompare(b.fecha) || natural.compare(a.documento, b.documento));
+  return { grupos: out, debito: r2(out.reduce((s, g) => s + g.debito, 0)), credito: r2(out.reduce((s, g) => s + g.credito, 0)), partidas: out.reduce((s, g) => s + g.filas.length, 0) };
+}
+
+// Hojas de Excel del auxiliar general (las usa el botón Descargar Excel y la copia nocturna).
+// nomCta(codigo) → nombre; tercero(id) → { numero, nombre }.
+export function hojasAuxiliarGeneral(r, { empresa = {}, desde, hasta, nomCta = () => '', tercero = () => null, generado = '' }) {
+  const filas = [['Fecha', 'Documento', 'Cuenta', 'Nombre de la cuenta', 'Identificación', 'Tercero', 'Detalle', 'Débito', 'Crédito']];
+  for (const g of r.grupos) for (const m of g.filas) {
+    const t = m.tercero_id ? tercero(m.tercero_id) : null;
+    filas.push([g.fecha, g.documento, m.cuenta, nomCta(m.cuenta), t?.numero || '', t?.nombre || '', m.detalle || '', r2(m.debito || 0), r2(m.credito || 0)]);
+  }
+  const tot = filas.length;
+  filas.push(['', '', '', '', '', '', 'Sumas iguales', r.debito, r.credito]);
+  return [
+    { nombre: 'Auxiliar', filas, negritas: [tot], anchos: [11, 14, 11, 34, 15, 32, 40, 16, 16] },
+    { nombre: 'Información', encabezado: false, anchos: [24, 50], filas: [['Auxiliar contable general detallado'], ['Empresa', empresa.nombre || ''], ['NIT', empresa.nit || ''], ['Desde', desde || ''], ['Hasta', hasta || ''], ['Comprobantes', String(r.grupos.length)], ['Partidas', String(r.partidas)], ['Total débitos', r.debito], ['Total créditos', r.credito], ['Generado', generado]] },
+  ];
 }

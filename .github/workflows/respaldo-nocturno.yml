@@ -1,0 +1,62 @@
+# Copia nocturna de AGAsoft a Google Drive. PREPARADA, SIN ACTIVAR:
+# solo corre a mano (Actions › Respaldo nocturno › Run workflow) hasta que existan los secretos
+# y se quite el comentario de "schedule".
+# Secretos del repositorio (Settings › Secrets and variables › Actions):
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  → leer las empresas
+#   SUPABASE_DB_URL                          → copia completa de la base (pg_dump), con la contraseña de la base
+#   RESPALDO_CLAVE                           → clave para cifrar la copia de la base (guárdala fuera de GitHub)
+#   RCLONE_CONFIG                            → configuración de rclone con el remoto "drive" (cuenta de Google dedicada)
+name: Respaldo nocturno
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 7 * * *'   # 2:00 a. m. hora de Colombia
+permissions:
+  contents: read
+concurrency: respaldo
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SALIDA: respaldo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Fecha
+        run: echo "FECHA=$(TZ=America/Bogota date +%F)" >> "$GITHUB_ENV"
+      - name: Auxiliar general en Excel y datos por empresa
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/respaldo-nocturno.mjs
+      - name: Copia completa de la base, cifrada
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          mkdir -p "$SALIDA/$FECHA"
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" --no-owner --no-privileges -n public -n auth -Fc -f base.dump
+          # Los datos de cada empresa también van dentro del paquete cifrado (no quedan sueltos en Drive).
+          tar czf - base.dump $(find "$SALIDA/$FECHA" -name datos.json) \
+            | gpg --batch --yes --pinentry-mode loopback --passphrase "$RESPALDO_CLAVE" --symmetric --cipher-algo AES256 -o "$SALIDA/$FECHA/base-$FECHA.tar.gz.gpg"
+          find "$SALIDA/$FECHA" -name datos.json -delete
+          rm -f base.dump
+      - name: Subir a Google Drive
+        env:
+          RCLONE_CONFIG_TEXTO: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash >/dev/null
+          mkdir -p ~/.config/rclone && printf '%s' "$RCLONE_CONFIG_TEXTO" > ~/.config/rclone/rclone.conf
+          rclone copy "$SALIDA/$FECHA" "drive:AGAsoft respaldos/$FECHA"
+          # Retención: diarios por 35 días; el del día 1 de cada mes se guarda siempre.
+          for d in $(rclone lsf --dirs-only "drive:AGAsoft respaldos" | tr -d '/'); do
+            case "$d" in *-01) continue;; esac
+            if [ "$(date -d "$d" +%s 2>/dev/null || echo 9999999999)" -lt "$(date -d '35 days ago' +%s)" ]; then rclone purge "drive:AGAsoft respaldos/$d"; fi
+          done
