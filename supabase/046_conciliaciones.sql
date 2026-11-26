@@ -5,7 +5,7 @@ create table if not exists public.conciliaciones (
   empresa_id uuid not null references public.empresas(id) on delete cascade,
   cuenta text not null check (cuenta ~ '^[0-9]{8}$'),
   periodo text not null check (periodo ~ '^[0-9]{4}-[0-9]{2}$'),
-  saldo_extracto numeric(18,2) not null default 0,
+  saldo_extracto numeric(18,2),  -- vacío mientras no se escriba el saldo del extracto
   -- [{id, fecha, descripcion, referencia, debito, credito}]  débito = sale de la cuenta, crédito = entra (como el banco)
   extracto jsonb not null default '[]'::jsonb,
   -- [{l: [claves del libro], b: [ids del extracto], auto}]
@@ -27,5 +27,8 @@ drop policy if exists conciliaciones_editar on public.conciliaciones;
 create policy conciliaciones_editar on public.conciliaciones for update to authenticated using (public.puede_editar(empresa_id)) with check (public.puede_editar(empresa_id));
 drop policy if exists conciliaciones_borrar on public.conciliaciones;
 create policy conciliaciones_borrar on public.conciliaciones for delete to authenticated using (public.puede_editar(empresa_id));
+
+-- Por si la tabla ya se había creado con saldo obligatorio.
+alter table public.conciliaciones alter column saldo_extracto drop not null, alter column saldo_extracto drop default;
 
 notify pgrst, 'reload schema';
