@@ -251,6 +251,6 @@ export function costoPorVenta(costeados, items, desde, hasta) {
     const cantidad = r4(-m.cantidad), costo = r2(-m.total);
     const venta = it ? r2(s * num(it.cantidad) * num(it.precio) * (1 - num(it.descuento_pct) / 100)) : 0;
     const utilidad = r2(venta - costo);
-    return { fecha: m.fecha, doc_id: m.doc_id, tipo: m.tipo, ref: m.ref, tercero_id: m.tercero_id, producto_id: m.producto_id, bodega_id: m.bodega_id, cantidad, venta, costo, costo_unitario: m.costo, utilidad, margen: venta ? r2(utilidad / venta * 100) : 0 };
+    return { fecha: m.fecha, doc_id: m.doc_id, tipo: m.tipo, ref: m.ref, tercero_id: m.tercero_id, producto_id: m.producto_id, bodega_id: m.bodega_id, cantidad, venta, costo, costo_unitario: m.costo, utilidad, margen: venta ? r2(utilidad / venta * 100) : 0, margen_costo: costo ? r2(utilidad / costo * 100) : 0 };
   });
 }
