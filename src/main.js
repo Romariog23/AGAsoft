@@ -24,7 +24,7 @@ import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnua
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
-import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
+import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto, costoPorVenta } from './inventario.js';
 import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente, vInicioOp } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
@@ -227,7 +227,7 @@ const MENU = [
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
+  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['costoventas', 'Costo detallado por venta']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'], ['importar/saldos', 'Plantilla de saldos iniciales']] },
@@ -338,6 +338,7 @@ function route() {
     if (v === 'traslado') return vTraslado(m, arg);
     if (v === 'kardex') return vKardex(m, q);
     if (v === 'costoproducto') return vCostoProducto(m);
+    if (v === 'costoventas') return vCostoVentas(m);
     if (v === 'retenciones') return vRetenciones(m);
     if (v === 'tarifasiva') return vTarifasIva(m);
     if (v === 'cierre') return vCierre(m);
@@ -2512,6 +2513,19 @@ function vCostoProducto(m) {
       nota: 'Ventas antes de IVA, con descuentos. El costo es el de la salida de inventario de cada factura (y la reversión en las notas crédito de devolución).' };
   });
 }
+function vCostoVentas(m) {
+  informeTabla(m, 'Costo detallado por venta', 'Cada producto vendido en cada factura: valor de la venta, costo con que salió del inventario y margen de utilidad. Las notas crédito de devolución restan.', 'costo-por-venta', (desde, hasta) => {
+    const ls = costoPorVenta(invCosteado(), S.d.items, desde, hasta).sort((a, b) => a.fecha.localeCompare(b.fecha) || String(a.ref).localeCompare(String(b.ref), 'es', { numeric: true }));
+    const t = ls.reduce((s2, x) => ({ venta: s2.venta + x.venta, costo: s2.costo + x.costo }), { venta: 0, costo: 0 }), ut = r2(t.venta - t.costo);
+    const pc = v => `${String(r2(v)).replace('.', ',')} %`, prod = id => S.d.productos.find(p => p.id === id);
+    const docTxt = x => `${TIPOS[x.tipo]?.corto || x.tipo} ${x.ref}`;
+    return { head: [['Fecha'], ['Documento'], ['Cliente'], ['Producto'], ['Cantidad', 'r'], ['Valor venta', 'r'], ['Costo unitario', 'r'], ['Costo', 'r'], ['Utilidad', 'r'], ['Margen sobre venta', 'r'], ['Margen sobre costo', 'r']],
+      filas: ls.map(x => ({ go: '#/doc/' + x.doc_id, c: [fFecha(x.fecha), `<span class="mono">${esc(docTxt(x))}</span>`, esc(nomTer(x.tercero_id)), `<span class="mono">${esc(prod(x.producto_id)?.codigo || '')}</span> ${esc(prod(x.producto_id)?.nombre || '')}`, `<span class="mono">${cantTxt(x.cantidad, fmtEmp())}</span>`, mon(x.venta), mon(x.costo_unitario), mon(x.costo), `<span class="mono ${x.utilidad < 0 ? 'neg' : ''}">${money(x.utilidad)}</span>`, `<span class="mono ${x.margen < 0 ? 'neg' : ''}">${pc(x.margen)}</span>`, `<span class="mono ${x.margen_costo < 0 ? 'neg' : ''}">${x.costo ? pc(x.margen_costo) : ''}</span>`] })),
+      csv: ls.map(x => [x.fecha, docTxt(x), nomTer(x.tercero_id), prod(x.producto_id)?.codigo || '', prod(x.producto_id)?.nombre || '', nCsv(x.cantidad), nCsv(x.venta), nCsv(x.costo_unitario), nCsv(x.costo), nCsv(x.utilidad), nCsv(x.margen), nCsv(x.margen_costo)]),
+      pie: ['', `${new Set(ls.map(x => x.doc_id)).size} documentos`, '', `${ls.length} líneas`, '', mon(t.venta), '', mon(t.costo), mon(ut), `<span class="mono">${t.venta ? pc(ut / t.venta * 100) : ''}</span>`, `<span class="mono">${t.costo ? pc(ut / t.costo * 100) : ''}</span>`],
+      nota: 'Valor de la venta antes de IVA y con descuentos. El costo es el de la salida de inventario de cada factura según el método de costeo de la empresa. Margen sobre venta = utilidad ÷ venta; margen sobre costo = utilidad ÷ costo. Solo productos inventariables (los servicios no tienen costo).' };
+  });
+}
 /* ---------- Centros de costo ---------- */
 const ccCfg = () => cfgCC(emp()?.contabilidad);
 const centros = () => S.d?.centros_costo || [];
@@ -4418,24 +4432,36 @@ function vCompEditor(m, { id, tipo }) {
   </form>`;
   const nomDe = cod => cod ? (idx[cod]?.nombre || 'No existe en el plan') : '';
   const conCartera = cod => /^\d{8}$/.test(String(cod || '')) && manejaCartera(cod, idx);
-  const celCruce = (l, i) => conCartera(l.cuenta) ? `<input data-k="cruce" value="${esc(l.cruce || '')}" maxlength="40" class="mono w-cod" aria-label="Documento cruce" placeholder="Ej.: FE 1234"><input data-k="vence" type="date" value="${esc(l.vence || '')}" aria-label="Vence" title="Vencimiento"><button type="button" class="ghost sm" data-pend="${i}" title="Escoger documentos pendientes de este tercero">Pendientes</button>` : '<span class="muted">—</span>';
+  // En cuentas con cartera: el cargo (débito en clientes, crédito en proveedores) crea un documento cruce nuevo;
+  // el abono (lado contrario) debe escoger un documento pendiente del tercero. Los saldos iniciales se escriben libres.
+  const esAbono = l => c.tipo !== 'SI' && conCartera(l.cuenta) && (lado(l.cuenta) === 'cobrar' ? num(l.credito) > 0 : num(l.debito) > 0);
+  const celCruce = (l, i) => !conCartera(l.cuenta) ? '<span class="muted">—</span>'
+    : esAbono(l) ? `<input data-k="cruce" value="${esc(l.cruce || '')}" class="mono w-cod ${l.cruce ? '' : 'falta'}" aria-label="Documento que abona" placeholder="Escoge la factura" readonly><button type="button" class="${l.cruce ? 'ghost' : 'primary'} sm" data-pend="${i}" title="Escoger la factura pendiente que se abona">Pendientes</button>`
+    : `<input data-k="cruce" value="${esc(l.cruce || '')}" maxlength="40" class="mono w-cod" aria-label="Documento cruce" placeholder="${c.tipo === 'SI' ? 'Ej.: FE 1234' : 'Este comprobante'}"><input data-k="vence" type="date" value="${esc(l.vence || '')}" aria-label="Vence" title="Vencimiento">${c.tipo === 'SI' ? `<button type="button" class="ghost sm" data-pend="${i}" title="Escoger documentos pendientes de este tercero">Pendientes</button>` : ''}`;
+  const refrescarCruce = i => { const cw = m.querySelector(`[data-cru="${i}"]`); if (cw) cw.innerHTML = celCruce(c.lineas[i], i); };
+  // Documentos pendientes de un tercero en la cuenta, para validar los abonos.
+  const pendientesDe = l => carteraViva(lado(l.cuenta), id || null).filter(x => x.tercero_id === l.tercero_id && x.saldo > 0.009 && (x.cuenta === l.cuenta || (!x.href.startsWith('#/comp/') && String(x.cuenta).slice(0, 4) === l.cuenta.slice(0, 4))));
   // Documentos pendientes (cartera viva) del tercero en la cuenta de la línea: los escogidos se abonan, una línea por documento.
   const lado = cod => (idx[cod]?.naturaleza || (/^[1567]/.test(cod) ? 'D' : 'C')) === 'D' ? 'cobrar' : 'pagar';
-  const pendientes = i => {
+  const pendientes = (i, monto = 0) => {
     const l = c.lineas[i];
     if (!l.tercero_id) return fail(new Error('Escoge primero el tercero de la línea.'));
     const ld = lado(l.cuenta);
-    const items = carteraViva(ld, id || null).filter(x => x.tercero_id === l.tercero_id && x.saldo > 0.009 && (x.cuenta === l.cuenta || (!x.href.startsWith('#/comp/') && String(x.cuenta).slice(0, 4) === l.cuenta.slice(0, 4))));
-    if (!items.length) return fail(new Error(`${terc(l.tercero_id)?.nombre || 'Este tercero'} no tiene documentos pendientes en la cuenta ${l.cuenta}.`));
+    // Lo que ya abonan otras líneas de este comprobante no se vuelve a ofrecer.
+    const usado = {}; c.lineas.forEach((o, j) => { if (j !== i && o.cruce && o.tercero_id === l.tercero_id && esAbono(o)) usado[o.cruce] = r2((usado[o.cruce] || 0) + num(ld === 'cobrar' ? o.credito : o.debito)); });
+    const items = pendientesDe(l).map(x => ({ ...x, saldo: r2(x.saldo - (usado[x.cruce] || 0)) })).filter(x => x.saldo > 0.009).sort((a, b) => String(a.vence || a.fecha).localeCompare(String(b.vence || b.fecha)));
+    if (!items.length) return fail(new Error(`${terc(l.tercero_id)?.nombre || 'Este tercero'} no tiene ${ld === 'cobrar' ? 'facturas pendientes de cobro' : 'facturas pendientes de pago'} en la cuenta ${l.cuenta}. ${ld === 'cobrar' ? 'Un crédito' : 'Un débito'} en esta cuenta debe abonar a una de ellas.`));
+    // Con un valor escrito se reparte entre las más antiguas.
+    let resto = r2(monto); const pre = items.map(x => { const v = resto > 0 ? Math.min(resto, x.saldo) : 0; resto = r2(resto - v); return v; });
     const lado_ = ld === 'cobrar' ? 'credito' : 'debito';
     dialogo(`<h2>Documentos pendientes</h2><p class="hint">${esc(terc(l.tercero_id)?.nombre)} · cuenta ${esc(l.cuenta)} ${esc(nomDe(l.cuenta))}. Marca los que vas a abonar; puedes cambiar el valor. Cada uno queda en una línea al ${lado_ === 'credito' ? 'crédito' : 'débito'} con su documento cruce.</p>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th></th><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Abono</th></tr></thead><tbody>
-      ${items.map((x, k) => `<tr><td><input type="checkbox" name="p${k}" aria-label="Abonar ${esc(x.cruce || x.doc)}"></td><td class="mono">${esc(x.cruce || x.doc)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.saldo)}</td><td class="r"><input name="v${k}" type="number" min="0" step="0.01" class="r mono w-val" value="${x.saldo}"></td></tr>`).join('')}
-      </tbody></table></div>${pie('Agregar')}`, fd => {
+      ${items.map((x, k) => `<tr><td><input type="checkbox" name="p${k}" ${pre[k] ? 'checked' : ''} aria-label="Abonar ${esc(x.cruce || x.doc)}"></td><td class="mono">${esc(x.cruce || x.doc)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.saldo)}</td><td class="r"><input name="v${k}" type="number" min="0" step="0.01" class="r mono w-val" value="${pre[k] || x.saldo}"></td></tr>`).join('')}
+      </tbody></table></div>${resto > 0.009 ? `<p class="err">El valor escrito (${money(monto)}) supera lo pendiente en ${money(resto)}.</p>` : ''}${pie('Agregar')}`, fd => {
       const sel = items.map((x, k) => ({ x, v: r2(num(fd.get('v' + k))), on: fd.get('p' + k) === 'on' })).filter(o => o.on && o.v > 0);
       if (!sel.length) throw new Error('Marca al menos un documento con valor.');
       const mayor = sel.find(o => o.v > o.x.saldo + 0.009); if (mayor) throw new Error(`El abono a ${mayor.x.cruce || mayor.x.doc} supera su saldo (${money(mayor.x.saldo)}).`);
-      const nuevas = sel.map(o => ({ cuenta: l.cuenta, tercero_id: l.tercero_id, detalle: l.detalle || `Abono ${o.x.cruce || ''}`.trim(), cruce: o.x.cruce || '', vence: o.x.vence || '', debito: lado_ === 'debito' ? o.v : '', credito: lado_ === 'credito' ? o.v : '', ...(l.cc1 ? { cc1: l.cc1, cc2: l.cc2, cc3: l.cc3 } : {}) }));
+      const nuevas = sel.map(o => ({ cuenta: l.cuenta, tercero_id: l.tercero_id, detalle: l.detalle || `Abono ${o.x.cruce || ''}`.trim(), cruce: o.x.cruce || '', vence: o.x.vence || '', _abono: true, debito: lado_ === 'debito' ? o.v : '', credito: lado_ === 'credito' ? o.v : '', ...(l.cc1 ? { cc1: l.cc1, cc2: l.cc2, cc3: l.cc3 } : {}) }));
       c.lineas.splice(i, 1, ...nuevas); pintar();
     }, { ancho: true });
   };
@@ -4469,9 +4495,15 @@ function vCompEditor(m, { id, tipo }) {
       totales_();
     }
   });
-  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return; if (el.dataset.cc) c.lineas[Number(tr.dataset.i)]['cc' + el.dataset.cc] = el.value; else c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
+  // Al dejar el valor de un abono sin factura, se abre la lista de pendientes.
+  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !['debito', 'credito', 'cuenta'].includes(el.dataset.k)) return; const i = Number(tr.dataset.i), l = c.lineas[i];
+    if (el.dataset.k === 'cuenta' || (l._abono !== undefined && esAbono(l) !== l._abono)) { l.cruce = ''; l.vence = ''; } l._abono = esAbono(l);
+    refrescarCruce(i); if (el.dataset.k !== 'cuenta' && esAbono(l) && !l.cruce && l.tercero_id) pendientes(i, num(el.value)); });
+  $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return; if (el.dataset.cc) c.lineas[Number(tr.dataset.i)]['cc' + el.dataset.cc] = el.value; else { const l = c.lineas[Number(tr.dataset.i)]; l.tercero_id = el.value; if (conCartera(l.cuenta) && l.cruce && c.tipo !== 'SI') { l.cruce = ''; refrescarCruce(Number(tr.dataset.i)); } } });
   $('lns').addEventListener('click', ev => { const pb = ev.target.closest('[data-pend]'); if (pb) return pendientes(Number(pb.dataset.pend)); const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });
   $('addL').onclick = () => {
+    const sin = c.lineas.findIndex(l => esAbono(l) && !l.cruce);
+    if (sin >= 0) { fail(new Error(`Línea ${sin + 1}: escoge la factura que abona antes de seguir.`)); return pendientes(sin, num(lado(c.lineas[sin].cuenta) === 'cobrar' ? c.lineas[sin].credito : c.lineas[sin].debito)); }
     // La línea nueva propone el valor que falta para cuadrar.
     const dif = r2(c.lineas.reduce((s, l) => s + num(l.debito) - num(l.credito), 0));
     c.lineas.push({ ...nuevaLinea(), detalle: c.lineas.at(-1)?.detalle || '', debito: dif < 0 ? -dif : '', credito: dif > 0 ? dif : '' });
@@ -4483,7 +4515,19 @@ function vCompEditor(m, { id, tipo }) {
     c.fecha = $('cf').value; c.descripcion = $('cd').value.trim();
     const lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito))
       .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '', ...(conCartera(String(l.cuenta).trim()) && String(l.cruce || '').trim() ? { cruce: String(l.cruce).trim() } : {}), ...(conCartera(String(l.cuenta).trim()) && l.vence ? { vence: l.vence } : {}) }, ccCfg()));
-    const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas).concat(erroresCC(lineas, ccCfg(), centros()));
+    // Cuentas con cartera: el abono va contra un documento pendiente del tercero (sin pasar su saldo); el cargo sin documento cruce toma este comprobante.
+    const errCar = [], numC = id ? c.numero : siguienteComp(c.tipo), abonado = {};
+    lineas.forEach((l, k) => {
+      if (!conCartera(l.cuenta) || c.tipo === 'SI') return;
+      if (esAbono(l)) {
+        if (!l.cruce) { errCar.push(`Línea ${k + 1}: escoge la factura que abona (botón Pendientes).`); return; }
+        const x = pendientesDe(l).find(o => o.cruce === l.cruce), v = num(l.debito) + num(l.credito), key = `${l.tercero_id}|${l.cruce}`;
+        abonado[key] = r2((abonado[key] || 0) + v);
+        if (!x) errCar.push(`Línea ${k + 1}: ${l.cruce} no está pendiente para este tercero en la cuenta ${l.cuenta}.`);
+        else if (abonado[key] > x.saldo + 0.009) errCar.push(`Línea ${k + 1}: el abono a ${l.cruce} supera su saldo (${money(x.saldo)}).`);
+      } else if (!l.cruce) { l.cruce = `${c.tipo} ${numC}`; if (!l.vence) l.vence = c.fecha; }
+    });
+    const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas).concat(erroresCC(lineas, ccCfg(), centros()), errCar);
     if (errs.length) { $('ceErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>') + (errs.length > 8 ? `<br>…y ${errs.length - 8} más.` : ''); $('ceErr').hidden = false; return; }
     $('ceErr').hidden = true; $('ceSave').disabled = true;
     try {

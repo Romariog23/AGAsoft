@@ -99,7 +99,7 @@ export function movimientosInv(S) {
     (itemsPor[d.id] || []).sort((a, b) => (a.orden || 0) - (b.orden || 0)).forEach((it, i) => {
       if (!it.producto_id || !inv(it.producto_id) || !num(it.cantidad)) return;
       const p = prods[it.producto_id], venta = d.tipo === 'FV';
-      out.push({ fecha: d.fecha, orden: venta ? 3 : 2, origen: venta ? 'venta' : 'devolucion', doc_id: d.id, tipo: d.tipo, ref, linea: i, tercero_id: d.tercero_id, producto_id: it.producto_id, bodega_id: it.bodega_id || p.bodega_id || '',
+      out.push({ fecha: d.fecha, orden: venta ? 3 : 2, origen: venta ? 'venta' : 'devolucion', doc_id: d.id, tipo: d.tipo, ref, linea: i, item_id: it.id, tercero_id: d.tercero_id, producto_id: it.producto_id, bodega_id: it.bodega_id || p.bodega_id || '',
         cantidad: (venta ? -1 : 1) * num(it.cantidad), costo: null, factura_id: venta ? null : d.ref_id || null, factura: venta ? null : docs[d.ref_id] || null,
         dist: primeraDist(it.cc, p.cc, d.cc, venta ? null : docs[d.ref_id]?.cc) });
     });
@@ -240,4 +240,17 @@ export function costoPorProducto(costeados, items, desde, hasta) {
     por[it.producto_id].venta = r2(por[it.producto_id].venta + v * base);
   }
   return Object.values(por).map(x => ({ ...x, utilidad: r2(x.venta - x.costo), margen: x.venta ? r2((x.venta - x.costo) / x.venta * 100) : 0 }));
+}
+
+// Costo detallado por venta: una fila por línea de producto de cada factura (y de cada nota crédito de devolución, que resta),
+// con el valor de la venta antes de IVA, el costo con que salió del inventario, la utilidad y el margen.
+export function costoPorVenta(costeados, items, desde, hasta) {
+  const its = Object.fromEntries((items || []).map(it => [it.id, it]));
+  return costeados.filter(m => m.fecha >= desde && m.fecha <= hasta && (m.origen === 'venta' || m.origen === 'devolucion')).map(m => {
+    const s = m.origen === 'venta' ? 1 : -1, it = its[m.item_id];
+    const cantidad = r4(-m.cantidad), costo = r2(-m.total);
+    const venta = it ? r2(s * num(it.cantidad) * num(it.precio) * (1 - num(it.descuento_pct) / 100)) : 0;
+    const utilidad = r2(venta - costo);
+    return { fecha: m.fecha, doc_id: m.doc_id, tipo: m.tipo, ref: m.ref, tercero_id: m.tercero_id, producto_id: m.producto_id, bodega_id: m.bodega_id, cantidad, venta, costo, costo_unitario: m.costo, utilidad, margen: venta ? r2(utilidad / venta * 100) : 0, margen_costo: costo ? r2(utilidad / costo * 100) : 0 };
+  });
 }
