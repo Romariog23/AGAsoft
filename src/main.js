@@ -5203,6 +5203,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     <div class="err" id="kErr" hidden></div>
     <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/compra/' + id : '#/compras/' + tipo}">Cancelar</a><button type="submit" class="primary" id="kSave">Guardar y contabilizar</button></div>
   </form>`;
+  selectBuscable($('prv'));
   const leer = () => {
     c.tercero_id = $('prv').value; c.fecha = $('kf').value; c.observaciones = $('kob').value.trim();
     if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
@@ -5318,7 +5319,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   if ($('ccGen')) editorDist($('ccGen'), c.cc, d => { c.cc = d; if (esCE) resumen(); else pintarLineas(); });
   $('ke').addEventListener('input', ev => { if (!ev.target.closest('#kl,#aplK,#ccGen')) resumen(); });
   $('ke').addEventListener('change', ev => { if (!ev.target.closest('#kl,#aplK,#ccGen') && ev.target.id !== 'prv') resumen(); });
-  $('newPrv').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('prv'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.onchange(); }, 'proveedor');
+  $('newPrv').onclick = () => formTercero({}, async t => { await cargarEmpresa(); const sel = $('prv'); sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${esc(t.nombre)} · ${esc(fmtNit(t.numero))}</option>`); sel.value = t.id; sel.dispatchEvent(new Event('change')); }, 'proveedor');
   $('ke').onsubmit = async ev => {
     ev.preventDefault(); leer();
     if (!esCE) c.lineas = c.lineas.filter(l => esLineaProducto(l) || String(l.cuenta || '').trim() || String(l.descripcion || '').trim() || num(l.base)).map(l => esLineaProducto(l)
@@ -5448,6 +5449,34 @@ function vProveedores(m) {
   $('nuevo').onclick = () => formTercero({}, null, 'proveedor');
   $('lst').onclick = ev => { const b = ev.target.closest('[data-ed]'); if (b) formTercero(terc(b.dataset.ed), null, 'proveedor'); };
   pintar();
+}
+
+// Convierte un <select> en un campo donde se escribe para buscar (nombre o NIT). El select sigue siendo el valor real.
+let nBuscable = 0;
+function selectBuscable(sel) {
+  if (!sel || sel._buscable) return; sel._buscable = true;
+  const lid = 'sb' + (++nBuscable), inp = document.createElement('input');
+  inp.type = 'search'; inp.className = 'sel-busca'; inp.autocomplete = 'off'; inp.setAttribute('list', lid);
+  inp.placeholder = sel.options[0]?.value === '' ? sel.options[0].text : 'Escribe para buscar…';
+  if (sel.id) { inp.id = sel.id + '_q'; const lab = document.querySelector(`label[for="${sel.id}"]`); if (lab) lab.htmlFor = inp.id; }
+  inp.required = sel.required; sel.required = false; sel.hidden = true;
+  const dl = document.createElement('datalist'); dl.id = lid;
+  const opciones = () => [...sel.options].filter(o => o.value);
+  const llenar = () => { dl.innerHTML = opciones().map(o => `<option value="${esc(o.text)}"></option>`).join(''); };
+  const sync = () => { const o = sel.selectedOptions[0]; inp.value = o && o.value ? o.text : ''; inp.setCustomValidity(''); };
+  const elegir = () => {
+    const q = inp.value.trim().toLowerCase();
+    if (!q) { inp.setCustomValidity(''); if (sel.value) { sel.value = ''; sel.dispatchEvent(new Event('change')); } return; }
+    const ops = opciones(), o = ops.find(x => x.text.toLowerCase() === q) || (ops.filter(x => x.text.toLowerCase().includes(q)).length === 1 ? ops.find(x => x.text.toLowerCase().includes(q)) : null);
+    if (!o) { inp.setCustomValidity('Escoge uno de la lista.'); return; }
+    inp.setCustomValidity(''); inp.value = o.text;
+    if (sel.value !== o.value) { sel.value = o.value; sel.dispatchEvent(new Event('change')); }
+  };
+  inp.addEventListener('input', () => { if (opciones().some(x => x.text === inp.value)) elegir(); });
+  inp.addEventListener('change', elegir);
+  sel.addEventListener('change', sync);
+  new MutationObserver(() => { llenar(); sync(); }).observe(sel, { childList: true });
+  sel.after(inp, dl); llenar(); sync();
 }
 
 /* ---------- Importar plantillas (datos descargados de la DIAN con el token) ---------- */

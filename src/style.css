@@ -640,3 +640,4 @@ button.cfg-main:hover{background:none}
 .af-cuota{margin:0;padding:8px 10px;border-radius:8px;background:var(--ok-soft);font-weight:600}
 @media (max-width:700px){.grid3.grid-af{grid-template-columns:minmax(0,1fr)}.grid-af .span2{grid-column:auto}}
 .tbl.conc.af td:first-child{width:auto;text-align:left}
+.sel-busca { flex: 1; min-width: 0; }
