@@ -43,6 +43,8 @@ function asiento(d, ctx) {
       // El abono va a la cuenta de clientes con que se causó la factura.
       mov((f && ctx.cfgDe ? ctx.cfgDe(f.id).param : P).clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`, true, distF(a));
     }
+    // Abonos a saldos que dejaron los comprobantes (saldos iniciales): a la cuenta de cartera de ese saldo.
+    for (const x of d.cruces || []) mov(String(x.cuenta || '').trim() || P.clientes, 0, num(x.valor), `Abono ${x.ref || x.cruce || 'saldo inicial'}`.trim(), true);
     mov(P.anticipos, 0, d.anticipo, 'Anticipo recibido');
     const ex = d.retenciones?.excedente;
     if (ex?.cuenta) mov(ex.cuenta, 0, num(ex.valor), 'Valor recibido de más');

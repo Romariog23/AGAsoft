@@ -1086,7 +1086,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
   const calcular = () => {
     leerCab();
     if (esRC) {
-      const t = r2(apl.reduce((s, a) => s + num(a.valor), 0) + num(doc.anticipo));
+      const t = r2(apl.reduce((s, a) => s + num(a.valor), 0) + num(doc.anticipo) + (doc.cruces || []).reduce((s, x) => s + num(x.valor), 0));
       Object.assign(doc, { bruto: t, descuento: 0, base: t, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: t, neto: t });
       $('tot').innerHTML = `<dl class="tot"><dt>Total recibido</dt><dd class="big mono">${money(t)}</dd></dl><p class="hint letras">${enLetras(t)}</p>`;
       vistaAsiento(); return;
@@ -1129,11 +1129,18 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     const tid = $('cli').value;
     const pend = cartera(S.d.documentos, S.d.aplicaciones.filter(a => a.recibo_id !== doc.id)).filter(c => c.factura.tercero_id === tid && (c.saldo > 0.009 || apl.some(a => a.factura_id === c.factura.id)));
     apl = apl.filter(a => pend.some(c => c.factura.id === a.factura_id));
-    $('aplW').innerHTML = !tid ? '<p class="muted">Escoge el cliente para ver sus facturas pendientes.</p>' : !pend.length ? '<p class="muted">Este cliente no tiene facturas pendientes. Puedes registrar el valor como anticipo.</p>' :
+    // Saldos de cartera que dejaron los comprobantes (saldos iniciales, notas de contabilidad).
+    const otros = tid ? carteraViva('cobrar', null, doc.id || '__nuevo').filter(x => String(x.id).includes('|') && x.tercero_id === tid && (x.saldo > 0.009 || (doc.cruces || []).some(c => c.cuenta === x.cuenta && normCruce(c.cruce) === normCruce(x.cruce)))) : [];
+    doc.cruces = (doc.cruces || []).filter(c => otros.some(x => x.cuenta === c.cuenta && normCruce(x.cruce) === normCruce(c.cruce)));
+    const tablaOtros = otros.length ? `<h3>Saldos iniciales y otros documentos</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Valor que paga</th></tr></thead><tbody>
+      ${otros.map(x => { const a = (doc.cruces || []).find(c => c.cuenta === x.cuenta && normCruce(c.cruce) === normCruce(x.cruce)), k = esc(`${x.cuenta}|${x.cruce}`); return `<tr><td class="mono"><a href="${x.href}">${esc(x.doc)}</a></td><td>${fFecha(x.fecha)}</td><td>${fFecha(x.vence)}${x.dias > 0 ? ` <span class="tag bad">${x.dias} d</span>` : ''}</td><td class="r mono">${money(x.saldo)}</td>
+        <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-ctodo="${k}" data-saldo="${x.saldo}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-capl="${k}" data-doc="${esc(String(x.doc).split(' · ')[0])}" value="${a ? num(a.valor) : ''}" aria-label="Valor que paga a ${esc(x.doc)}"></div></td></tr>`; }).join('')}
+      </tbody></table></div>` : '';
+    $('aplW').innerHTML = !tid ? '<p class="muted">Escoge el cliente para ver sus facturas pendientes.</p>' : !pend.length ? (otros.length ? tablaOtros : '<p class="muted">Este cliente no tiene facturas pendientes. Puedes registrar el valor como anticipo.</p>') :
       `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Factura</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Valor que paga</th></tr></thead><tbody>
       ${pend.map(c => { const a = apl.find(x => x.factura_id === c.factura.id); return `<tr><td class="mono">${esc(numDoc(c.factura))}</td><td>${fFecha(c.factura.fecha)}</td><td>${fFecha(c.factura.vence)}${c.diasVencida ? ` <span class="tag bad">${c.diasVencida} d</span>` : ''}</td><td class="r mono">${money(c.saldo)}</td>
         <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-todo="${c.factura.id}" data-saldo="${c.saldo}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-apl="${c.factura.id}" data-max="${c.saldo}" value="${a ? num(a.valor) : ''}" aria-label="Valor que paga"></div></td></tr>`; }).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>${tablaOtros}`;
   };
   const pintarRef = () => {
     if (!$('ref')) return;
@@ -1204,6 +1211,10 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       const fid = el.dataset.apl; const v = num(el.value);
       apl = apl.filter(a => a.factura_id !== fid); if (v > 0) apl.push({ factura_id: fid, valor: v });
     }
+    if (el.dataset.capl) {
+      const [cuenta, ...r] = el.dataset.capl.split('|'), cruce = r.join('|'), v = num(el.value);
+      doc.cruces = (doc.cruces || []).filter(c => !(c.cuenta === cuenta && normCruce(c.cruce) === normCruce(cruce))); if (v > 0) doc.cruces.push({ cuenta, cruce, valor: v, ref: el.dataset.doc || cruce });
+    }
     calcular();
   });
   form.addEventListener('change', ev => { if (ev.target.dataset.k === 'iva_pct') { items[Number(ev.target.closest('tr').dataset.i)].iva_pct = ev.target.value; calcular(); } });
@@ -1212,6 +1223,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if (b.dataset.del !== undefined) { items.splice(Number(b.dataset.del), 1); pintarItems(); calcular(); }
     if (b.dataset.ccl !== undefined) { const i = Number(b.dataset.ccl); dialogoDist(`Centro de costo · línea ${i + 1}`, items[i].cc, d => { items[i].cc = d; pintarItems(); calcular(); }); }
     if (b.dataset.todo) { const inp = m.querySelector(`[data-apl="${b.dataset.todo}"]`); inp.value = num(b.dataset.saldo); inp.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (b.dataset.ctodo) { const inp = [...m.querySelectorAll('[data-capl]')].find(x => x.dataset.capl === b.dataset.ctodo); inp.value = num(b.dataset.saldo); inp.dispatchEvent(new Event('input', { bubbles: true })); }
   });
   if ($('addIt')) $('addIt').onclick = () => { items.push(nuevoItem()); pintarItems(); calcular(); m.querySelector(`tr[data-i="${items.length - 1}"] [data-k=codigo]`)?.focus(); };
   $('fecha').onchange = () => { const t = terc($('cli').value); if ($('fp') && esCredFP() && t?.plazo_dias) $('vence').value = sumarDias($('fecha').value, t.plazo_dias); calcular(); };
@@ -1237,6 +1249,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     // Fechas y referencias vacías van como null: la base de datos no acepta texto vacío en esos campos.
     const g = await store.saveDoc({ ...campos, vence: campos.vence || null, ref_id: campos.ref_id || null, id: doc.id || id || undefined, empresa_id: S.eid, tipo }, its, esRC ? apl.map(a => ({ factura_id: a.factura_id, valor: num(a.valor) })) : []);
     doc.id = g.id; id = g.id;
+    if (esRC && (doc.cruces || []).length && g && !('cruces' in g)) toast('Falta correr en Supabase el archivo supabase/049_recibos_saldos_iniciales.sql: los abonos a saldos iniciales no quedaron guardados.', true);
     if (ccCfg().activo && (tieneDist(doc.cc) || its.some(i => tieneDist(i.cc))) && g && !('cc' in g)) avisoSqlCC();
     await cargarEmpresa();
     return g;
@@ -1259,6 +1272,8 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
       if (doc.total <= 0) return 'Escribe el valor que paga en al menos una factura, o un anticipo.';
       const c = Object.fromEntries(cartera(S.d.documentos, S.d.aplicaciones.filter(a => a.recibo_id !== doc.id)).map(x => [x.factura.id, x]));
       for (const a of apl) if (num(a.valor) > (c[a.factura_id]?.saldo ?? 0) + 0.001) return `El pago a la factura ${numDoc(c[a.factura_id]?.factura || {})} supera su saldo (${money(c[a.factura_id]?.saldo)}).`;
+      const otros = carteraViva('cobrar', null, doc.id || '__nuevo');
+      for (const x of doc.cruces || []) { const o = otros.find(y => String(y.id).includes('|') && y.tercero_id === doc.tercero_id && y.cuenta === x.cuenta && normCruce(y.cruce) === normCruce(x.cruce)); if (!o || num(x.valor) > o.saldo + 0.001) return `El pago a ${o?.doc || x.cruce} supera su saldo (${money(o?.saldo || 0)}).`; }
     }
     // Inventario: la factura sale de una bodega que vende y, si la empresa no deja vender sin existencias, con cantidad suficiente en esa bodega.
     if (conInv() && tipo === 'FV') {
@@ -1360,6 +1375,7 @@ ${e.actividad ? `<p>Actividad económica: ${esc(e.actividad)}</p>` : ''}</div></
     ${d.tipo === 'RC' ? `<p class="rep-suma">La suma de <b>${enLetras(d.total)}</b> (<span class="mono">${money(d.total)}</span>)</p>
       <table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
       ${aplDe(d.id).map(a => { const fa = docById(a.factura_id); return `<tr><td>Abono a factura <span class="mono">${esc(fa ? numDoc(fa) : '')}</span></td><td class="r mono">${money(a.valor)}</td></tr>`; }).join('')}
+      ${(d.cruces || []).map(x => `<tr><td>Abono ${esc(x.ref || x.cruce || 'saldo inicial')} <span class="muted mono">${esc(x.cuenta)}</span></td><td class="r mono">${money(x.valor)}</td></tr>`).join('')}
       ${num(d.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(d.anticipo)}</td></tr>` : ''}
       <tr class="strong"><td>Total</td><td class="r mono">${money(d.total)}</td></tr></tbody></table>` :
     `<table class="tbl rep-items"><thead><tr><th>#</th><th>Código</th><th>Descripción</th><th class="r">Cant.</th><th class="r">Vr. unitario</th><th class="r">Desc.</th><th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
@@ -1594,7 +1610,15 @@ function imprimir(d) {
 // Cartera viva: facturas (o compras) pendientes más los documentos cruce que dejan los comprobantes en las cuentas con cartera.
 // Un comprobante con el número de una factura de AGAsoft como documento cruce abona (o suma) a esa factura.
 const normCruce = v => String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
-function carteraViva(lado = 'cobrar', sinComp = null) {
+// Pagos de recibos (documentos.cruces) y egresos (aplicaciones con cruce) a los saldos que dejan los comprobantes.
+const claveCruce = (t, cuenta, cruce) => `${t || ''}|${cuenta}|${normCruce(cruce)}`;
+function abonosCruce(lado, sinDoc) {
+  const m = new Map(), add = (k, v) => m.set(k, r2((m.get(k) || 0) + num(v)));
+  if (lado === 'cobrar') { for (const d of S.d.documentos || []) if (d.tipo === 'RC' && d.estado === 'emitido' && d.id !== sinDoc) for (const x of d.cruces || []) add(claveCruce(d.tercero_id, x.cuenta, x.cruce), x.valor); }
+  else for (const c of compras()) if (c.tipo === 'CE' && c.estado !== 'anulado' && c.id !== sinDoc) for (const a of c.aplicaciones || []) if ('cruce' in a) add(claveCruce(c.tercero_id, a.cuenta, a.cruce), a.valor);
+  return m;
+}
+function carteraViva(lado = 'cobrar', sinComp = null, sinDoc = null) {
   const docs = lado === 'cobrar'
     ? cartera(S.d.documentos, S.d.aplicaciones).map(x => ({ id: x.factura.id, tercero_id: x.factura.tercero_id, doc: numDoc(x.factura), claves: [numDoc(x.factura)], href: '#/doc/' + x.factura.id,
       fecha: x.factura.fecha, vence: x.factura.vence, valor: x.neto, ajustes: r2(x.nd - x.nc), abonos: x.pagos, saldo: x.saldo, dias: x.diasVencida, cuenta: param().clientes }))
@@ -1602,12 +1626,14 @@ function carteraViva(lado = 'cobrar', sinComp = null) {
       claves: [`${TIPOS_COMPRA[x.compra.tipo].corto} ${x.compra.numero}`, x.compra.num_proveedor].filter(Boolean), href: '#/compra/' + x.compra.id,
       fecha: x.compra.fecha, vence: x.compra.vence, valor: x.neto, ajustes: 0, abonos: x.pagado, saldo: x.saldo, dias: x.diasVencida, cuenta: param().proveedores }));
   const comps = (S.d.comprobantes || []).filter(c => c.id !== sinComp);
-  const out = [];
+  const out = [], pagos = abonosCruce(lado, sinDoc);
   for (const x of carteraComprobantes(comps, idxCuentas(), lado, hoy())) {
     const d = x.cruce && docs.find(o => o.tercero_id === x.tercero_id && o.claves.some(k => normCruce(k) === normCruce(x.cruce)));
     if (d) { d.ajustes = r2(d.ajustes + x.valor); d.abonos = r2(d.abonos + x.abonos); d.saldo = r2(d.saldo + x.valor - x.abonos); continue; }
-    out.push({ id: `${x.comp_id}|${x.cuenta}|${x.cruce}`, tercero_id: x.tercero_id, doc: `${x.cruce || 'Sin documento cruce'} · ${x.cuenta}`, cruce: x.cruce, cuenta: x.cuenta, href: '#/comp/' + x.comp_id,
-      fecha: x.fecha, vence: x.vence, valor: x.valor, ajustes: 0, abonos: x.abonos, saldo: x.saldo, dias: x.dias });
+    const pg = pagos.get(claveCruce(x.tercero_id, x.cuenta, x.cruce)) || 0, cp = comps.find(c => c.id === x.comp_id);
+    // Sin documento cruce, el documento es el comprobante que dejó el saldo (por ejemplo SI 1).
+    out.push({ id: `${x.comp_id}|${x.cuenta}|${x.cruce}`, tercero_id: x.tercero_id, doc: `${x.cruce || (cp ? nomComp(cp) : 'Sin documento cruce')} · ${x.cuenta}`, cruce: x.cruce, cuenta: x.cuenta, href: '#/comp/' + x.comp_id,
+      fecha: x.fecha, vence: x.vence, valor: x.valor, ajustes: 0, abonos: r2(x.abonos + pg), saldo: r2(x.saldo - pg), dias: x.dias });
   }
   return docs.map(d => ({ ...d, cruce: d.claves[0] })).concat(out);
 }
@@ -5111,7 +5137,7 @@ const nomCompra = c => c?.tipo ? `${TIPOS_COMPRA[c.tipo].nombre} ${c.numero != n
 const siguienteCompra = tipo => sigInt(tipo, compras().filter(c => c.tipo === tipo));
 // A quién se le puede pagar con un egreso: proveedores, empleados y quien tenga saldos de nómina por pagar.
 const tercerosEgreso = incluir => { const lab = new Set(movs().filter(mv => /^(2370|2380|2505|2510|2515|2520|2525)/.test(mv.cuenta)).map(mv => mv.tercero_id)); return [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || esEmpleado(t.id) || lab.has(t.id) || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre)); };
-const refAplicacion = a => { if (a.cuenta) return { ...a, ref: `${nomCta(a.cuenta)} (${a.cuenta})` }; const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; };
+const refAplicacion = a => { if ('cruce' in a) return { ...a, ref: a.ref || a.cruce || 'saldo inicial' }; if (a.cuenta) return { ...a, ref: `${nomCta(a.cuenta)} (${a.cuenta})` }; const f = compraById(a.compra_id); return { ...a, ref: f ? `${TIPOS_COMPRA[f.tipo].corto} ${f.numero}${f.num_proveedor ? ' ' + f.num_proveedor : ''}` : '' }; };
 const proveedores = (incluir) => [...S.d.terceros].filter(t => t.es_proveedor || t.id === incluir || compras().some(c => c.tercero_id === t.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
 const cxp = () => cuentasPorPagar(compras(), hoy());
 const ctasDe = re => cuentasAux().filter(c => re.test(c.codigo));
@@ -5270,7 +5296,14 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     const pend = cuentasPorPagar(compras().filter(x => x.id !== c.id), hoy()).filter(x => x.compra.tercero_id === tid && (x.saldo > 0.009 || c.aplicaciones.some(a => a.compra_id === x.compra.id)));
     // Saldos de nómina por pagar a este tercero (salarios, aportes, prestaciones), sin contar este mismo egreso.
     const lab = tid ? porPagarLaboral(movs().filter(mv => mv.doc_id !== c.id), tid) : [];
-    c.aplicaciones = c.aplicaciones.filter(a => a.cuenta ? lab.some(x => x.cuenta === a.cuenta) : pend.some(x => x.compra.id === a.compra_id));
+    // Saldos de proveedores que dejaron los comprobantes (saldos iniciales, notas de contabilidad).
+    const otros = tid ? carteraViva('pagar', null, c.id || '__nuevo').filter(x => String(x.id).includes('|') && x.tercero_id === tid && (x.saldo > 0.009 || c.aplicaciones.some(a => 'cruce' in a && a.cuenta === x.cuenta && normCruce(a.cruce) === normCruce(x.cruce)))) : [];
+    const esOtro = (a, x) => 'cruce' in a && a.cuenta === x.cuenta && normCruce(a.cruce) === normCruce(x.cruce);
+    c.aplicaciones = c.aplicaciones.filter(a => 'cruce' in a ? otros.some(x => esOtro(a, x)) : a.cuenta ? lab.some(x => x.cuenta === a.cuenta) : pend.some(x => x.compra.id === a.compra_id));
+    const tablaOtros = otros.length ? `<h3>Saldos iniciales y otros documentos</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Valor que paga</th></tr></thead><tbody>
+      ${otros.map(x => { const a = c.aplicaciones.find(y => esOtro(y, x)), k = esc(`${x.cuenta}|${x.cruce}`); return `<tr><td class="mono"><a href="${x.href}">${esc(x.doc)}</a></td><td>${fFecha(x.fecha)}</td><td>${fFecha(x.vence)}${x.dias > 0 ? ` <span class="tag bad">${x.dias} d</span>` : ''}</td><td class="r mono">${money(x.saldo)}</td>
+        <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-ctodo="${k}" data-saldo="${x.saldo}" data-doc="${esc(x.doc)}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-capl="${k}" data-doc="${esc(x.doc)}" value="${a ? num(a.valor) : ''}" aria-label="Valor que paga a ${esc(x.doc)}"></div></td></tr>`; }).join('')}
+      </tbody></table></div>` : '';
     const tabla = pend.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Valor que paga</th></tr></thead><tbody>
       ${pend.map(x => { const a = c.aplicaciones.find(y => y.compra_id === x.compra.id); return `<tr><td class="mono">${esc(TIPOS_COMPRA[x.compra.tipo].corto)} ${x.compra.numero}${x.compra.num_proveedor ? ` · ${esc(x.compra.num_proveedor)}` : ''}</td><td>${fFecha(x.compra.fecha)}</td><td>${fFecha(x.compra.vence)}${x.diasVencida ? ` <span class="tag bad">${x.diasVencida} d</span>` : ''}</td><td class="r mono">${money(x.saldo)}</td>
         <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-todo="${x.compra.id}" data-saldo="${x.saldo}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-apl="${x.compra.id}" value="${a ? num(a.valor) || '' : ''}" aria-label="Valor que paga"></div></td></tr>`; }).join('')}
@@ -5279,12 +5312,15 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       ${lab.map(x => { const a = c.aplicaciones.find(y => y.cuenta === x.cuenta); return `<tr><td class="mono">${x.cuenta}</td><td>${esc(nomCta(x.cuenta))}</td><td class="r mono">${money(x.saldo)}</td>
         <td class="r"><div class="row nowrap end"><button type="button" class="ghost sm" data-ltodo="${x.cuenta}" data-saldo="${x.saldo}">Todo</button><input type="number" min="0" step="0.01" class="r mono w-val" data-lab="${x.cuenta}" value="${a ? num(a.valor) || '' : ''}" aria-label="Valor que paga"></div></td></tr>`; }).join('')}
       </tbody></table></div>` : '';
-    $('aplK').innerHTML = !tid ? '<p class="muted">Escoge a quién se le paga para ver lo que tiene pendiente.</p>' : !pend.length && !lab.length ? '<p class="muted">No tiene facturas ni saldos de nómina pendientes. Puedes registrar el valor como anticipo.</p>' : tabla + tablaLab;
+    $('aplK').innerHTML = !tid ? '<p class="muted">Escoge a quién se le paga para ver lo que tiene pendiente.</p>' : !pend.length && !lab.length && !otros.length ? '<p class="muted">No tiene facturas ni saldos de nómina pendientes. Puedes registrar el valor como anticipo.</p>' : tabla + tablaOtros + tablaLab;
     resumen();
   };
   if (esCE) {
-    $('aplK').addEventListener('input', ev => { const l = ev.target.closest('[data-lab]'); if (l) { c.aplicaciones = c.aplicaciones.filter(a => a.cuenta !== l.dataset.lab); if (num(l.value)) c.aplicaciones.push({ cuenta: l.dataset.lab, valor: num(l.value) }); resumen(); return; } const i = ev.target.closest('[data-apl]'); if (!i) return; const id2 = i.dataset.apl; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== id2); if (num(i.value)) c.aplicaciones.push({ compra_id: id2, valor: num(i.value) }); resumen(); });
-    $('aplK').addEventListener('click', ev => { const lb = ev.target.closest('[data-ltodo]'); if (lb) { c.aplicaciones = c.aplicaciones.filter(a => a.cuenta !== lb.dataset.ltodo).concat([{ cuenta: lb.dataset.ltodo, valor: num(lb.dataset.saldo) }]); pintarApl(); return; } const b = ev.target.closest('[data-todo]'); if (!b) return; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== b.dataset.todo).concat([{ compra_id: b.dataset.todo, valor: num(b.dataset.saldo) }]); pintarApl(); });
+    const ponOtro = (k, v, docTxt) => { const [cuenta, ...r] = k.split('|'), cruce = r.join('|'); c.aplicaciones = c.aplicaciones.filter(a => !('cruce' in a && a.cuenta === cuenta && normCruce(a.cruce) === normCruce(cruce))); if (v > 0) c.aplicaciones.push({ cuenta, cruce, valor: v, ref: String(docTxt || cruce).split(' · ')[0] }); };
+    $('aplK').addEventListener('input', ev => { const o = ev.target.closest('[data-capl]'); if (o) { ponOtro(o.dataset.capl, num(o.value), o.dataset.doc); resumen(); return; } });
+    $('aplK').addEventListener('click', ev => { const o = ev.target.closest('[data-ctodo]'); if (o) { ponOtro(o.dataset.ctodo, num(o.dataset.saldo), o.dataset.doc); pintarApl(); } });
+    $('aplK').addEventListener('input', ev => { if (ev.target.closest('[data-capl]')) return; const l = ev.target.closest('[data-lab]'); if (l) { c.aplicaciones = c.aplicaciones.filter(a => 'cruce' in a || a.cuenta !== l.dataset.lab); if (num(l.value)) c.aplicaciones.push({ cuenta: l.dataset.lab, valor: num(l.value) }); resumen(); return; } const i = ev.target.closest('[data-apl]'); if (!i) return; const id2 = i.dataset.apl; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== id2); if (num(i.value)) c.aplicaciones.push({ compra_id: id2, valor: num(i.value) }); resumen(); });
+    $('aplK').addEventListener('click', ev => { if (ev.target.closest('[data-ctodo]')) return; const lb = ev.target.closest('[data-ltodo]'); if (lb) { c.aplicaciones = c.aplicaciones.filter(a => 'cruce' in a || a.cuenta !== lb.dataset.ltodo).concat([{ cuenta: lb.dataset.ltodo, valor: num(lb.dataset.saldo) }]); pintarApl(); return; } const b = ev.target.closest('[data-todo]'); if (!b) return; c.aplicaciones = c.aplicaciones.filter(a => a.compra_id !== b.dataset.todo).concat([{ compra_id: b.dataset.todo, valor: num(b.dataset.saldo) }]); pintarApl(); });
     $('prv').onchange = pintarApl;
     pintarApl();
   } else {
@@ -5575,7 +5611,12 @@ function previaSaldos(out, rows) {
     b.disabled = true; b.textContent = 'Creando…';
     try {
       const ids = new Map(S.d.terceros.map(t => [t.numero, t.id]));
-      for (const t of r.terceros) { const g = await store.save('terceros', { empresa_id: S.eid, tipo_id: t.tipo_id, numero: t.numero, dv: t.dv, nombre: t.nombre, tipo_persona: t.tipo_persona, razon_social: t.razon_social || '', primer_nombre: t.primer_nombre || '', segundo_nombre: t.segundo_nombre || '', primer_apellido: t.primer_apellido || '', segundo_apellido: t.segundo_apellido || '', direccion: '', ciudad: '', telefono: '', correo: '', es_cliente: false, es_proveedor: false, plazo_dias: 0, responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }); ids.set(t.numero, g.id); }
+      // Quien queda con saldo en una cuenta de cartera débito es cliente; en una crédito, proveedor (para cobrarle o pagarle después).
+      const idx = { ...idxCuentas(), ...Object.fromEntries(r.cuentasNuevas.map(c => [c.codigo, c])) };
+      const natC = cod => { for (let n = cod.length; n > 0; n -= n > 2 ? 2 : 1) if (idx[cod.slice(0, n)]?.naturaleza) return idx[cod.slice(0, n)].naturaleza; return /^[1567]/.test(cod) ? 'D' : 'C'; };
+      const rol = num => { const ls = r.lineas.filter(l => l.tercero === num && manejaCartera(l.cuenta, idx)); return { es_cliente: ls.some(l => natC(l.cuenta) === 'D'), es_proveedor: ls.some(l => natC(l.cuenta) === 'C') }; };
+      for (const t of S.d.terceros) { const rl = rol(t.numero); if ((rl.es_cliente && !t.es_cliente) || (rl.es_proveedor && !t.es_proveedor)) await store.save('terceros', { id: t.id, es_cliente: t.es_cliente || rl.es_cliente, es_proveedor: t.es_proveedor || rl.es_proveedor }); }
+      for (const t of r.terceros) { const rl = rol(t.numero); const g = await store.save('terceros', { empresa_id: S.eid, tipo_id: t.tipo_id, numero: t.numero, dv: t.dv, nombre: t.nombre, tipo_persona: t.tipo_persona, razon_social: t.razon_social || '', primer_nombre: t.primer_nombre || '', segundo_nombre: t.segundo_nombre || '', primer_apellido: t.primer_apellido || '', segundo_apellido: t.segundo_apellido || '', direccion: '', ciudad: '', telefono: '', correo: '', es_cliente: rl.es_cliente, es_proveedor: rl.es_proveedor, plazo_dias: 0, responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }); ids.set(t.numero, g.id); }
       for (const c of r.cuentasNuevas) await store.save('cuentas', { empresa_id: S.eid, codigo: c.codigo, nombre: c.nombre, naturaleza: c.naturaleza, activa: true });
       await cargarEmpresa();
       const lineas = r.lineas.map(l => ({ cuenta: l.cuenta, tercero_id: ids.get(l.tercero), detalle: l.detalle, debito: l.debito, credito: l.credito, ...(l.cruce ? { cruce: l.cruce } : {}), ...(l.vence ? { vence: l.vence } : {}) }));
