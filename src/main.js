@@ -3151,20 +3151,24 @@ function vCierre(m) {
       <div class="grow"><label for="cp">Cuenta de la pérdida</label><input id="cp" list="ctas3" class="mono" value="${P.perd}" autocomplete="off"><p class="hint" id="cpN"></p></div></div>
       <div class="row filters"><div class="grow"><label for="ct">Tercero para la utilidad o pérdida y las líneas sin tercero</label><select id="ct">${optsTerceros(terceroEmpresa())}</select><p class="hint">Todas las líneas del cierre llevan tercero. Por lo general es la misma empresa.</p></div></div>
       <datalist id="ctas3">${optsLista(ctas3)}</datalist></section>
-    <section class="panel stack" id="cOut"></section>`;
+    <section class="panel stack" id="cOut"></section>
+    <section class="panel stack"><div><h3>Bloqueo por mes</h3><p class="hint">Opcional. Si quieres, bloquea los meses ya revisados del año que cierras para que nadie cree, edite, anule ni elimine documentos con esas fechas. Haz primero el cierre: con diciembre bloqueado no se puede guardar el comprobante de cierre. No mueve cuentas y se puede desbloquear. También está en Configuración › Bloqueo de periodos.</p></div><div id="cBloq" class="stack"></div></section>`;
+  const pintarBloq = () => panelBloqueo($('cBloq'), $('ca').value, () => { ms0 = null; pintar(); });
   const pintar = () => {
+    pintarBloq();
     anio = $('ca').value;
     const cu = $('cu').value.trim().split(' ')[0], cp = $('cp').value.trim().split(' ')[0];
     $('cuN').textContent = nomCta(cu); $('cpN').textContent = nomCta(cp);
     const hecho = comps().find(c => c.tipo === 'CI' && c.estado !== 'anulado' && c.fecha.startsWith(anio));
-    const ct = $('ct').value, r = cierreAnual(ms, anio, cu, cp, ct);
+    const ct = $('ct').value, r = cierreAnual(ms(), anio, cu, cp, ct);
     $('cOut').innerHTML = `<div class="kpis"><div class="kpi"><span>Ingresos ${anio}</span><b class="mono">${money(r.ingresos)}</b></div><div class="kpi"><span>Gastos y costos</span><b class="mono">${money(r.gastos)}</b></div>
       <div class="kpi ${r.resultado < 0 ? 'warn' : ''}"><span>${r.resultado < 0 ? 'Pérdida' : 'Utilidad'} del ejercicio</span><b class="mono">${money(Math.abs(r.resultado))}</b></div></div>
       ${hecho ? `<p class="aviso">El año ${anio} ya está cerrado con el <a href="#/comp/${hecho.id}">${esc(nomComp(hecho))}</a> del ${fFecha(hecho.fecha)}. Si registras algo más en ${anio}, anula ese cierre y hazlo de nuevo.</p>` : ''}
+      ${!hecho && (emp().bloqueado_hasta || '') >= r.fecha ? `<p class="aviso">Diciembre de ${anio} está bloqueado. Para hacer el cierre, desbloquéalo abajo y vuelve a bloquearlo después.</p>` : ''}
       ${r.resultado ? `<p>La ${r.resultado < 0 ? 'pérdida' : 'utilidad'} de <b>${money(Math.abs(r.resultado))}</b> se lleva a <b class="mono">${esc(r.resultado < 0 ? cp : cu)}</b> ${esc(nomCta(r.resultado < 0 ? cp : cu))}, con fecha ${fFecha(r.fecha)}.</p>` : ''}
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
       ${r.lineas.map(l => `<tr><td><span class="mono">${l.cuenta}</span> ${esc(nomCta(l.cuenta))}</td><td>${esc(l.tercero_id ? terc(l.tercero_id)?.nombre || '' : '')}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay ingresos, gastos ni costos en ese año.</td></tr>'}</tbody></table></div>
-      <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
+      <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 || (emp().bloqueado_hasta || '') >= r.fecha ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
     if ($('cGo')) $('cGo').onclick = async () => {
       for (const [c, q] of [[cu, 'utilidad'], [cp, 'pérdida']]) if (!esAuxiliar(c) || !idxCuentas()[c]) return toast(`La cuenta de la ${q} (${c}) no es auxiliar o no existe en el plan de cuentas.`, true);
       if (r.lineas.some(l => !l.tercero_id)) return toast('Escoge el tercero para la utilidad o pérdida y las líneas sin tercero.', true);
@@ -4087,38 +4091,46 @@ function vTarifasIva(m) {
 /* ---------- Bloqueo de periodos (no es el comprobante de cierre) ---------- */
 const MESES_B = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 let bloqAnio = null;
-async function vBloqueo(m) {
+// Meses bloqueados de un año, con botones para bloquear o desbloquear (lo usan Bloqueo de periodos y Cierre contable).
+function panelBloqueo(el, anioB, rehacer) {
   const e = emp(), h = e.bloqueado_hasta || '';
   const dueno = store.mode === 'local' || S.perfil?.es_admin || e.owner === S.user?.id;
-  const anios = aniosConDatos();
-  if (!bloqAnio || !anios.includes(bloqAnio)) bloqAnio = h ? h.slice(0, 4) : anios[0];
-  const ym = i => `${bloqAnio}-${String(i + 1).padStart(2, '0')}`;
+  const ym = i => `${anioB}-${String(i + 1).padStart(2, '0')}`;
   const cerrado = i => h && `${ym(i)}-01` <= h;
   const cuenta = i => ['documentos', 'compras', 'comprobantes', 'nominas'].reduce((n, t) => n + (S.d[t] || []).filter(x => String(x.fecha || '').startsWith(ym(i)) && x.estado !== 'anulado' && x.estado !== 'borrador').length, 0);
+  el.innerHTML = `<div class="row filters"><p class="grow"><b>${h ? `Bloqueado hasta el ${fFecha(h)}` : 'Ningún mes bloqueado'}</b><br><span class="hint">El bloqueo va en orden: al bloquear un mes quedan bloqueados también los anteriores.${dueno ? '' : ' Solo el dueño de la empresa puede cambiarlo.'}</span></p>
+      ${dueno ? `<div class="row end"><button data-banio class="primary">${cerrado(11) ? `Desbloquear ${anioB}` : `Bloquear todo ${anioB}`}</button></div>` : ''}</div>
+    <div class="bloq-grid">${MESES_B.map((n, i) => `<div class="bloq-mes ${cerrado(i) ? 'on' : ''}"><div><b>${n}</b><br><small class="muted">${cuenta(i)} documentos</small></div>
+      <span class="tag ${cerrado(i) ? '' : 'muted'}">${cerrado(i) ? 'Bloqueado' : 'Abierto'}</span>
+      ${dueno ? `<button class="sm ${cerrado(i) ? 'ghost' : ''}" data-b="${i}">${cerrado(i) ? 'Desbloquear' : 'Bloquear'}</button>` : ''}</div>`).join('')}</div>`;
+  const aplicar = async (nuevo, texto) => {
+    if (!await confirmar('Bloqueo de periodos', texto, 'Confirmar')) return;
+    try { await store.bloquearPeriodo(S.eid, nuevo); await recargar(); toast(nuevo ? `Bloqueado hasta el ${fFecha(nuevo)}.` : 'Ningún mes bloqueado.'); rehacer(); } catch (er) { fail(er); }
+  };
+  el.querySelectorAll('[data-b]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.b;
+    if (cerrado(i)) { const n = hastaAlDesbloquear(ym(i)); aplicar(n, `Se desbloquea ${MESES_B[i].toLowerCase()} de ${anioB}${i < 11 || (h && h > `${anioB}-12-31`) ? ' y los meses siguientes' : ''}. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
+    else { const n = hastaAlBloquear(ym(i)); aplicar(n, `Se bloquea hasta el ${fFecha(n)}, incluidos todos los meses anteriores. Nadie podrá crear, editar, anular ni eliminar documentos con esas fechas.`); }
+  });
+  const bA = el.querySelector('[data-banio]');
+  if (bA) bA.onclick = () => {
+    if (cerrado(11)) { const n = hastaAlDesbloquear(`${anioB}-01`); aplicar(n, `Se desbloquea todo ${anioB} y lo que sigue. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
+    else { const n = `${anioB}-12-31`; aplicar(n, `Se bloquea todo ${anioB} y los años anteriores (hasta el ${fFecha(n)}).`); }
+  };
+}
+
+async function vBloqueo(m) {
+  const h = emp().bloqueado_hasta || '';
+  const anios = aniosConDatos();
+  if (!bloqAnio || !anios.includes(bloqAnio)) bloqAnio = h ? h.slice(0, 4) : anios[0];
   m.innerHTML = `<header class="vhead"><div><h2>Bloqueo de periodos</h2><p class="sub">Un mes bloqueado no deja crear, editar, anular ni eliminar documentos con fecha en ese mes: facturas, notas, recibos, compras, egresos, comprobantes, nómina e inventario. No es el comprobante de cierre: no mueve cuentas.</p></div></header>
     <section class="panel stack">
-      <div class="row filters"><div><label for="bA">Año</label><select id="bA">${anios.map(a => `<option ${a === bloqAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
-        <p class="grow"><b>${h ? `Bloqueado hasta el ${fFecha(h)}` : 'Ningún mes bloqueado'}</b><br><span class="hint">El bloqueo va en orden: al bloquear un mes quedan bloqueados también los anteriores.${dueno ? '' : ' Solo el dueño de la empresa puede cambiarlo.'}</span></p>
-        ${dueno ? `<div class="row end"><button id="bAnio" class="primary">${cerrado(11) ? `Desbloquear ${bloqAnio}` : `Bloquear todo ${bloqAnio}`}</button></div>` : ''}</div>
-      <div class="bloq-grid">${MESES_B.map((n, i) => `<div class="bloq-mes ${cerrado(i) ? 'on' : ''}"><div><b>${n}</b><br><small class="muted">${cuenta(i)} documentos</small></div>
-        <span class="tag ${cerrado(i) ? '' : 'muted'}">${cerrado(i) ? 'Bloqueado' : 'Abierto'}</span>
-        ${dueno ? `<button class="sm ${cerrado(i) ? 'ghost' : ''}" data-b="${i}">${cerrado(i) ? 'Desbloquear' : 'Bloquear'}</button>` : ''}</div>`).join('')}</div>
+      <div class="row filters"><div><label for="bA">Año</label><select id="bA">${anios.map(a => `<option ${a === bloqAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+      <div id="bPan" class="stack"></div>
     </section>
     <section class="panel"><h3>Historial</h3><div id="bLog" class="muted">Cargando…</div></section>`;
   $('bA').onchange = () => { bloqAnio = $('bA').value; vBloqueo(m); };
-  const aplicar = async (nuevo, texto) => {
-    if (!await confirmar('Bloqueo de periodos', texto, 'Confirmar')) return;
-    try { await store.bloquearPeriodo(S.eid, nuevo); await recargar(); toast(nuevo ? `Bloqueado hasta el ${fFecha(nuevo)}.` : 'Ningún mes bloqueado.'); vBloqueo(m); } catch (er) { fail(er); }
-  };
-  m.querySelectorAll('[data-b]').forEach(b => b.onclick = () => {
-    const i = +b.dataset.b;
-    if (cerrado(i)) { const n = hastaAlDesbloquear(ym(i)); aplicar(n, `Se desbloquea ${MESES_B[i].toLowerCase()} de ${bloqAnio}${i < 11 || (h && h > `${bloqAnio}-12-31`) ? ' y los meses siguientes' : ''}. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
-    else { const n = hastaAlBloquear(ym(i)); aplicar(n, `Se bloquea hasta el ${fFecha(n)}, incluidos todos los meses anteriores. Nadie podrá crear, editar, anular ni eliminar documentos con esas fechas.`); }
-  });
-  if ($('bAnio')) $('bAnio').onclick = () => {
-    if (cerrado(11)) { const n = hastaAlDesbloquear(`${bloqAnio}-01`); aplicar(n, `Se desbloquea todo ${bloqAnio} y lo que sigue. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
-    else { const n = `${bloqAnio}-12-31`; aplicar(n, `Se bloquea todo ${bloqAnio} y los años anteriores (hasta el ${fFecha(n)}).`); }
-  };
+  panelBloqueo($('bPan'), bloqAnio, () => vBloqueo(m));
   const log = await store.bloqueosLog?.(S.eid) || [];
   if ($('bLog')) $('bLog').innerHTML = log.length ? `<table class="tbl"><thead><tr><th>Fecha</th><th>Quién</th><th>Bloqueado hasta</th><th>Antes</th></tr></thead><tbody>${log.map(x => `<tr><td class="nowrap">${new Date(x.en).toLocaleString('es-CO')}</td><td>${esc(x.correo || '')}</td><td>${x.hasta ? fFecha(x.hasta) : 'Sin bloqueo'}</td><td class="muted">${x.anterior ? fFecha(x.anterior) : '—'}</td></tr>`).join('')}</tbody></table>` : 'Aún no se ha bloqueado ningún periodo.';
 }
