@@ -227,7 +227,7 @@ const MENU = [
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['costoventas', 'Costo detallado por venta']] },
+  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'], ['importar/saldos', 'Plantilla de saldos iniciales']] },
@@ -251,7 +251,7 @@ const NAV_ICO = {
 const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${NAV_ICO[k]}"/></svg></span>`;
 // Informes y Configuración son un solo enlace del menú: sus páginas de tarjetas llevan a cada pantalla.
 const HUB = {
-  informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'auxgeneral', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
+  informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'auxgeneral', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja', 'costoproducto', 'costoventas'],
   operacion: ['oprecibos', 'opproyectos', 'opoperadores', 'opmaquinas', 'opprogramar', 'opfacturar', 'ophorascliente', 'opporcerrar', 'opcorte'],
   config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg', 'bloqueo'],
 };
@@ -630,6 +630,10 @@ function vInformes(m) {
       ['ventasproducto', 'caja', 'Ventas por producto', 'Qué se vende más', '#/ventasproducto'],
       ['libroventas', 'normal', 'Libro de ventas', 'Facturas y notas del período', '#/libroventas'],
       ['cartera', 'pago', 'Cartera por edades', porCobrar ? `${money(porCobrar)} por cobrar` : 'Sin saldos por cobrar', '#/cartera', null, vencido ? ['warn', 'Vencida'] : null],
+    ]],
+    ['Costos', [
+      ['costoventas', 'tendencia', 'Costo detallado por venta', 'Venta, costo y margen de cada factura', '#/costoventas'],
+      ['costoproducto', 'caja', 'Costo de ventas por producto', 'Costo y utilidad de cada producto', '#/costoproducto'],
     ]],
     ['Compras', [
       ['comprasproveedor', 'empresa', 'Compras por proveedor', 'A quién le compras más', '#/comprasproveedor'],
