@@ -3152,7 +3152,7 @@ function vCierre(m) {
       <div class="row filters"><div class="grow"><label for="ct">Tercero para la utilidad o pérdida y las líneas sin tercero</label><select id="ct">${optsTerceros(terceroEmpresa())}</select><p class="hint">Todas las líneas del cierre llevan tercero. Por lo general es la misma empresa.</p></div></div>
       <datalist id="ctas3">${optsLista(ctas3)}</datalist></section>
     <section class="panel stack" id="cOut"></section>
-    <section class="panel stack"><div><h3>Bloqueo por mes</h3><p class="hint">Opcional. Si quieres, bloquea los meses ya revisados del año que cierras para que nadie cree, edite, anule ni elimine documentos con esas fechas. Haz primero el cierre: con diciembre bloqueado no se puede guardar el comprobante de cierre. No mueve cuentas y se puede desbloquear. También está en Configuración › Bloqueo de periodos.</p></div><div id="cBloq" class="stack"></div></section>`;
+    <section class="panel stack"><div><h3>Bloqueo por mes</h3><p class="hint">Opcional. Si quieres, bloquea los meses ya revisados del año que cierras para que nadie cree, edite, anule ni elimine documentos con esas fechas. El comprobante de cierre se puede hacer aunque el año esté bloqueado. No mueve cuentas y se puede desbloquear. También está en Configuración › Bloqueo de periodos.</p></div><div id="cBloq" class="stack"></div></section>`;
   const pintarBloq = () => panelBloqueo($('cBloq'), $('ca').value, () => { ms0 = null; pintar(); });
   const pintar = () => {
     pintarBloq();
@@ -3164,11 +3164,10 @@ function vCierre(m) {
     $('cOut').innerHTML = `<div class="kpis"><div class="kpi"><span>Ingresos ${anio}</span><b class="mono">${money(r.ingresos)}</b></div><div class="kpi"><span>Gastos y costos</span><b class="mono">${money(r.gastos)}</b></div>
       <div class="kpi ${r.resultado < 0 ? 'warn' : ''}"><span>${r.resultado < 0 ? 'Pérdida' : 'Utilidad'} del ejercicio</span><b class="mono">${money(Math.abs(r.resultado))}</b></div></div>
       ${hecho ? `<p class="aviso">El año ${anio} ya está cerrado con el <a href="#/comp/${hecho.id}">${esc(nomComp(hecho))}</a> del ${fFecha(hecho.fecha)}. Si registras algo más en ${anio}, anula ese cierre y hazlo de nuevo.</p>` : ''}
-      ${!hecho && (emp().bloqueado_hasta || '') >= r.fecha ? `<p class="aviso">Diciembre de ${anio} está bloqueado. Para hacer el cierre, desbloquéalo abajo y vuelve a bloquearlo después.</p>` : ''}
       ${r.resultado ? `<p>La ${r.resultado < 0 ? 'pérdida' : 'utilidad'} de <b>${money(Math.abs(r.resultado))}</b> se lleva a <b class="mono">${esc(r.resultado < 0 ? cp : cu)}</b> ${esc(nomCta(r.resultado < 0 ? cp : cu))}, con fecha ${fFecha(r.fecha)}.</p>` : ''}
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
       ${r.lineas.map(l => `<tr><td><span class="mono">${l.cuenta}</span> ${esc(nomCta(l.cuenta))}</td><td>${esc(l.tercero_id ? terc(l.tercero_id)?.nombre || '' : '')}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No hay ingresos, gastos ni costos en ese año.</td></tr>'}</tbody></table></div>
-      <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 || (emp().bloqueado_hasta || '') >= r.fecha ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
+      <div class="row end"><button class="primary" id="cGo" ${hecho || r.lineas.length < 2 ? 'disabled' : ''}>Hacer el cierre de ${anio}</button></div>`;
     if ($('cGo')) $('cGo').onclick = async () => {
       for (const [c, q] of [[cu, 'utilidad'], [cp, 'pérdida']]) if (!esAuxiliar(c) || !idxCuentas()[c]) return toast(`La cuenta de la ${q} (${c}) no es auxiliar o no existe en el plan de cuentas.`, true);
       if (r.lineas.some(l => !l.tercero_id)) return toast('Escoge el tercero para la utilidad o pérdida y las líneas sin tercero.', true);
