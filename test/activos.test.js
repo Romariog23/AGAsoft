@@ -51,3 +51,13 @@ test('tipos sugeridos se ajustan a las cuentas que existen en el plan', async ()
   assert.equal(maq.dep, '15920501'); assert.equal(maq.gasto, '51600501'); assert.equal(maq.activo, '15200501');
   assert.equal(tiposActivo({ activos_tipos: [{ id: 'x', nombre: 'X', meses: 1 }] }, []).length, 1);
 });
+
+test('repotenciación suma al costo desde su mes y toma la nueva vigencia; tercero propio del activo', async () => {
+  const { costoTotal } = await import('../src/activos.js');
+  const a = { id: 'r', tipo: 'maquinaria', inicio: '2026-01', costo: 1200, residual: 0, dep_inicial: 0, vida_meses: 12, adiciones: [{ desde: '2026-07', valor: 600, restantes: 12 }] };
+  const t = tablaDepreciacion(a);
+  assert.equal(t[5].cuota, 100); assert.equal(t[6].periodo, '2026-07'); assert.equal(t[6].cuota, 100); // (1200 − 600 + 600) ÷ 12
+  assert.equal(t.length, 18); assert.equal(t[17].libros, 0); assert.equal(costoTotal(a), 1800);
+  const ls = lineasDepreciacion([{ activo: a, cuota: 100, cuentas: { gasto: 'g', dep: 'd' } }, { activo: { id: 'b' }, cuota: 5, cuentas: { gasto: 'g', dep: 'd' } }], '2026-07', 'emp', x => x.id === 'r' ? 'prov' : '');
+  assert.deepEqual(ls.map(l => l.tercero_id), ['prov', 'prov', 'emp', 'emp']);
+});

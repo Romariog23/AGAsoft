@@ -19,7 +19,7 @@ import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, compras
 import { xlsx } from './xlsx.js';
 import { esCuentaBanco, inicioMes, mesAnterior, movimientosLibro, leerExtracto, valorBanco, autoCruzar, cuadraCruce, estadoConciliacion, lineasContabilizar } from './conciliacion.js';
 import { leerXlsx } from './xlsxleer.js';
-import { TIPOS_ACTIVO_DEF, tiposActivo, depreciable, finDeMes, cuentasActivo, tablaDepreciacion, mesesContabilizados, estadoActivo, cuotasDelMes, lineasDepreciacion, erroresActivo } from './activos.js';
+import { TIPOS_ACTIVO_DEF, tiposActivo, depreciable, costoTotal, mesSig, finDeMes, cuentasActivo, tablaDepreciacion, mesesContabilizados, estadoActivo, cuotasDelMes, lineasDepreciacion, erroresActivo } from './activos.js';
 import { conVersion, inactiva, usosCuenta, trasladarLocal, manejaCartera, carteraComprobantes } from './cuentas.js';
 import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
@@ -2720,6 +2720,8 @@ const activoById = id => activos().find(a => a.id === id);
 const tiposAF = () => tiposActivo(emp()?.contabilidad, S.d.cuentas.filter(c => c.activa !== false).map(c => c.codigo));
 const tipoAF = id => tiposAF().find(t => t.id === id);
 const hechosAF = () => mesesContabilizados(comps());
+// Tercero propio del activo: el de su factura de compra o documento soporte; si no, el que se le asignó.
+const terAF = a => (a.compra_id && compraById(a.compra_id)?.tercero_id) || a.tercero_id || '';
 const faltaSqlAF = e => /activos|comprobantes_tipo_check/.test(e.message) && /exist|schema|relation|find|check/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/047_activos_fijos.sql.') : e;
 const ESTADO_AF = { depreciando: '<span class="tag ok">Depreciando</span>', depreciado: '<span class="tag warn">Depreciado</span>', baja: '<span class="tag bad">De baja</span>', no: '<span class="tag">No se deprecia</span>' };
 const mesLargo = p => { const t = new Date(p + '-15T12:00:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }); return t.charAt(0).toUpperCase() + t.slice(1); };
@@ -2730,7 +2732,7 @@ function vActivos(m) {
   const filas = activos().map(a => ({ a, e: estadoActivo(a, { tipos, hechos }) })).sort((x, y) => String(x.a.codigo).localeCompare(String(y.a.codigo), 'es', { numeric: true }));
   const vivos = filas.filter(x => x.a.estado !== 'baja');
   const cuotaMes = x => x.e.tabla.find(t => t.periodo === mes)?.cuota || 0;
-  const tot = k => r2(vivos.reduce((s, x) => s + (k === 'costo' ? r2(x.a.costo) : k === 'cuota' ? cuotaMes(x) : x.e[k]), 0));
+  const tot = k => r2(vivos.reduce((s, x) => s + (k === 'costo' ? x.e.costo : k === 'cuota' ? cuotaMes(x) : x.e[k]), 0));
   const pend = cuotasDelMes(activos(), mes, { tipos, hechos });
   m.innerHTML = `<header class="vhead"><div><h2>Activos fijos</h2><p class="sub">Propiedad, planta y equipo con su depreciación por línea recta. Cada mes se contabiliza con un comprobante de depreciación (DP).</p></div>
     <div class="row"><a class="btn ghost" href="#/activostipos">Tipos de activo</a><button id="afCsv" class="ghost" ${filas.length ? '' : 'disabled'}>Descargar CSV</button><a class="btn" href="#/depreciar">Depreciar el mes</a><a class="btn primary" href="#/activonuevo">+ Nuevo activo</a></div></header>
@@ -2739,7 +2741,7 @@ function vActivos(m) {
     ${pend.anterior ? `<p class="aviso">Hay depreciación pendiente desde ${esc(mesLargo(pend.anterior).toLowerCase())}. <a href="#/depreciar">Depreciar ahora</a></p>` : ''}
     <section class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Activo</th><th>Tipo</th><th>Desde</th><th class="r">Costo</th><th class="r">Cuota mes</th><th class="r">Dep. acumulada</th><th class="r">Valor en libros</th><th>Estado</th></tr></thead><tbody>
       ${filas.map(({ a, e }) => `<tr class="click" data-id="${a.id}"><td class="mono">${esc(a.codigo)}</td><td>${esc(a.nombre)}${a.origen === 'saldo' ? ' <span class="tag">Saldo inicial</span>' : ''}</td><td>${esc(tipoAF(a.tipo)?.nombre || a.tipo)}</td><td class="nowrap">${a.inicio ? esc(a.inicio.slice(5) + '/' + a.inicio.slice(0, 4)) : '—'}</td>
-        <td class="r mono">${valor(a.costo)}</td><td class="r mono">${a.estado === 'baja' ? '' : valor(cuotaMes({ e }))}</td><td class="r mono">${valor(e.acumulada)}</td><td class="r mono">${money(e.libros)}</td><td>${ESTADO_AF[e.estado]}</td></tr>`).join('')}
+        <td class="r mono">${valor(e.costo)}</td><td class="r mono">${a.estado === 'baja' ? '' : valor(cuotaMes({ e }))}</td><td class="r mono">${valor(e.acumulada)}</td><td class="r mono">${money(e.libros)}</td><td>${ESTADO_AF[e.estado]}</td></tr>`).join('')}
       <tr class="strong"><td></td><td colspan="3">Total (sin los dados de baja)</td><td class="r mono">${money(tot('costo'))}</td><td class="r mono">${money(tot('cuota'))}</td><td class="r mono">${money(tot('acumulada'))}</td><td class="r mono">${money(tot('libros'))}</td><td></td></tr></tbody></table></div></section>`
     : `<section class="panel stack"><p>Aún no hay activos fijos.</p><p class="hint">Crea cada activo con su tipo, costo y fecha. Los que vienen de otro programa se crean como <b>saldo inicial</b>, con la depreciación que ya llevan y los meses de vigencia que les quedan.</p><div><a class="btn primary" href="#/activonuevo">+ Nuevo activo</a></div></section>`}`;
   m.querySelectorAll('[data-id]').forEach(r => r.onclick = () => { location.hash = '#/activo/' + r.dataset.id; });
@@ -2772,7 +2774,7 @@ function vActivoForm(m, id) {
         <div class="dep"><label>Cuota mensual (línea recta)</label><p class="mono af-cuota" id="afCuota">—</p></div>
         <div class="solo-nuevo"><label for="f_doc">Documento de compra</label><select id="f_doc" name="doc">${x ? '' : '<option value="FC">Generar factura de compra (FC) al guardar</option><option value="DS">Generar documento soporte (DS) al guardar</option>'}<option value="" ${x ? '' : 'selected'}>Ninguno${x ? '' : ' (ya está registrada)'}</option>
           ${compras().filter(c => ['FC', 'DS'].includes(c.tipo) && c.estado !== 'anulado').sort((p, q) => q.fecha.localeCompare(p.fecha)).slice(0, 300).map(c => `<option value="${c.id}" ${c.id === a.compra_id ? 'selected' : ''}>${esc(nomCompra(c))} · ${esc(terc(c.tercero_id)?.nombre || '')} · ${fFecha(c.fecha)}</option>`).join('')}</select></div>
-        <div class="solo-gen"><label for="f_prov">Proveedor</label><select id="f_prov" name="prov">${optsTerceros('')}</select></div>
+        <div><label for="f_prov">Proveedor o tercero del activo</label><select id="f_prov" name="prov">${optsTerceros(a.tercero_id || '')}</select><p class="hint">Si el activo tiene factura, la depreciación usa el tercero de la factura.</p></div>
         <div class="solo-saldo-si"><label class="check"><input type="checkbox" id="f_si" name="si" ${x ? '' : 'checked'}> Generar el comprobante de saldos iniciales al guardar</label></div>
         ${campo('ubicacion', 'Ubicación o responsable', a.ubicacion, 'maxlength="120"')}
         ${campo('serie', 'Serie o placa', a.serie, 'maxlength="60"')}
@@ -2791,6 +2793,7 @@ function vActivoForm(m, id) {
     costo: yaDep ? a.costo : r2(num(val('costo'))), residual: yaDep ? a.residual : r2(num(val('residual'))), inicio: yaDep ? a.inicio : val('inicio') || null,
     dep_inicial: yaDep ? a.dep_inicial : val('origen') === 'saldo' ? r2(num(val('dep_inicial'))) : 0, vida_meses: yaDep ? a.vida_meses : Math.round(num(val('vida_meses'))),
     compra_id: val('origen') === 'saldo' || ['FC', 'DS'].includes(val('doc')) ? (x ? a.compra_id || null : null) : val('doc') || null,
+    tercero_id: val('prov') || null,
     ubicacion: val('ubicacion').trim(), serie: val('serie').trim(), ...Object.fromEntries(['cta_activo', 'cta_dep', 'cta_gasto'].map(k => [k, val(k).trim().split(' ')[0]])),
     ...Object.fromEntries([1, 2, 3].map(n => [`cc${n}`, F.elements['cc' + n] ? F.elements['cc' + n].value || null : a['cc' + n] || null])) });
   const pintar = () => {
@@ -2798,7 +2801,6 @@ function vActivoForm(m, id) {
     F.querySelectorAll('.dep').forEach(el => el.hidden = !dep);
     F.querySelectorAll('.solo-saldo').forEach(el => el.hidden = !dep || !saldo);
     F.querySelectorAll('.solo-nuevo').forEach(el => el.hidden = saldo);
-    F.querySelectorAll('.solo-gen').forEach(el => el.hidden = saldo || !['FC', 'DS'].includes(val('doc')));
     F.querySelectorAll('.solo-saldo-si').forEach(el => el.hidden = !saldo || !!x);
     F.querySelector('label[for="f_vida_meses"]').textContent = saldo ? 'Vigencia que le queda (meses)' : 'Vida útil (meses)';
     const tb = tablaDepreciacion(b, { tipos: tiposAF() }), cuota = tb[0]?.cuota || 0;
@@ -2829,11 +2831,11 @@ function vActivoForm(m, id) {
       const det = `${g.codigo} ${g.nombre}`.trim();
       if (gen) {
         // El documento de compra se abre ya armado; al guardarlo queda enlazado al activo.
-        S.compraBorrador = { activo_id: g.id, campos: { tipo: gen, fecha: g.fecha_compra || hoy(), tercero_id: val('prov'), observaciones: `Compra del activo fijo ${det}`, lineas: [{ cuenta: C.activo, descripcion: det, base: r2(g.costo), iva_pct: '0' }] } };
+        S.compraBorrador = { alGuardar: async cg => store.save('activos', { id: g.id, compra_id: cg.id }), campos: { tipo: gen, fecha: g.fecha_compra || hoy(), tercero_id: val('prov'), observaciones: `Compra del activo fijo ${det}`, lineas: [{ cuenta: C.activo, descripcion: det, base: r2(g.costo), iva_pct: '0' }] } };
         location.hash = '#/compranueva?tipo=' + gen;
       } else if (!x && b.origen === 'saldo' && F.elements.si?.checked) {
         // Saldo inicial: el activo al costo, su depreciación acumulada y la contrapartida (la cuenta puente que use la empresa para los saldos iniciales).
-        const ter = terceroEmpresa();
+        const ter = g.tercero_id || terceroEmpresa();
         S.compBorrador = { tipo: 'SI', fecha: g.fecha_compra || hoy(), descripcion: `Saldo inicial activo fijo ${det}`, volver: '#/activo/' + g.id, lineas: [
           { cuenta: C.activo, tercero_id: ter, detalle: det, debito: r2(g.costo), credito: '' },
           ...(r2(g.dep_inicial) && C.dep ? [{ cuenta: C.dep, tercero_id: ter, detalle: `${det} · depreciación acumulada`, debito: '', credito: r2(g.dep_inicial) }] : []),
@@ -2851,12 +2853,14 @@ function vActivo(m, id) {
   const compDe = p => comps().find(c => c.tipo === 'DP' && c.estado !== 'anulado' && (c.lineas || []).some(l => l.activo === a.id && (l.periodo || c.fecha.slice(0, 7)) === p));
   const sig = e.siguiente?.periodo;
   m.innerHTML = `${cabAF(`${esc(a.codigo)} · ${esc(a.nombre)}`, `${esc(t?.nombre || a.tipo)} · ${depreciable(t) ? `línea recta · ${a.origen === 'saldo' ? `saldo inicial con ${a.vida_meses} meses de vigencia` : `${a.vida_meses} meses`} desde ${esc(a.inicio ? mesLargo(a.inicio).toLowerCase() : '—')}` : 'no se deprecia'} ${ESTADO_AF[e.estado]}`,
-    a.estado === 'baja' ? '' : `<a class="btn ghost" href="#/activoeditar/${a.id}">Editar</a>${depreciable(t) && e.pendientes.length ? '<button id="afVida" class="ghost">Cambiar vida útil</button>' : ''}<button id="afBaja" class="ghost">Dar de baja</button>`)}
-    <section class="kpis"><div class="kpi"><span>Costo</span><b class="mono">${money(a.costo)}</b></div><div class="kpi"><span>Depreciación acumulada</span><b class="mono">${money(e.acumulada)}</b></div>
+    a.estado === 'baja' ? '' : `<a class="btn ghost" href="#/activoeditar/${a.id}">Editar</a>${depreciable(t) && e.pendientes.length ? '<button id="afVida" class="ghost">Cambiar vida útil</button>' : ''}${depreciable(t) ? '<button id="afRep" class="ghost">Repotenciar</button>' : ''}<button id="afBaja" class="ghost">Dar de baja</button>`)}
+    <section class="kpis"><div class="kpi"><span>Costo${(a.adiciones || []).length ? ' con repotenciaciones' : ''}</span><b class="mono">${money(e.costo)}</b></div><div class="kpi"><span>Depreciación acumulada</span><b class="mono">${money(e.acumulada)}</b></div>
       <div class="kpi"><span>Valor en libros</span><b class="mono">${money(e.libros)}</b></div><div class="kpi"><span>Meses que faltan</span><b>${e.pendientes.length}${e.tabla.length ? ` de ${e.tabla.length}` : ''}</b></div></section>
     <section class="panel stack"><div class="grid3 hint">
       <p>Cuenta del activo: <b class="mono">${esc(C.activo)}</b> ${esc(nomCta(C.activo))}</p>${depreciable(t) ? `<p>Depreciación acumulada: <b class="mono">${esc(C.dep)}</b> ${esc(nomCta(C.dep))}</p><p>Gasto: <b class="mono">${esc(C.gasto)}</b> ${esc(nomCta(C.gasto))}</p>` : ''}
       ${a.fecha_compra ? `<p>Compra: ${fFecha(a.fecha_compra)}${a.compra_id && compraById(a.compra_id) ? ` · <a href="#/compra/${a.compra_id}">${esc(nomCompra(compraById(a.compra_id)))}</a>` : ''}</p>` : ''}${a.residual ? `<p>Valor residual: ${money(a.residual)}</p>` : ''}${a.dep_inicial ? `<p>Depreciación traída de otro programa: ${money(a.dep_inicial)}</p>` : ''}${a.ubicacion ? `<p>Ubicación: ${esc(a.ubicacion)}</p>` : ''}${a.serie ? `<p>Serie o placa: ${esc(a.serie)}</p>` : ''}
+      ${terAF(a) ? `<p>Tercero de la depreciación: ${esc(terc(terAF(a))?.nombre || '')}</p>` : ''}
+      ${(a.adiciones || []).map(x => `<p>Repotenciación ${fFecha(x.fecha)}: ${money(x.valor)}${x.detalle ? ` · ${esc(x.detalle)}` : ''}${x.restantes ? ` · ${x.restantes} meses desde ${esc(mesLargo(x.desde).toLowerCase())}` : ''}${x.compra_id && compraById(x.compra_id) ? ` · <a href="#/compra/${x.compra_id}">${esc(nomCompra(compraById(x.compra_id)))}</a>` : ''}</p>`).join('')}
       ${(a.cambios || []).map(c => `<p>Vida útil cambiada desde ${esc(mesLargo(c.desde).toLowerCase())}: ${c.restantes} meses restantes</p>`).join('')}
       ${a.estado === 'baja' ? `<p>Dado de baja el ${fFecha(a.baja_fecha)}${a.baja_motivo ? ` · ${esc(a.baja_motivo)}` : ''}</p>` : ''}</div></section>
     ${e.tabla.length ? `<section class="panel stack"><h3>Tabla de depreciación</h3><div class="tbl-wrap"><table class="tbl conc af"><thead><tr><th>Mes</th><th class="r">Cuota</th><th class="r">Dep. acumulada</th><th class="r">Valor en libros</th><th>Comprobante</th></tr></thead><tbody>
@@ -2871,6 +2875,31 @@ function vActivo(m, id) {
     await store.save('activos', { id: a.id, cambios: [...(a.cambios || []).filter(c => c.desde !== desde), { desde, restantes }].sort((x, y) => x.desde.localeCompare(y.desde)) }).catch(er => { throw faltaSqlAF(er); });
     await cargarEmpresa(); toast('Vida útil cambiada.'); vActivo(m, id);
   });
+  if ($('afRep')) $('afRep').onclick = () => {
+    const ultimo = e.tabla.filter(x => h.has(x.periodo)).map(x => x.periodo).pop();
+    const docs = compras().filter(c => ['FC', 'DS'].includes(c.tipo) && c.estado !== 'anulado').sort((p, q) => q.fecha.localeCompare(p.fecha)).slice(0, 300);
+    dialogo(`<h2>Repotenciar ${esc(a.codigo)}</h2><p class="hint">Una mejora que aumenta la vida útil o la capacidad del activo se suma a su costo (NIIF, sección 17). Desde el mes siguiente a lo ya depreciado, lo que falta se reparte en los meses que escribas.</p>
+      <div class="grid2">${campo('fecha', 'Fecha', hoy(), 'type="date" required')}${campo('valor', 'Valor de la repotenciación', '', 'type="number" min="0" step="0.01" required')}</div>
+      ${campo('detalle', 'Descripción', '', 'maxlength="120" placeholder="Cambio de motor, ampliación…"')}
+      <div class="grid2">${campo('restantes', 'Meses de vida que le quedan desde ahí', e.pendientes.length || '', 'type="number" min="1" step="1"')}
+        <div><label for="f_rdoc">Documento de compra</label><select id="f_rdoc" name="doc"><option value="FC">Generar factura de compra (FC)</option><option value="DS">Generar documento soporte (DS)</option><option value="">Ninguno</option>${docs.map(c => `<option value="${c.id}">${esc(nomCompra(c))} · ${esc(terc(c.tercero_id)?.nombre || '')}</option>`).join('')}</select></div></div>
+      <div><label for="f_rprov">Proveedor</label><select id="f_rprov" name="prov">${optsTerceros(terAF(a))}</select></div>${pie('Guardar')}`, async fd => {
+      const fecha = fd.get('fecha'), v = r2(num(fd.get('valor'))), doc = fd.get('doc'), prov = fd.get('prov');
+      if (!fecha || !(v > 0)) throw new Error('Escribe la fecha y el valor de la repotenciación.');
+      if (['FC', 'DS'].includes(doc) && !prov) throw new Error('Escoge el proveedor para generar el documento de compra.');
+      const fm = fecha.slice(0, 7), desde = ultimo && fm <= ultimo ? mesSig(ultimo) : fm < a.inicio ? a.inicio : fm;
+      const x = { id: uidConc(), fecha, desde, valor: v, detalle: String(fd.get('detalle') || '').trim(), restantes: Math.round(num(fd.get('restantes'))) || null, compra_id: ['FC', 'DS', ''].includes(doc) ? null : doc };
+      const adiciones = [...(a.adiciones || []), x];
+      await store.save('activos', { id: a.id, adiciones }).catch(er => { throw faltaSqlAF(er); });
+      await cargarEmpresa(); toast('Repotenciación registrada.');
+      if (['FC', 'DS'].includes(doc)) {
+        const det = `Repotenciación ${a.codigo} ${a.nombre}${x.detalle ? ' · ' + x.detalle : ''}`;
+        S.compraBorrador = { alGuardar: async cg => { const b = activoById(a.id); return store.save('activos', { id: a.id, adiciones: (b.adiciones || []).map(y => y.id === x.id ? { ...y, compra_id: cg.id } : y) }); },
+          campos: { tipo: doc, fecha, tercero_id: prov, observaciones: det, lineas: [{ cuenta: C.activo, descripcion: det, base: v, iva_pct: '0' }] } };
+        location.hash = '#/compranueva?tipo=' + doc;
+      } else vActivo(m, id);
+    });
+  };
   if ($('afBaja')) $('afBaja').onclick = () => dialogo(`<h2>Dar de baja</h2><p class="hint">El activo deja de depreciarse después del mes de la baja. Luego se abre una nota de contabilidad con el retiro del activo y de su depreciación; tú escoges la cuenta de la diferencia (pérdida, venta u otra).</p>
     <div class="grid2">${campo('fecha', 'Fecha de la baja', hoy(), 'type="date" required')}${campo('motivo', 'Motivo', '', 'maxlength="120" placeholder="Venta, daño, fin de uso…"')}</div>${pie('Dar de baja')}`, async fd => {
     const fecha = fd.get('fecha'); if (!fecha) throw new Error('Escoge la fecha de la baja.');
@@ -2882,7 +2911,7 @@ function vActivo(m, id) {
     S.compBorrador = { tipo: 'CC', fecha, descripcion: det, volver: '#/activo/' + a.id, lineas: [
       ...(e.acumulada && C.dep ? [{ cuenta: C.dep, tercero_id: ter, detalle: det, debito: e.acumulada, credito: '' }] : []),
       ...(e.libros ? [{ cuenta: '', tercero_id: ter, detalle: `${det} · valor en libros`, debito: e.libros, credito: '' }] : []),
-      { cuenta: C.activo, tercero_id: ter, detalle: det, debito: '', credito: r2(a.costo) }] };
+      { cuenta: C.activo, tercero_id: ter, detalle: det, debito: '', credito: e.costo }] };
     location.hash = '#/compnuevo?tipo=CC';
   });
 }
@@ -2924,19 +2953,19 @@ function vDepreciar(m) {
   const pintar = () => {
     const { filas, anterior } = cuotasDelMes(activos(), mes, { tipos, hechos });
     const ter = $('dpT')?.value ?? terceroEmpresa();
-    const ls = lineasDepreciacion(filas, mes, ter), total = r2(filas.reduce((s, x) => s + x.cuota, 0));
+    const ls = lineasDepreciacion(filas, mes, ter, terAF), total = r2(filas.reduce((s, x) => s + x.cuota, 0));
     const hecho = comps().find(c => c.tipo === 'DP' && c.estado !== 'anulado' && (c.periodo || c.fecha.slice(0, 7)) === mes);
     m.innerHTML = `${cabAF('Depreciar el mes', 'Un comprobante de depreciación (DP) con la cuota del mes de cada activo: débito al gasto y crédito a la depreciación acumulada.')}
       <section class="panel stack"><div class="row filters"><div><label for="dpM">Mes</label><input id="dpM" type="month" value="${mes}"></div><div><label>Fecha del comprobante</label><p class="mono">${fFecha(finDeMes(mes))}</p></div>
-        <div class="grow"><label for="dpT">Tercero de las líneas</label><select id="dpT">${optsTerceros(ter)}</select><p class="hint">Todas las líneas llevan tercero; por defecto la propia empresa.</p></div></div>
+        <div class="grow"><label for="dpT">Tercero para los activos sin factura ni tercero</label><select id="dpT">${optsTerceros(ter)}</select><p class="hint">Cada activo usa el tercero de su factura de compra (o el que se le asignó); los demás llevan este, por defecto la propia empresa.</p></div></div>
       ${anterior ? `<p class="aviso">Falta depreciar ${esc(mesLargo(anterior).toLowerCase())}. Contabiliza los meses en orden. <button id="dpAnt" class="ghost sm">Ir a ${esc(mesLargo(anterior).toLowerCase())}</button></p>` : ''}
       ${hecho ? `<p class="hint">Ya hay depreciación de este mes en el <a href="#/comp/${hecho.id}">${esc(nomComp(hecho))}</a>. Abajo solo salen los activos que faltan.</p>` : ''}
-      ${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Activo</th><th>Tipo</th><th class="r">Cuota</th></tr></thead><tbody>
-        ${filas.map(x => `<tr><td><a href="#/activo/${x.activo.id}">${esc(x.activo.codigo)}</a> · ${esc(x.activo.nombre)}</td><td>${esc(tipoAF(x.activo.tipo)?.nombre || '')}</td><td class="r mono">${valor(x.cuota)}</td></tr>`).join('')}
-        <tr class="strong"><td colspan="2">Total depreciación de ${esc(mesLargo(mes).toLowerCase())}</td><td class="r mono">${money(total)}</td></tr></tbody></table></div>
-      <h3>Asiento que se va a contabilizar</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
-        ${ls.map(l => `<tr><td><span class="mono">${esc(l.cuenta)}</span> ${esc(nomCta(l.cuenta))}</td><td>${esc(l.detalle)}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('')}
-        <tr class="strong"><td colspan="2">Sumas iguales</td><td class="r mono">${money(total)}</td><td class="r mono">${money(total)}</td></tr></tbody></table></div>
+      ${filas.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Activo</th><th>Tipo</th><th>Tercero</th><th class="r">Cuota</th></tr></thead><tbody>
+        ${filas.map(x => `<tr><td><a href="#/activo/${x.activo.id}">${esc(x.activo.codigo)}</a> · ${esc(x.activo.nombre)}</td><td>${esc(tipoAF(x.activo.tipo)?.nombre || '')}</td><td>${esc(terc(terAF(x.activo) || ter)?.nombre || '—')}</td><td class="r mono">${valor(x.cuota)}</td></tr>`).join('')}
+        <tr class="strong"><td colspan="3">Total depreciación de ${esc(mesLargo(mes).toLowerCase())}</td><td class="r mono">${money(total)}</td></tr></tbody></table></div>
+      <h3>Asiento que se va a contabilizar</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Detalle</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+        ${ls.map(l => `<tr><td><span class="mono">${esc(l.cuenta)}</span> ${esc(nomCta(l.cuenta))}</td><td>${esc(l.detalle)}</td><td>${esc(terc(l.tercero_id)?.nombre || '—')}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('')}
+        <tr class="strong"><td colspan="3">Sumas iguales</td><td class="r mono">${money(total)}</td><td class="r mono">${money(total)}</td></tr></tbody></table></div>
       <p class="err" id="dpErr" hidden></p>
       <div class="row end"><a class="btn ghost" href="#/activos">Cancelar</a><button id="dpGo" class="primary" ${anterior ? 'disabled' : ''}>Contabilizar</button></div>`
       : `<p class="muted">No hay depreciación pendiente en ${esc(mesLargo(mes).toLowerCase())}.</p>`}</section>`;
@@ -2946,7 +2975,7 @@ function vDepreciar(m) {
     if ($('dpGo')) $('dpGo').onclick = async () => {
       const c = { empresa_id: S.eid, tipo: 'DP', fecha: finDeMes(mes), descripcion: `Depreciación de activos fijos ${mesLargo(mes).toLowerCase()}`, lineas: ls, estado: 'contabilizado' };
       const errs = erroresComprobante(c, S.d.cuentas).concat(erroresCC(ls, ccCfg(), centros()));
-      if (!$('dpT').value) errs.unshift('Escoge el tercero de las líneas.');
+      if (ls.some(l => !l.tercero_id)) errs.unshift('Escoge el tercero para los activos que no tienen factura ni tercero.');
       if (errs.length) { $('dpErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>'); $('dpErr').hidden = false; return; }
       $('dpGo').disabled = true;
       try {
@@ -5104,7 +5133,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
   }
   // Borrador armado desde otro módulo (por ejemplo, la compra de un activo fijo).
   let activoLink = null;
-  if (!id && S.compraBorrador && tipo !== 'NA') { const b = S.compraBorrador; S.compraBorrador = null; activoLink = b.activo_id || null; c = { ...c, ...b.campos, tipo }; const t = terc(c.tercero_id); if (t) Object.assign(c, { retefuente_pct: num(t.ret_compra_fuente_pct), reteiva_pct: num(t.ret_compra_iva_pct), reteica_milaje: num(t.ret_compra_ica_milaje) }); }
+  if (!id && S.compraBorrador && tipo !== 'NA') { const b = S.compraBorrador; S.compraBorrador = null; activoLink = b.alGuardar || null; c = { ...c, ...b.campos, tipo }; const t = terc(c.tercero_id); if (t) Object.assign(c, { retefuente_pct: num(t.ret_compra_fuente_pct), reteiva_pct: num(t.ret_compra_iva_pct), reteica_milaje: num(t.ret_compra_ica_milaje) }); }
   const T = TIPOS_COMPRA[tipo], esCE = tipo === 'CE';
   const pagado = !esCE && id && compras().some(e => e.tipo === 'CE' && e.estado !== 'anulado' && (e.aplicaciones || []).some(a => a.compra_id === id));
   const RET_C = { retefuente: ['krfC', 'krf'], reteiva: ['kriC', 'kri'], reteica: ['kricaC', 'krica'] };
@@ -5304,7 +5333,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       }
       // El proveedor queda marcado como tal.
       const t2 = terc(c.tercero_id); if (t2 && !t2.es_proveedor && !esEmpleado(t2.id)) { try { await store.save('terceros', { id: t2.id, es_proveedor: true }); } catch (_) {} }
-      if (activoLink) { try { await store.save('activos', { id: activoLink, compra_id: g.id }); } catch (_) {} }
+      if (activoLink && !id) { try { await activoLink(g); } catch (_) {} }
       await cargarEmpresa(); toast('Guardado y contabilizado.'); location.hash = '#/compra/' + g.id;
     } catch (e) { $('kErr').textContent = /electronica|ref_id|concepto|compras_tipo_check/.test(e.message) ? 'Falta correr en Supabase el archivo supabase/040_documento_soporte_electronico.sql (documento soporte electrónico).' : /'cc'|column.*\bcc\b|\bcc\b.*column/i.test(e.message) ? 'Falta correr en Supabase el archivo supabase/035_centros_documentos.sql (centros de costo en documentos).' : /compras|es_proveedor/.test(e.message) && /exist|schema|relation|column/i.test(e.message) ? 'Falta crear la tabla de compras en Supabase (archivo supabase/006_compras.sql).' : e.message; $('kErr').hidden = false; }
     finally { $('kSave').disabled = false; }

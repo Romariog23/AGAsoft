@@ -20,6 +20,8 @@ create table if not exists public.activos (
   ubicacion text not null default '',
   serie text not null default '',
   compra_id uuid references public.compras(id) on delete set null,          -- factura de compra o documento soporte del activo
+  tercero_id uuid references public.terceros(id) on delete set null,        -- proveedor o tercero del activo (si no tiene factura)
+  adiciones jsonb not null default '[]'::jsonb,                              -- repotenciaciones [{id, fecha, desde, valor, detalle, restantes, compra_id}]
   estado text not null default 'activo' check (estado in ('activo', 'baja')),
   baja_fecha date,
   baja_motivo text not null default '',
@@ -27,6 +29,9 @@ create table if not exists public.activos (
   unique (empresa_id, codigo)
 );
 create index if not exists activos_empresa on public.activos (empresa_id);
+-- Por si la tabla ya se creó con una versión anterior de este archivo.
+alter table public.activos add column if not exists tercero_id uuid references public.terceros(id) on delete set null;
+alter table public.activos add column if not exists adiciones jsonb not null default '[]'::jsonb;
 
 alter table public.activos enable row level security;
 drop policy if exists activos_ver on public.activos;

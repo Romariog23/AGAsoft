@@ -30,19 +30,24 @@ export const mesSig = p => { const [y, m] = p.split('-').map(Number); return m =
 export const finDeMes = p => { const [y, m] = p.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
 
 // Cuentas del activo: las propias o las de su tipo.
+// Costo con las repotenciaciones registradas.
+export const costoTotal = a => r2(r2(a.costo) + (a.adiciones || []).reduce((s, x) => s + r2(x.valor), 0));
 export const cuentasActivo = (a, tipos) => { const t = tipos.find(x => x.id === a.tipo) || {}; return { activo: a.cta_activo || t.activo || '', dep: a.cta_dep || t.dep || '', gasto: a.cta_gasto || t.gasto || '' }; };
 
 // Tabla de depreciación completa: [{periodo, cuota, acumulada, libros}] hasta que no quede nada por depreciar.
 export function tablaDepreciacion(a, { tipos = TIPOS_ACTIVO_DEF } = {}) {
   const t = tipos.find(x => x.id === a.tipo);
   if (t && !depreciable(t)) return [];
-  const costo = r2(a.costo), residual = r2(a.residual), ini = r2(a.dep_inicial);
+  let costo = r2(a.costo); const residual = r2(a.residual), ini = r2(a.dep_inicial);
+  // Repotenciaciones o adiciones: suman al costo desde su mes y pueden traer una nueva vigencia restante.
+  const adic = {}; for (const x of a.adiciones || []) (adic[x.desde] ||= []).push(x);
   let restantes = Math.round(Number(a.vida_meses) || 0), acum = ini, p = a.inicio;
   const out = [], cambios = Object.fromEntries((a.cambios || []).map(c => [c.desde, Math.round(Number(c.restantes) || 0)]));
   if (!p || !/^\d{4}-\d{2}$/.test(p)) return out;
   const fin = a.estado === 'baja' && a.baja_fecha ? a.baja_fecha.slice(0, 7) : null;
   let fija = null;  // la cuota se fija al empezar y en cada cambio de vida útil; el último mes lleva lo que quede
   for (let i = 0; i < 1200; i++) {
+    for (const x of adic[p] || []) { costo = r2(costo + r2(x.valor)); if (Number(x.restantes) > 0) restantes = Math.round(Number(x.restantes)); fija = null; }
     if (cambios[p] !== undefined) { restantes = cambios[p]; fija = null; }
     const falta = r2(costo - residual - acum);
     if (restantes <= 0 || falta <= 0.004 || (fin && p > fin)) break;
@@ -74,7 +79,7 @@ export function estadoActivo(a, { tipos = TIPOS_ACTIVO_DEF, hechos = {} } = {}) 
   const pend = tabla.filter(x => !h.has(x.periodo));
   const t = tipos.find(x => x.id === a.tipo);
   const estado = a.estado === 'baja' ? 'baja' : t && !depreciable(t) ? 'no' : pend.length ? 'depreciando' : 'depreciado';
-  return { tabla, acumulada, libros: r2(r2(a.costo) - acumulada), pendientes: pend, siguiente: pend[0] || null, estado };
+  return { tabla, acumulada, costo: costoTotal(a), libros: r2(costoTotal(a) - acumulada), pendientes: pend, siguiente: pend[0] || null, estado };
 }
 
 // Cuotas de un mes que faltan por contabilizar, y el mes pendiente más antiguo antes de él (si lo hay).
@@ -92,12 +97,13 @@ export function cuotasDelMes(activos, periodo, { tipos = TIPOS_ACTIVO_DEF, hecho
 }
 
 // Líneas del comprobante DP: por activo, débito al gasto (con su centro de costo) y crédito a la depreciación acumulada.
-export function lineasDepreciacion(filas, periodo, tercero) {
+// terceroDe(activo): el tercero propio del activo (el de su factura o el que se le asignó); si no tiene, va el del módulo.
+export function lineasDepreciacion(filas, periodo, tercero, terceroDe = () => '') {
   const out = [];
   for (const { activo: a, cuota, cuentas } of filas) {
-    const det = `Depreciación ${a.codigo} ${a.nombre}`.trim();
-    out.push({ cuenta: cuentas.gasto, tercero_id: tercero, detalle: det, debito: cuota, credito: 0, activo: a.id, periodo, ...(a.cc1 ? { cc1: a.cc1 } : {}), ...(a.cc2 ? { cc2: a.cc2 } : {}), ...(a.cc3 ? { cc3: a.cc3 } : {}) });
-    out.push({ cuenta: cuentas.dep, tercero_id: tercero, detalle: det, debito: 0, credito: cuota, activo: a.id, periodo });
+    const det = `Depreciación ${a.codigo} ${a.nombre}`.trim(), ter = terceroDe(a) || tercero;
+    out.push({ cuenta: cuentas.gasto, tercero_id: ter, detalle: det, debito: cuota, credito: 0, activo: a.id, periodo, ...(a.cc1 ? { cc1: a.cc1 } : {}), ...(a.cc2 ? { cc2: a.cc2 } : {}), ...(a.cc3 ? { cc3: a.cc3 } : {}) });
+    out.push({ cuenta: cuentas.dep, tercero_id: ter, detalle: det, debito: 0, credito: cuota, activo: a.id, periodo });
   }
   return out;
 }
