@@ -2853,7 +2853,8 @@ function vActivo(m, id) {
   const compDe = p => comps().find(c => c.tipo === 'DP' && c.estado !== 'anulado' && (c.lineas || []).some(l => l.activo === a.id && (l.periodo || c.fecha.slice(0, 7)) === p));
   const sig = e.siguiente?.periodo;
   m.innerHTML = `${cabAF(`${esc(a.codigo)} · ${esc(a.nombre)}`, `${esc(t?.nombre || a.tipo)} · ${depreciable(t) ? `línea recta · ${a.origen === 'saldo' ? `saldo inicial con ${a.vida_meses} meses de vigencia` : `${a.vida_meses} meses`} desde ${esc(a.inicio ? mesLargo(a.inicio).toLowerCase() : '—')}` : 'no se deprecia'} ${ESTADO_AF[e.estado]}`,
-    a.estado === 'baja' ? '' : `<a class="btn ghost" href="#/activoeditar/${a.id}">Editar</a>${depreciable(t) && e.pendientes.length ? '<button id="afVida" class="ghost">Cambiar vida útil</button>' : ''}${depreciable(t) ? '<button id="afRep" class="ghost">Repotenciar</button>' : ''}<button id="afBaja" class="ghost">Dar de baja</button>`)}
+    a.estado === 'baja' ? '' : `<a class="btn ghost" href="#/activoeditar/${a.id}">Editar</a>${depreciable(t) && e.pendientes.length ? '<button id="afVida" class="ghost">Cambiar vida útil</button>' : ''}${depreciable(t) ? '<button id="afRep" class="ghost">Repotenciar</button>' : ''}${a.origen !== 'saldo' && !(a.compra_id && compraById(a.compra_id)) ? '<button id="afCompra" class="primary">Contabilizar la compra</button>' : ''}<button id="afBaja" class="ghost">Dar de baja</button>`)}
+    ${a.origen !== 'saldo' && !(a.compra_id && compraById(a.compra_id)) ? `<p class="aviso">La compra de este activo no tiene documento contable. Usa <b>Contabilizar la compra</b> para generar la factura de compra o el documento soporte, o para enlazar uno ya registrado.</p>` : ''}
     <section class="kpis"><div class="kpi"><span>Costo${(a.adiciones || []).length ? ' con repotenciaciones' : ''}</span><b class="mono">${money(e.costo)}</b></div><div class="kpi"><span>Depreciación acumulada</span><b class="mono">${money(e.acumulada)}</b></div>
       <div class="kpi"><span>Valor en libros</span><b class="mono">${money(e.libros)}</b></div><div class="kpi"><span>Meses que faltan</span><b>${e.pendientes.length}${e.tabla.length ? ` de ${e.tabla.length}` : ''}</b></div></section>
     <section class="panel stack"><div class="grid3 hint">
@@ -2875,6 +2876,20 @@ function vActivo(m, id) {
     await store.save('activos', { id: a.id, cambios: [...(a.cambios || []).filter(c => c.desde !== desde), { desde, restantes }].sort((x, y) => x.desde.localeCompare(y.desde)) }).catch(er => { throw faltaSqlAF(er); });
     await cargarEmpresa(); toast('Vida útil cambiada.'); vActivo(m, id);
   });
+  if ($('afCompra')) $('afCompra').onclick = () => {
+    const docs = compras().filter(c => ['FC', 'DS'].includes(c.tipo) && c.estado !== 'anulado').sort((p, q) => q.fecha.localeCompare(p.fecha)).slice(0, 300);
+    dialogo(`<h2>Contabilizar la compra de ${esc(a.codigo)}</h2><p class="hint">Se abre la factura de compra o el documento soporte ya armado: ${money(a.costo)} a la cuenta ${esc(C.activo)} ${esc(nomCta(C.activo))}. Ahí completas el número del proveedor, el IVA y las retenciones, y al guardarlo queda enlazado al activo.</p>
+      <div class="grid2"><div><label for="f_cdoc">Documento</label><select id="f_cdoc" name="doc"><option value="FC">Generar factura de compra (FC)</option><option value="DS">Generar documento soporte (DS)</option>${docs.length ? '<optgroup label="Enlazar uno ya registrado">' + docs.map(c => `<option value="${c.id}">${esc(nomCompra(c))} · ${esc(terc(c.tercero_id)?.nombre || '')} · ${fFecha(c.fecha)}</option>`).join('') + '</optgroup>' : ''}</select></div>
+      <div><label for="f_cprov">Proveedor</label><select id="f_cprov" name="prov">${optsTerceros(a.tercero_id || '')}</select></div></div>${pie('Continuar')}`, async fd => {
+      const doc = fd.get('doc'), prov = fd.get('prov');
+      if (!['FC', 'DS'].includes(doc)) { await store.save('activos', { id: a.id, compra_id: doc }).catch(er => { throw faltaSqlAF(er); }); await cargarEmpresa(); toast('Compra enlazada al activo.'); return vActivo(m, id); }
+      if (!prov) throw new Error('Escoge el proveedor.');
+      const det = `${a.codigo} ${a.nombre}`.trim();
+      S.compraBorrador = { alGuardar: async cg => store.save('activos', { id: a.id, compra_id: cg.id, ...(a.tercero_id ? {} : { tercero_id: prov }) }),
+        campos: { tipo: doc, fecha: a.fecha_compra || hoy(), tercero_id: prov, observaciones: `Compra del activo fijo ${det}`, lineas: [{ cuenta: C.activo, descripcion: det, base: r2(a.costo), iva_pct: '0' }] } };
+      location.hash = '#/compranueva?tipo=' + doc;
+    });
+  };
   if ($('afRep')) $('afRep').onclick = () => {
     const ultimo = e.tabla.filter(x => h.has(x.periodo)).map(x => x.periodo).pop();
     const docs = compras().filter(c => ['FC', 'DS'].includes(c.tipo) && c.estado !== 'anulado').sort((p, q) => q.fecha.localeCompare(p.fecha)).slice(0, 300);
