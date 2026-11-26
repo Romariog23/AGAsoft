@@ -53,7 +53,9 @@ function asientoCompra(c, param, tarifas, ctx = {}) {
     for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || (a.compra_id && ctx.cfgDe ? ctx.cfgDe(a.compra_id).param : P).proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim(), distA(a));
     mov(P.anticipos_prov, num(c.anticipo), 0, 'Anticipo a proveedor');
     for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || 'Pago directo', primeraDist(c.cc));
-    mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
+    // El detalle de la caja o el banco es la primera línea de las observaciones (si hay); si no, el nombre del egreso.
+    const detPago = String(c.observaciones || '').trim().split('\n')[0].slice(0, 120);
+    mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), detPago || `${nom} ${c.numero}`);
     return out;
   }
   // Nota de ajuste: el mismo asiento de un documento soporte, al revés (disminuye el gasto o el inventario y lo que se debe).

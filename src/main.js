@@ -5196,7 +5196,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       ${prodsInv.length ? '<p class="hint">Cada línea lleva <b>producto o cuenta</b>, no los dos. Con producto, la compra entra al inventario de la bodega escogida y va a su cuenta 14; con cuenta, va a un gasto, costo o activo, y puedes poner cantidad y costo unitario o escribir el valor directo.</p>' : ''}
       ${pagado ? '<p class="hint">Esta factura ya tiene pagos. Si cambias los valores, revisa el egreso.</p>' : ''}</section>`}
     <section class="panel grid-doc">
-      <div class="span2 c-obs"><label for="kob">Observaciones</label><textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
+      <div class="span2 c-obs"><label for="kob">Observaciones</label>${esCE ? '<p class="hint">La primera línea es el detalle del movimiento de caja o banco en la contabilización.</p>' : ''}<textarea id="kob" rows="3" maxlength="1000">${esc(c.observaciones)}</textarea></div>
       ${esCE ? '' : `<div class="span2 ret"><h3>Retenciones que la empresa practica</h3><div class="grid3">
         ${campoRet('compra', 'retefuente', ['krfC', 'krf'], c)}${campoRet('compra', 'reteiva', ['kriC', 'kri'], c)}${campoRet('compra', 'reteica', ['kricaC', 'krica'], c)}</div></div>`}
       <div class="span2 totbox" id="ktot"></div>

@@ -11,6 +11,7 @@ test('egreso con pago directo a una cuenta', () => {
   const cuentas = ['51359501', '23359501', '11100501'].map(codigo => ({ codigo }));
   assert.deepEqual(erroresCompra(ce, cuentas), []);
   assert.ok(erroresCompra({ ...ce, lineas: [{ cuenta: '5135', base: 1 }] }, cuentas).some(e => /Pago directo 1/.test(e)));
+  assert.equal(asientoCompra({ ...ce, observaciones: 'Pago aseo noviembre\nfactura en trámite' }, {}).at(-1).detalle, 'Pago aseo noviembre');
   // Las facturas de compra no suman sus líneas al total del egreso.
   assert.equal(totalEgreso({ tipo: 'FC', lineas: [{ base: 10 }] }), 0);
 });
