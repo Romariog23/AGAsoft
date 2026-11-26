@@ -635,3 +635,8 @@ button.cfg-main:hover{background:none}
 .tbl.conc td.r{white-space:nowrap}
 .tbl.conc .ell{max-width:150px;font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbl.conc td.ell2{min-width:100px}
+/* Activos fijos */
+.grid-af .span2{grid-column:span 2}
+.af-cuota{margin:0;padding:8px 10px;border-radius:8px;background:var(--ok-soft);font-weight:600}
+@media (max-width:700px){.grid3.grid-af{grid-template-columns:minmax(0,1fr)}.grid-af .span2{grid-column:auto}}
+.tbl.conc.af td:first-child{width:auto;text-align:left}
