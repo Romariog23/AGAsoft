@@ -80,4 +80,8 @@ test('plantilla de saldos iniciales', async () => {
   assert.equal(r.cuentasNuevas[0].codigo, '31050501');
   assert.equal(r.diferencia, -500);
   assert.equal(r.errores.length, 1);
+  assert.deepEqual(r.faltantes, [{ cuenta: '99999999', nombre: '' }]);
+  // La cuenta se toma de los dígitos del comienzo aunque el nombre tenga números.
+  const r2 = prepararSaldos(leerFilas('saldos', [PLANTILLAS.saldos.cols.map(c => c[1]), ['11100501 Banco cuenta 123', '', '900123456-8', '', '', '', '', '', '', '', '', '', '1', '']]).filas, { cuentas: [{ codigo: '11100501' }], terceros: [{ numero: '900123456' }] });
+  assert.equal(r2.lineas[0].cuenta, '11100501');
 });

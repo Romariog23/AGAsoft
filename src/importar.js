@@ -255,15 +255,16 @@ function prepararCompras(filas, ctx, totalesCompra) {
 
 // Saldos iniciales: líneas del comprobante SI, terceros y cuentas auxiliares que faltan. ctx.cuentas, ctx.terceros.
 function prepararSaldos(filas, ctx) {
-  const nuevos = new Map(), cuentasNuevas = new Map(), lineas = [], errores = [];
+  const nuevos = new Map(), cuentasNuevas = new Map(), faltantes = new Map(), lineas = [], errores = [];
   const existe = c => ctx.cuentas.some(x => x.codigo === c) || cuentasNuevas.has(c);
   for (const f of filas) {
-    const raw = String(f.cuenta || '').replace(/\D/g, '');
+    // Solo los dígitos del comienzo: "11100501 Banco cuenta 123" es la cuenta 11100501.
+    const raw = (String(f.cuenta || '').trim().match(/^[\d.\s-]+/)?.[0] || '').replace(/\D/g, '');
     const cuenta = raw.length === 6 ? a8(raw) : raw;
     if (!esAuxiliar(cuenta)) { errores.push(`Fila ${f._fila}: la cuenta "${f.cuenta}" no es auxiliar (8 dígitos).`); continue; }
     if (!existe(cuenta)) {
       const padre = ctx.cuentas.find(x => x.codigo === cuenta.slice(0, 6));
-      if (!padre || !f.nombre_cuenta) { errores.push(`Fila ${f._fila}: la cuenta ${cuenta} no existe${padre ? '; escribe su nombre en la columna Nombre cuenta para crearla' : ` y tampoco su subcuenta ${cuenta.slice(0, 6)}`}.`); continue; }
+      if (!padre || !f.nombre_cuenta) { if (!faltantes.has(cuenta)) faltantes.set(cuenta, { cuenta, nombre: String(f.nombre_cuenta || '').trim() }); errores.push(`Fila ${f._fila}: la cuenta ${cuenta} no existe${padre ? '; escribe su nombre en la columna Nombre cuenta para crearla' : ` y tampoco su subcuenta ${cuenta.slice(0, 6)}`}.`); continue; }
       cuentasNuevas.set(cuenta, { codigo: cuenta, nombre: f.nombre_cuenta, naturaleza: padre.naturaleza });
     }
     let d = parseValor(f.debito), c = parseValor(f.credito);
@@ -277,7 +278,7 @@ function prepararSaldos(filas, ctx) {
     lineas.push({ cuenta, tercero: t.numero, detalle: f.detalle || 'Saldo inicial', debito: d > c ? r2(d - c) : 0, credito: c > d ? r2(c - d) : 0, ...(f.cruce ? { cruce: String(f.cruce).trim() } : {}), ...(vence ? { vence } : {}) });
   }
   const debito = r2(lineas.reduce((x, l) => x + l.debito, 0)), credito = r2(lineas.reduce((x, l) => x + l.credito, 0));
-  return { terceros: [...nuevos.values()], cuentasNuevas: [...cuentasNuevas.values()], lineas, debito, credito, diferencia: r2(debito - credito), errores, docs: [], marcar: [] };
+  return { terceros: [...nuevos.values()], cuentasNuevas: [...cuentasNuevas.values()], faltantes: [...faltantes.values()], lineas, debito, credito, diferencia: r2(debito - credito), errores, docs: [], marcar: [] };
 }
 
 export { prepararSaldos };

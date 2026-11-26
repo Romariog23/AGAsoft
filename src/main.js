@@ -4171,15 +4171,16 @@ function formTraslado() {
   const res = () => { const a = ver('trA'), b = ver('trB'); const n = ms.filter(x => x.cuenta === a), sd = r2(n.reduce((s2, x) => s2 + x.debito - x.credito, 0)); f.querySelector('#trRes').textContent = a ? `${n.length} movimientos · saldo ${money(sd)}${b ? ` → ${b}` : ''}` : ''; };
   f.querySelector('#trA').oninput = res; f.querySelector('#trB').oninput = res;
 }
-function formCuenta(c = {}, padre = '') {
+// opc.nombre: nombre sugerido; opc.alGuardar: en vez de volver a pintar la ruta (lo usa la importación de saldos).
+function formCuenta(c = {}, padre = '', opc = {}) {
   const nueva = !c.id;
   const usada = c.codigo && movs().some(x => x.cuenta.startsWith(c.codigo));
   const tieneHijas = c.codigo && S.d.cuentas.some(x => x.codigo !== c.codigo && x.codigo.startsWith(c.codigo));
   const ejemplo = padre ? padre + (padre.length === 1 ? '9' : '95') : '11100502';
   const f = dialogo(`<h2>${nueva ? 'Nueva cuenta' : `Cuenta ${esc(c.codigo)} · ${esc(nivelDe(c.codigo))}`}</h2>
     ${nueva ? `${campo('codigo', 'Código', padre, 'required inputmode="numeric" class="mono" maxlength="8" pattern="[0-9]{2}|[0-9]{4}|[0-9]{6}|[0-9]{8}" placeholder="' + ejemplo + '"')}<p class="hint" id="ctaPadre">Grupo de 2 dígitos, cuenta de 4, subcuenta de 6 o auxiliar de 8. La cuenta padre debe existir. Solo las auxiliares de 8 dígitos reciben movimientos.</p>` : ''}
-    ${campo('nombre', 'Nombre', c.nombre, 'required maxlength="120"')}
-    <div class="grid2">${campoSel('naturaleza', 'Naturaleza', [['D', 'Débito'], ['C', 'Crédito']], c.naturaleza || (padre && idxCuentas()[padre]?.naturaleza) || 'D')}
+    ${campo('nombre', 'Nombre', c.nombre ?? opc.nombre, 'required maxlength="120"')}
+    <div class="grid2">${campoSel('naturaleza', 'Naturaleza', [['D', 'Débito'], ['C', 'Crédito']], c.naturaleza || (padre && (idxCuentas()[padre] || idxCuentas()[padreDe(padre)] || idxCuentas()[padre[0]])?.naturaleza) || 'D')}
     ${campo('niif_codigo', 'Código en el plan NIIF (opcional)', c.niif_codigo, 'class="mono" maxlength="20"')}</div>
     <div><label for="f_rub">Rubro NIIF (línea del estado financiero)</label><select id="f_rub" name="niif_rubro"><option value="">Igual que la cuenta padre</option>
       ${['ESF', 'ER', '—'].map(e => `<optgroup label="${e === 'ESF' ? 'Estado de situación financiera' : e === 'ER' ? 'Estado de resultados' : 'Otros'}">${RUBROS.filter(r => r.estado === e).map(r => `<option value="${r.id}" ${r.id === c.niif_rubro ? 'selected' : ''}>${esc(r.seccion)} · ${esc(r.nombre)}</option>`).join('')}</optgroup>`).join('')}</select></div>
@@ -4212,7 +4213,7 @@ function formCuenta(c = {}, padre = '') {
     try { await store.save('cuentas', nueva ? row : { ...row, id: c.id }); }
     catch (e) { throw /cartera/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/045_cuentas_cartera.sql para marcar las cuentas con cartera.') : e; }
     if (nueva) { for (let p = padreDe(row.codigo); p; p = padreDe(p)) pucAbiertas?.add(p); try { localStorage.setItem('agasoft-puc', JSON.stringify([...(pucAbiertas || [])])); } catch (_) {} }
-    await cargarEmpresa(); toast('Cuenta guardada.'); route();
+    await cargarEmpresa(); toast('Cuenta guardada.'); if (opc.alGuardar) opc.alGuardar(); else route();
   });
   if (nueva) {
     const i = f.querySelector('[name=codigo]');
@@ -5494,6 +5495,8 @@ function previaImport(cual, rows) {
     catch (e) { fail(e); b.disabled = false; b.textContent = `Importar ${listos}`; }
   };
 }
+// Primer nivel que falta en el plan para una cuenta (grupo 2, cuenta 4, subcuenta 6 o la auxiliar de 8).
+const faltaPrimero = cod => [2, 4, 6, 8].map(n => cod.slice(0, n)).find(c => !idxCuentas()[c]) || cod;
 // Saldos iniciales desde la plantilla: un comprobante SI que debe cuadrar.
 function previaSaldos(out, rows) {
   const { filas, faltan } = leerFilas('saldos', rows);
@@ -5511,9 +5514,16 @@ function previaSaldos(out, rows) {
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
       ${r.lineas.slice(0, 80).map(l => `<tr><td class="mono">${l.cuenta}</td><td>${esc(nomC(l.cuenta))}${r.cuentasNuevas.some(x => x.codigo === l.cuenta) ? ' <span class="tag">Nueva</span>' : ''}</td><td>${esc(nomT(l.tercero))}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('')}
     </tbody></table></div>${r.lineas.length > 80 ? `<p class="hint">Y ${r.lineas.length - 80} líneas más.</p>` : ''}
+    ${r.faltantes.length ? `<div class="panel stack imp-faltan"><div><h4>Cuentas que no están en el plan de cuentas (${r.faltantes.length})</h4><p class="hint">Créalas aquí sin salir de la importación. Si también falta la subcuenta o la cuenta mayor, primero se crea esa. Al guardar, la revisión se vuelve a hacer sola.</p></div>
+      <div class="tbl-wrap"><table class="tbl"><tbody>${r.faltantes.map(f => { const sig = faltaPrimero(f.cuenta); return `<tr><td class="mono">${f.cuenta}</td><td>${esc(f.nombre) || '<span class="muted">Sin nombre en la plantilla</span>'}</td>
+        <td class="r nowrap">${sig === f.cuenta ? `<button class="sm" data-crea="${f.cuenta}">Crear cuenta</button>` : `<span class="hint">Falta la ${esc(nivelDe(sig).toLowerCase())} ${sig}</span> <button class="sm" data-crea="${sig}">Crear ${sig}</button>`}</td></tr>`; }).join('')}</tbody></table></div></div>` : ''}
     ${r.errores.length ? `<details class="imp-err" open><summary>No se importan (${r.errores.length})</summary><ul>${r.errores.slice(0, 100).map(e => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
     ${r.diferencia ? '<p class="err">El comprobante no cuadra. Corrige la plantilla (o las filas que no se importan) para que débitos y créditos sean iguales.</p>' : ''}
     <div class="row end"><div><label for="siF">Fecha de los saldos</label><input id="siF" type="date" value="${defF}"></div><button class="primary" id="go_saldos" ${ok ? '' : 'disabled'}>Crear saldos iniciales</button></div></div>`;
+  out.querySelectorAll('[data-crea]').forEach(b => b.onclick = () => {
+    const cod = b.dataset.crea, f = r.faltantes.find(x => x.cuenta === cod);
+    formCuenta({}, cod, { nombre: f?.nombre || '', alGuardar: () => previaSaldos(out, rows) });
+  });
   $('go_saldos').onclick = async () => {
     const b = $('go_saldos'), fecha = $('siF').value; if (!fecha) return toast('Escoge la fecha de los saldos.', true);
     b.disabled = true; b.textContent = 'Creando…';
