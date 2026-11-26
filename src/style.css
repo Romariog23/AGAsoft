@@ -623,3 +623,15 @@ button.cfg-main:hover{background:none}
 .bloq-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
 .bloq-mes{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface)}
 .bloq-mes.on{background:var(--surface-2)}
+/* Conciliación bancaria */
+.conc-cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1250px){.conc-cols{grid-template-columns:1fr}}
+.tbl.conc tr.c-ok td{background:var(--ok-soft)}
+.tbl.conc tr.c-pend td{background:var(--warn-soft)}
+.tbl.conc tr.c-ban td{background:var(--bad-soft)}
+.tbl.conc td:first-child{width:32px;text-align:center}
+.tbl.conc{font-size:.84rem}
+.tbl.conc th,.tbl.conc td{padding:6px 6px}
+.tbl.conc td.r{white-space:nowrap}
+.tbl.conc .ell{max-width:150px;font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl.conc td.ell2{min-width:100px}

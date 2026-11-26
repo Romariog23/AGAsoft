@@ -17,6 +17,8 @@ import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, 
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
 import { xlsx } from './xlsx.js';
+import { esCuentaBanco, inicioMes, mesAnterior, movimientosLibro, leerExtracto, valorBanco, autoCruzar, cuadraCruce, estadoConciliacion, lineasContabilizar } from './conciliacion.js';
+import { leerXlsx } from './xlsxleer.js';
 import { conVersion, inactiva, usosCuenta, trasladarLocal, manejaCartera, carteraComprobantes } from './cuentas.js';
 import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
@@ -225,7 +227,7 @@ const MENU = [
   { t: 'Ventas', i: 'ventas', l: [['FV', 'Facturas'], ['NC', 'Notas crédito'], ['ND', 'Notas débito'], ['cotizaciones', 'Cotizaciones'], ['RC', 'Recibos de caja'], ['cartera', 'Cartera']] },
   { t: 'Compras y gastos', i: 'compras', l: [['compras/FC', 'Facturas de proveedor'], ['compras/DS', 'Documentos soporte'], ['compras/NA', 'Notas de ajuste al DS'], ['compras/CE', 'Comprobantes de egreso'], ['cxp', 'Cuentas por pagar']] },
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
-  { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
+  { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['conciliacion', 'Conciliación bancaria'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
@@ -360,6 +362,7 @@ function route() {
     if (v === 'usuarios') return vUsuarios(m);
     if (v === 'puc') return vPuc(m);
     if (v === 'comprobantes') return vComprobantes(m);
+    if (v === 'conciliacion') return vConciliacion(m);
     if (v === 'compras') return vCompras(m, arg);
     if (v === 'compra') return vCompra(m, arg);
     if (v === 'compranueva') return vCompraEditor(m, { tipo: q.get('tipo'), tercero: q.get('tercero'), ref: q.get('ref') });
@@ -2530,6 +2533,180 @@ function vCostoVentas(m) {
       nota: 'Valor de la venta antes de IVA y con descuentos. El costo es el de la salida de inventario de cada factura según el método de costeo de la empresa. Margen sobre venta = utilidad ÷ venta; margen sobre costo = utilidad ÷ costo. Solo productos inventariables (los servicios no tienen costo).' };
   });
 }
+/* ---------- Conciliación bancaria ---------- */
+const concOpc = { cuenta: '', periodo: '', sel: { l: [], b: [] }, m: null };
+const uidConc = () => (crypto.randomUUID ? crypto.randomUUID() : 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+const concs = () => S.d.conciliaciones || [];
+const faltaSqlConc = e => /conciliaciones/.test(e.message) && /exist|schema|relation|find/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/046_conciliaciones.sql para guardar conciliaciones.') : e;
+async function guardarConc(c) {
+  let g; try { g = await store.save('conciliaciones', c); } catch (e) { throw faltaSqlConc(e); }
+  S.d.conciliaciones = [...concs().filter(x => x.id !== g.id), g];
+  return g;
+}
+function vConciliacion(m) {
+  concOpc.m = m;
+  const bancos = cuentasAux().filter(c => esCuentaBanco(c.codigo));
+  if (!bancos.length) { m.innerHTML = '<header class="vhead"><h2>Conciliación bancaria</h2></header><p class="muted">No hay cuentas de bancos (auxiliares de 1110 o 1120) en el plan de cuentas. Créalas en Plan de cuentas.</p>'; return; }
+  if (!bancos.some(c => c.codigo === concOpc.cuenta)) concOpc.cuenta = bancos[0].codigo;
+  if (!concOpc.periodo) concOpc.periodo = mesAnterior(hoy().slice(0, 7));
+  const historial = concs().filter(c => c.cuenta === concOpc.cuenta).sort((a, b) => b.periodo.localeCompare(a.periodo));
+  m.innerHTML = `<header class="vhead"><div><h2>Conciliación bancaria</h2><p class="sub">El libro auxiliar de la cuenta de bancos frente al extracto del banco. Lo que no cruza explica la diferencia, y lo que está solo en el banco se envía a contabilizar.</p></div></header>
+    <div class="row filters"><div class="grow"><label for="cnCta">Cuenta de banco</label><select id="cnCta">${bancos.map(c => `<option value="${c.codigo}" ${c.codigo === concOpc.cuenta ? 'selected' : ''}>${c.codigo} · ${esc(c.nombre)}</option>`).join('')}</select></div>
+      <div><label for="cnMes">Mes</label><input id="cnMes" type="month" value="${concOpc.periodo}"></div></div>
+    <section id="cnOut" class="stack"></section>
+    ${historial.length ? `<section class="panel stack"><h3>Conciliaciones de esta cuenta</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Mes</th><th class="r">Saldo extracto</th><th class="r">Movimientos del extracto</th><th>Estado</th></tr></thead><tbody>
+      ${historial.map(c => `<tr class="click" data-per="${c.periodo}"><td>${mesTxt(c.periodo)}</td><td class="r mono">${money(c.saldo_extracto)}</td><td class="r">${(c.extracto || []).length}</td><td>${c.estado === 'cerrada' ? '<span class="tag ok">Cerrada</span>' : '<span class="tag warn">Abierta</span>'}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
+  $('cnCta').onchange = () => { concOpc.cuenta = $('cnCta').value; concOpc.sel = { l: [], b: [] }; vConciliacion(m); };
+  $('cnMes').onchange = () => { if ($('cnMes').value) { concOpc.periodo = $('cnMes').value; concOpc.sel = { l: [], b: [] }; vConciliacion(m); } };
+  m.querySelectorAll('[data-per]').forEach(r => r.onclick = () => { concOpc.periodo = r.dataset.per; concOpc.sel = { l: [], b: [] }; vConciliacion(m); });
+  pintarConciliacion();
+}
+const mesTxt = p => { const t = new Date(p + '-15T12:00:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }); return t.charAt(0).toUpperCase() + t.slice(1); };
+function pintarConciliacion() {
+  const out = $('cnOut'); if (!out) return;
+  const cuenta = concOpc.cuenta, p = concOpc.periodo;
+  const todas = concs().filter(c => c.cuenta === cuenta);
+  const guardada = todas.find(c => c.periodo === p);
+  const libroTodo = movimientosLibro(movs(), cuenta);
+  const previa = todas.filter(c => c.periodo < p).sort((a, b) => b.periodo.localeCompare(a.periodo))[0];
+  if (previa && previa.estado !== 'cerrada' && !guardada) {
+    out.innerHTML = `<section class="panel"><p>Primero cierra la conciliación de ${mesTxt(previa.periodo)}: lo que quede pendiente allá pasa a este mes.</p><p><button class="primary" id="cnIr">Ir a ${mesTxt(previa.periodo)}</button></p></section>`;
+    $('cnIr').onclick = () => { concOpc.periodo = previa.periodo; vConciliacion(concOpc.m); };
+    return;
+  }
+  const c = guardada || { empresa_id: S.eid, cuenta, periodo: p, saldo_extracto: previa ? null : 0, extracto: [], cruces: [], estado: 'abierta' };
+  const cerrada = c.estado === 'cerrada';
+  // Cruces automáticos sobre lo pendiente (no en una conciliación cerrada).
+  let e = estadoConciliacion(libroTodo, todas.filter(x => x.id !== c.id), c);
+  if (!cerrada && c.id) {
+    const nuevos = autoCruzar(e.pendL, e.pendB);
+    if (nuevos.length) { c.cruces = [...e.cruces, ...nuevos]; e = estadoConciliacion(libroTodo, todas.filter(x => x.id !== c.id), c); guardarConc({ ...c }).catch(fail); }
+  }
+  const saldoIni = previa ? r2(previa.saldo_extracto) : null;
+  const sel = concOpc.sel;
+  const estadoL = mv => e.enL.has(mv.key) ? 'ok' : 'pend', estadoB = b => e.enB.has(b.id) ? 'ok' : 'ban';
+  const chk = (lado, id, enCruce) => cerrada ? (enCruce ? '✓' : '') : enCruce ? `<button type="button" class="ghost sm" data-des="${lado}:${esc(id)}" title="Deshacer este cruce">✓</button>` : `<input type="checkbox" data-s${lado}="${esc(id)}" ${sel[lado].includes(id) ? 'checked' : ''} aria-label="Escoger">`;
+  const sumSel = r2(e.libro.filter(x => sel.l.includes(x.key)).reduce((s, x) => s + x.valor, 0)), sumSelB = r2(e.banco.filter(b => sel.b.includes(b.id)).reduce((s, b) => s + valorBanco(b), 0));
+  const dm = f => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
+  out.innerHTML = `
+    <section class="panel stack">
+      <div class="vhead"><h3>Extracto de ${mesTxt(p)}${cerrada ? ' <span class="tag ok">Cerrada</span>' : ''}</h3>
+        ${cerrada ? '<button id="cnReabrir" class="ghost">Reabrir</button>' : `<div class="row"><label class="btn">Cargar extracto (Excel o CSV)<input type="file" id="cnFile" accept=".xlsx,.csv,text/csv" hidden></label><button id="cnMan" class="ghost">Agregar a mano</button><button id="cnPlt" class="ghost">Descargar plantilla</button></div>`}</div>
+      <div class="row filters">
+        <div><label for="cnSal">Saldo final según extracto</label><input id="cnSal" type="number" step="0.01" class="r mono" value="${c.saldo_extracto ?? ''}" ${cerrada ? 'disabled' : ''}></div>
+        ${saldoIni !== null ? `<p class="hint">Saldo inicial (final de ${mesTxt(previa.periodo)}): <b class="mono">${money(saldoIni)}</b> · con los movimientos cargados el final sería <b class="mono">${money(r2(saldoIni + (c.extracto || []).reduce((s, b) => s + valorBanco(b), 0)))}</b></p>` : '<p class="hint">Escribe el saldo final que trae el extracto del banco.</p>'}
+      </div>
+      <p class="hint">${(c.extracto || []).length} movimientos en el extracto del mes${e.banco.length > (c.extracto || []).length ? ` y ${e.banco.length - (c.extracto || []).length} pendientes de meses anteriores` : ''}. El archivo debe traer Fecha y Débito/Crédito (o Valor con signo); Descripción y Referencia son opcionales.</p>
+    </section>
+    <section class="panel stack">
+      <div class="vhead"><div><h3>Libro auxiliar vs. extracto</h3><p class="hint">${e.cruces.length} cruces · ${e.pendL.length} pendientes en libros · ${e.pendB.length} pendientes en el banco</p></div>
+        ${cerrada ? '' : `<div class="row"><span class="hint mono" id="cnSum">${sel.l.length || sel.b.length ? `Libro ${money(sumSel)} · Banco ${money(sumSelB)}` : 'Marca uno o varios de cada lado que sumen lo mismo'}</span><button id="cnCruzar" ${sel.l.length && sel.b.length && Math.abs(sumSel - sumSelB) < 0.005 ? '' : 'disabled'}>Cruzar seleccionados</button></div>`}</div>
+      <div class="row hint"><span class="tag ok">Cruzado</span> <span class="tag warn">Solo en libros</span> <span class="tag bad">Solo en el banco</span></div>
+      <div class="conc-cols">
+        <div><h4>Libro auxiliar · ${esc(cuenta)} ${esc(nomCta(cuenta))}</h4><div class="tbl-wrap"><table class="tbl conc"><thead><tr><th></th><th>Fecha</th><th>Documento y tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+          ${e.libro.map(x => `<tr class="c-${estadoL(x)}"><td>${chk('l', x.key, e.enL.has(x.key))}</td><td class="nowrap mono" title="${fCor(x.fecha)}">${dm(x.fecha)}</td><td><span class="nowrap">${linkDoc(x)}</span>${x.tercero_id ? `<div class="muted ell">${esc(terc(x.tercero_id)?.nombre || '')}</div>` : ''}</td><td class="r mono">${valor(x.debito)}</td><td class="r mono">${valor(x.credito)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sin movimientos en el mes.</td></tr>'}
+          <tr class="strong"><td></td><td colspan="2">Saldo final libros</td><td class="r mono" colspan="2">${money(e.saldoLibros)}</td></tr></tbody></table></div></div>
+        <div><h4>Extracto del banco</h4><div class="tbl-wrap"><table class="tbl conc"><thead><tr><th></th><th>Fecha</th><th>Descripción</th><th class="r">Débito</th><th class="r">Crédito</th>${cerrada ? '' : '<th></th>'}</tr></thead><tbody>
+          ${e.banco.map(b => `<tr class="c-${estadoB(b)}"><td>${chk('b', b.id, e.enB.has(b.id))}</td><td class="nowrap mono" title="${fCor(b.fecha)}">${dm(b.fecha)}</td><td class="ell2">${esc(b.descripcion)}${b.referencia ? ` <span class="muted">${esc(b.referencia)}</span>` : ''}${b.anterior ? ` <span class="tag">${esc(mesTxt(b.anterior))}</span>` : ''}</td><td class="r mono">${valor(b.debito)}</td><td class="r mono">${valor(b.credito)}</td>${cerrada ? '' : `<td>${!b.anterior && !e.enB.has(b.id) ? `<button type="button" class="ghost sm" data-qb="${esc(b.id)}" aria-label="Quitar">✕</button>` : ''}</td>`}</tr>`).join('') || `<tr><td colspan="6" class="muted">Carga el extracto del mes.</td></tr>`}
+          <tr class="strong"><td></td><td colspan="2">Saldo final extracto</td><td class="r mono" colspan="2">${money(e.saldoExtracto)}</td>${cerrada ? '' : '<td></td>'}</tr></tbody></table></div></div>
+      </div>
+    </section>
+    <section class="panel stack" id="cnRes">
+      <div class="vhead"><h3>Conciliación</h3><div class="row"><button id="cnCsv" class="ghost">Descargar CSV</button>${cerrada ? '' : `<button id="cnCerrar" class="primary" ${Math.abs(e.diferencia) < 0.005 && !e.pendB.length && c.saldo_extracto !== null && c.saldo_extracto !== '' ? '' : 'disabled'} title="Se cierra cuando la diferencia es cero y no quedan partidas del banco sin contabilizar">Cerrar conciliación</button>`}</div></div>
+      <section class="kpis"><div class="kpi"><span>Saldo según extracto</span><b class="mono">${money(e.saldoExtracto)}</b></div><div class="kpi"><span>Saldo según libros</span><b class="mono">${money(e.saldoLibros)}</b></div>
+        <div class="kpi ${Math.abs(e.diferencia) < 0.005 ? '' : 'warn'}"><span>Diferencia sin explicar</span><b class="mono">${money(e.diferencia)}</b></div><div class="kpi"><span>Por contabilizar</span><b>${e.pendB.length} partidas</b></div></section>
+      <div class="conc-cols"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Según el banco</th><th class="r">Valor</th></tr></thead><tbody>
+          <tr><td>Saldo final del extracto</td><td class="r mono">${money(e.saldoExtracto)}</td></tr>
+          <tr><td>(+) Consignaciones en tránsito</td><td class="r mono">${money(e.transito)}</td></tr>
+          <tr><td>(−) Cheques y pagos no cobrados</td><td class="r mono">${money(-e.noCobrados)}</td></tr>
+          <tr class="strong"><td>Saldo conciliado</td><td class="r mono">${money(e.segunBanco)}</td></tr></tbody></table></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Según libros</th><th class="r">Valor</th></tr></thead><tbody>
+          <tr><td>Saldo final del libro auxiliar</td><td class="r mono">${money(e.saldoLibros)}</td></tr>
+          <tr><td>(+) Notas crédito del banco sin contabilizar</td><td class="r mono">${money(e.ncBanco)}</td></tr>
+          <tr><td>(−) Notas débito del banco sin contabilizar</td><td class="r mono">${money(-e.ndBanco)}</td></tr>
+          <tr class="strong"><td>Saldo conciliado</td><td class="r mono">${money(e.segunLibros)}</td></tr></tbody></table></div></div>
+      ${e.pendL.length || e.pendB.length ? `<h4>Partidas con diferencias</h4><div class="tbl-wrap"><table class="tbl"><thead><tr>${cerrada ? '' : '<th></th>'}<th>Partida</th><th>Fecha</th><th>Tipo</th><th class="r">Valor</th><th>Qué hacer</th></tr></thead><tbody>
+        ${e.pendL.map(x => `<tr>${cerrada ? '' : '<td></td>'}<td>${linkDoc(x)} ${esc(x.tercero_id ? terc(x.tercero_id)?.nombre || '' : '')}</td><td class="nowrap">${fCor(x.fecha)}</td><td><span class="tag warn">Solo en libros</span></td><td class="r mono">${money(x.valor)}</td><td>${x.valor > 0 ? 'Consignación en tránsito' : 'Cheque o pago no cobrado'}: pasa al mes siguiente</td></tr>`).join('')}
+        ${e.pendB.map(b => `<tr>${cerrada ? '' : `<td><input type="checkbox" data-cb="${esc(b.id)}" checked aria-label="Contabilizar"></td>`}<td>${esc(b.descripcion || 'Partida del extracto')} <span class="muted">${esc(b.referencia || '')}</span></td><td class="nowrap">${fCor(b.fecha)}</td><td><span class="tag bad">Solo en el banco</span></td><td class="r mono">${money(valorBanco(b))}</td><td>Contabilizar</td></tr>`).join('')}
+        </tbody></table></div>${!cerrada && e.pendB.length ? '<div class="row end"><button id="cnContab" class="primary">Enviar a contabilizar</button></div>' : ''}` : '<p class="muted">Todo está cruzado.</p>'}
+    </section>`;
+  const guardarYPintar = async cambios => { try { await guardarConc({ ...c, ...cambios }); concOpc.sel = { l: [], b: [] }; vConciliacion(concOpc.m); } catch (er) { fail(er); } };
+  if (cerrada) {
+    $('cnReabrir').onclick = () => {
+      if (todas.some(x => x.periodo > p)) return fail(new Error('Hay conciliaciones de meses siguientes. Reabre primero la más reciente.'));
+      guardarYPintar({ estado: 'abierta', cerrada_en: null, cerrada_por: '' });
+    };
+  } else {
+    $('cnSal').onchange = () => guardarYPintar({ saldo_extracto: $('cnSal').value === '' ? null : r2(num($('cnSal').value)) });
+    $('cnPlt').onclick = () => descargar('plantilla-extracto-bancario.csv', csvTxt([['Fecha', 'Descripción', 'Referencia', 'Débito', 'Crédito'], ['02/11/2026', 'Consignación', '0398', '', '5200000'], ['30/11/2026', 'GMF 4 x 1.000', '', '43080', '']]), false);
+    $('cnFile').onchange = async ev => {
+      const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+      try {
+        let rows;
+        if (/\.xlsx$/i.test(f.name)) rows = await leerXlsx(await f.arrayBuffer());
+        else { let txt = await f.text(); if (txt.includes(String.fromCharCode(0xfffd))) txt = new TextDecoder('windows-1252').decode(await f.arrayBuffer()); rows = parseCSV(txt); }
+        const r = leerExtracto(rows);
+        if (r.faltan.length) throw new Error(`No encontré las columnas ${r.faltan.join(' y ')} en el archivo.`);
+        const ini = inicioMes(p), fin = finMes(p), fuera = r.lineas.filter(x => x.fecha < ini || x.fecha > fin);
+        const ls = r.lineas.filter(x => x.fecha >= ini && x.fecha <= fin);
+        if (!ls.length) throw new Error(`El archivo no trae movimientos de ${mesTxt(p)}.`);
+        const base = c.id || uidConc(), ya = c.extracto || [];
+        const nuevas = ls.map((x, i) => ({ id: `${base}:${ya.length + i}`, ...x }));
+        // Si nada del extracto anterior se cruzó a mano, el archivo nuevo lo reemplaza; si no, se agregan solo las líneas que no estaban.
+        const reemplazar = !(c.cruces || []).some(x => !x.auto);
+        const igual = (a, b) => a.fecha === b.fecha && r2(a.debito) === r2(b.debito) && r2(a.credito) === r2(b.credito) && String(a.descripcion || '') === String(b.descripcion || '');
+        const extracto = reemplazar ? nuevas.map((x, i) => ({ ...x, id: `${base}:${Date.now().toString(36)}:${i}` })) : [...ya, ...nuevas.filter(x => !ya.some(b => igual(b, x)))];
+        const sal = c.saldo_extracto ?? (saldoIni !== null ? r2(saldoIni + extracto.reduce((s, b) => s + valorBanco(b), 0)) : null);
+        await guardarYPintar({ id: c.id || undefined, extracto, cruces: reemplazar ? [] : c.cruces || [], saldo_extracto: sal });
+        toast(`${ls.length} movimientos cargados${fuera.length ? `; ${fuera.length} de otros meses no se tomaron` : ''}${r.errores.length ? `; ${r.errores.length} filas con fecha inválida` : ''}.`);
+      } catch (er) { fail(er); }
+    };
+    $('cnMan').onclick = () => dialogo(`<h2>Movimiento del extracto</h2><div class="grid2">${campo('fecha', 'Fecha', finMes(p), `type="date" min="${inicioMes(p)}" max="${finMes(p)}" required`)}${campo('referencia', 'Referencia', '')}</div>
+      ${campo('descripcion', 'Descripción', '', 'required maxlength="120"')}<div class="grid2">${campo('debito', 'Débito (sale de la cuenta)', '', 'type="number" min="0" step="0.01"')}${campo('credito', 'Crédito (entra a la cuenta)', '', 'type="number" min="0" step="0.01"')}</div>${pie('Agregar')}`, async fd => {
+      const d = r2(num(fd.get('debito'))), k = r2(num(fd.get('credito')));
+      if (!!d === !!k) throw new Error('Escribe el valor en Débito o en Crédito (solo uno).');
+      const base = c.id || uidConc(), ya = c.extracto || [];
+      await guardarYPintar({ id: c.id || undefined, extracto: [...ya, { id: `${base}:m${Date.now().toString(36)}`, fecha: fd.get('fecha'), descripcion: String(fd.get('descripcion')).trim(), referencia: String(fd.get('referencia')).trim(), debito: d, credito: k }] });
+    });
+    out.querySelectorAll('[data-qb]').forEach(bt => bt.onclick = () => guardarYPintar({ extracto: (c.extracto || []).filter(b => b.id !== bt.dataset.qb) }));
+    out.querySelectorAll('[data-sl],[data-sb]').forEach(ch => ch.onchange = () => {
+      const lado = ch.dataset.sl !== undefined ? 'l' : 'b', id = ch.dataset.sl ?? ch.dataset.sb;
+      sel[lado] = ch.checked ? [...sel[lado], id] : sel[lado].filter(x => x !== id);
+      const a = r2(e.libro.filter(x => sel.l.includes(x.key)).reduce((s, x) => s + x.valor, 0)), b = r2(e.banco.filter(x => sel.b.includes(x.id)).reduce((s, x) => s + valorBanco(x), 0));
+      $('cnSum').textContent = `Libro ${money(a)} · Banco ${money(b)}${sel.l.length && sel.b.length && Math.abs(a - b) >= 0.005 ? ` · diferencia ${money(r2(a - b))}` : ''}`;
+      $('cnCruzar').disabled = !(sel.l.length && sel.b.length && Math.abs(a - b) < 0.005);
+    });
+    $('cnCruzar').onclick = () => {
+      const ls = e.libro.filter(x => sel.l.includes(x.key)), bs = e.banco.filter(b => sel.b.includes(b.id));
+      if (!cuadraCruce(ls, bs)) return fail(new Error('Lo escogido no suma lo mismo en los dos lados.'));
+      guardarYPintar({ cruces: [...e.cruces, { l: ls.map(x => x.key), b: bs.map(b => b.id) }] });
+    };
+    out.querySelectorAll('[data-des]').forEach(bt => bt.onclick = () => {
+      const [lado, id] = [bt.dataset.des.slice(0, 1), bt.dataset.des.slice(2)];
+      guardarYPintar({ cruces: e.cruces.filter(x => !(lado === 'l' ? x.l : x.b).includes(id)) });
+    });
+    $('cnCerrar') && ($('cnCerrar').onclick = () => guardarYPintar({ estado: 'cerrada', cerrada_en: new Date().toISOString(), cerrada_por: S.user?.email || '' }));
+    if ($('cnContab')) $('cnContab').onclick = () => {
+      const ids = [...out.querySelectorAll('[data-cb]:checked')].map(x => x.dataset.cb), partidas = e.pendB.filter(b => ids.includes(b.id));
+      if (!partidas.length) return fail(new Error('Marca las partidas que vas a contabilizar.'));
+      // Tercero: el que trae el NIT en la descripción, o el que más se usa en las notas sobre esta cuenta (normalmente el banco).
+      const cuenta_ = {}; libroTodo.filter(x => x.origen === 'comp' && x.tercero_id).forEach(x => { cuenta_[x.tercero_id] = (cuenta_[x.tercero_id] || 0) + 1; });
+      const usual = Object.entries(cuenta_).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      const porNit = b => { const n = `${b.descripcion} ${b.referencia}`.match(/\b(\d{6,10})\b/g) || []; return S.d.terceros.find(t => n.includes(String(t.numero)))?.id || ''; };
+      const fecha = partidas.reduce((f, b) => b.fecha > f ? b.fecha : f, partidas[0].fecha);
+      S.compBorrador = { tipo: 'CC', fecha: fecha < inicioMes(p) ? finMes(p) : fecha, descripcion: `Conciliación bancaria ${mesTxt(p).toLowerCase()} · ${cuenta}`, volver: '#/conciliacion',
+        lineas: lineasContabilizar(partidas, cuenta, { cuentas: S.d.cuentas, tercero: usual, terceroDe: porNit }) };
+      location.hash = '#/compnuevo?tipo=CC';
+    };
+  }
+  $('cnCsv').onclick = () => descargar(`conciliacion-${cuenta}-${p}.csv`, csvTxt([
+    ['Conciliación bancaria', `${cuenta} ${nomCta(cuenta)}`, mesTxt(p)], [],
+    ['Saldo final del extracto', nCsv(e.saldoExtracto)], ['(+) Consignaciones en tránsito', nCsv(e.transito)], ['(−) Cheques y pagos no cobrados', nCsv(-e.noCobrados)], ['Saldo conciliado según el banco', nCsv(e.segunBanco)], [],
+    ['Saldo final del libro auxiliar', nCsv(e.saldoLibros)], ['(+) Notas crédito del banco sin contabilizar', nCsv(e.ncBanco)], ['(−) Notas débito del banco sin contabilizar', nCsv(-e.ndBanco)], ['Saldo conciliado según libros', nCsv(e.segunLibros)], ['Diferencia', nCsv(e.diferencia)], [],
+    ['Partida', 'Fecha', 'Tipo', 'Valor'],
+    ...e.pendL.map(x => [x.ref, x.fecha, 'Solo en libros', nCsv(x.valor)]), ...e.pendB.map(b => [`${b.descripcion} ${b.referencia || ''}`.trim(), b.fecha, 'Solo en el banco', nCsv(valorBanco(b))])]));
+}
+
 /* ---------- Centros de costo ---------- */
 const ccCfg = () => cfgCC(emp()?.contabilidad);
 const centros = () => S.d?.centros_costo || [];
@@ -4412,6 +4589,8 @@ function vCompEditor(m, { id, tipo }) {
     if (!TIPOS_COMP[tipo]) tipo = 'CC';
     const linea0 = () => ({ cuenta: '', tercero_id: '', detalle: '', debito: '', credito: '' });
     c = { empresa_id: S.eid, tipo, fecha: tipo === 'SI' ? hoy().slice(0, 4) + '-01-01' : hoy(), descripcion: tipo === 'SI' ? 'Saldos iniciales' : '', lineas: [linea0(), linea0()] };
+    // Borrador armado desde otro módulo (por ejemplo la conciliación bancaria).
+    if (S.compBorrador) { c = { ...c, ...S.compBorrador }; S.compBorrador = null; }
   }
   const T = TIPOS_COMP[c.tipo];
   const aux = cuentasAux(), idx = idxCuentas();
@@ -4432,7 +4611,7 @@ function vCompEditor(m, { id, tipo }) {
       <div class="totbox" id="ctot"></div>
     </section>
     <div class="err" id="ceErr" hidden></div>
-    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/comp/' + id : '#/comprobantes'}">Cancelar</a><button type="submit" class="primary" id="ceSave">Guardar</button></div>
+    <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/comp/' + id : c.volver || '#/comprobantes'}">Cancelar</a><button type="submit" class="primary" id="ceSave">Guardar</button></div>
   </form>`;
   const nomDe = cod => cod ? (idx[cod]?.nombre || 'No existe en el plan') : '';
   const conCartera = cod => /^\d{8}$/.test(String(cod || '')) && manejaCartera(cod, idx);
@@ -4518,7 +4697,7 @@ function vCompEditor(m, { id, tipo }) {
     ev.preventDefault();
     c.fecha = $('cf').value; c.descripcion = $('cd').value.trim();
     const lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito))
-      .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '', ...(conCartera(String(l.cuenta).trim()) && String(l.cruce || '').trim() ? { cruce: String(l.cruce).trim() } : {}), ...(conCartera(String(l.cuenta).trim()) && l.vence ? { vence: l.vence } : {}) }, ccCfg()));
+      .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '', ...(conCartera(String(l.cuenta).trim()) && String(l.cruce || '').trim() ? { cruce: String(l.cruce).trim() } : {}), ...(conCartera(String(l.cuenta).trim()) && l.vence ? { vence: l.vence } : {}), ...(l.conc ? { conc: l.conc } : {}) }, ccCfg()));
     // Cuentas con cartera: el abono va contra un documento pendiente del tercero (sin pasar su saldo); el cargo sin documento cruce toma este comprobante.
     const errCar = [], numC = id ? c.numero : siguienteComp(c.tipo), abonado = {};
     lineas.forEach((l, k) => {
@@ -4542,7 +4721,7 @@ function vCompEditor(m, { id, tipo }) {
         try { g = await store.save('comprobantes', { ...row, numero: siguienteComp(c.tipo), estado: 'contabilizado' }); }
         catch (e) { await cargarEmpresa(); g = await store.save('comprobantes', { ...row, numero: siguienteComp(c.tipo), estado: 'contabilizado' }); }
       }
-      await cargarEmpresa(); toast('Comprobante guardado.'); location.hash = '#/comp/' + g.id;
+      await cargarEmpresa(); toast('Comprobante guardado.'); location.hash = c.volver || '#/comp/' + g.id;
     } catch (e) { $('ceErr').textContent = /comprobantes/.test(e.message) && /exist|schema|relation/i.test(e.message) ? 'Falta crear la tabla de comprobantes en Supabase (archivo supabase/004_comprobantes.sql).' : faltaSqlCC(e).message; $('ceErr').hidden = false; }
     finally { $('ceSave').disabled = false; }
   };
