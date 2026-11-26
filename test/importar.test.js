@@ -68,3 +68,15 @@ test('terceros: persona natural con dos nombres y dos apellidos, jurídica con r
   const c = prepararCompras(filasDe('compras', csvPlantilla('compras')).filas, ctx, totalesCompra);
   assert.equal(c.terceros.find(t => t.numero === '1045678901').nombre, 'María José Pérez Gómez');
 });
+
+test('plantilla de saldos iniciales', async () => {
+  const { PLANTILLAS, leerFilas, prepararSaldos } = await import('../src/importar.js');
+  const rows = [PLANTILLAS.saldos.cols.map(c => c[1]), ...PLANTILLAS.saldos.ejemplo, ['130505', '', '900123456-8', '', '', '', '', '', '', '', '(500)', ''], ['99999999', '', '900123456-8', '', '', '', '', '', '', '', '1', '']];
+  const { filas } = leerFilas('saldos', rows);
+  const r = prepararSaldos(filas, { cuentas: [{ codigo: '111005', naturaleza: 'D' }, { codigo: '11100501' }, { codigo: '310505', naturaleza: 'C' }, { codigo: '13050501' }], terceros: [{ numero: '900123456' }] });
+  assert.equal(r.lineas.length, 3);
+  assert.deepEqual(r.lineas[2], { cuenta: '13050501', tercero: '900123456', detalle: 'Saldo inicial', debito: 0, credito: 500 });
+  assert.equal(r.cuentasNuevas[0].codigo, '31050501');
+  assert.equal(r.diferencia, -500);
+  assert.equal(r.errores.length, 1);
+});

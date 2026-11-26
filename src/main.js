@@ -13,7 +13,7 @@ import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEP
 import { jsonNominaE, jsonNotaNE, totalesNE, erroresNE, avisosNE, lineasDelMes, prestacionesPagadas, fechasPago, referenciaNE } from './nominae.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
-import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
+import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, prepararSaldos, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
 import { xlsx } from './xlsx.js';
@@ -230,7 +230,7 @@ const MENU = [
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
-  { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
+  { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'], ['importar/saldos', 'Plantilla de saldos iniciales']] },
   { k: 'config', t: 'Configuración', i: 'config' },
 ];
 const NAV_ICO = {
@@ -545,6 +545,7 @@ async function guardarEmpresa(fd, e = {}) {
     responsable_iva: fd.get('responsable_iva') === 'on', direccion: fd.get('direccion').trim(),
     departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
   if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
+  if (e.id && row.nit !== String(e.nit) && nitBloqueado(e.id)) throw new Error('El NIT no se puede cambiar: la empresa ya emitió facturas electrónicas en producción con este NIT.');
   if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y escoge el departamento y el municipio: salen en las facturas.');
   const g = await store.save('empresas', e.id ? { ...row, id: e.id } : row);
   if (!e.id) {
@@ -562,7 +563,11 @@ function formEmpresa(e = {}) {
     location.hash = e.id ? '#/config' : '#/numeraciones'; route();
   }, { ancho: true });
   activarNit(f);
+  // Después de la primera factura electrónica en producción el NIT queda fijo (la DIAN la emitió a ese NIT).
+  if (e.id && nitBloqueado(e.id)) { const i = f.querySelector('[name=nit]'); i.readOnly = true; i.title = 'No se puede cambiar'; i.closest('div:not(.nitrow)').insertAdjacentHTML('beforeend', '<p class="hint">Fijo: la empresa ya emitió facturas electrónicas en producción con este NIT.</p>'); }
 }
+// ¿La empresa ya tiene un documento electrónico aceptado por la DIAN en producción?
+const nitBloqueado = eid => eid === S.eid && (S.d?.fe_envios || []).some(x => x.estado === 'aceptado' && x.ambiente === 'produccion');
 // Íconos de línea para las tarjetas de Configuración.
 const ICO = {
   empresa: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1',
@@ -4011,14 +4016,16 @@ function vCertificados(m, tid) {
   const desde = `${certAnio}-01-01`, hasta = `${certAnio}-12-31`;
   const ids = tercerosConRetencion(S.d.compras, desde, hasta), lista = ids.map(terc).filter(Boolean).sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead noprint"><div><h2>Certificados de retención</h2><p class="sub">El certificado de las retenciones que la empresa le practicó a cada proveedor en el año. Se imprime o se guarda en PDF para enviarlo.</p></div></header>
-    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="grow"><label for="cQ">Proveedor</label><input id="cQ" type="search" list="cQL" autocomplete="off" placeholder="Nombre, NIT o cédula"><datalist id="cQL">${lista.map(t => `<option value="${esc(t.nombre)}">${esc(docId(t))}</option>`).join('')}</datalist></div></div>
     <section class="panel stack noprint">${lista.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th><th>Documento</th><th class="r">Retefuente</th><th class="r">ReteIVA</th><th class="r">ReteICA</th><th></th></tr></thead><tbody>
       ${lista.map(t => { const c = certificado(S.d.compras, t.id, desde, hasta), tot = k => r2(c.porTipo[k].reduce((s, g) => s + g.valor, 0));
-        return `<tr><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
+        return `<tr data-q="${esc(`${t.nombre} ${t.numero} ${docId(t)}`.toLowerCase())}"><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
           <td class="r nowrap"><button class="sm" data-ver="${t.id}">Ver</button> <button class="sm" data-pdf="${t.id}">Imprimir / PDF</button></td></tr>`; }).join('')}</tbody></table></div>`
       : '<p class="muted">No hay retenciones practicadas en ese año.</p>'}</section>
     <section class="panel" id="cert" ${tid ? '' : 'hidden'}></section>`;
   $('cA').onchange = () => { certAnio = +$('cA').value; vCertificados(m, ''); };
+  $('cQ').oninput = () => { const q = $('cQ').value.trim().toLowerCase().replace(/[.\s-]/g, ''); m.querySelectorAll('tr[data-q]').forEach(tr => { tr.hidden = !!q && !tr.dataset.q.replace(/[.\s-]/g, '').includes(q); }); };
   const hoja = id => {
     const t = terc(id), c = certificado(S.d.compras, id, desde, hasta), e = emp();
     const tabla = ([k, nombre]) => { const gs = c.porTipo[k]; if (!gs.length) return '';
@@ -4368,7 +4375,7 @@ function vCompEditor(m, { id, tipo }) {
   // Cada línea lleva tercero: la nueva toma el de la línea anterior para no escogerlo cada vez.
   const nuevaLinea = () => ({ cuenta: '', tercero_id: c.lineas?.filter(l => l.tercero_id).at(-1)?.tercero_id || '', detalle: '', debito: '', credito: '' });
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${id ? `Editar ${esc(nomComp(c))}` : `Nuevo: ${T.nombre.toLowerCase()}`}</h2>
-    <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
+    <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office, o subir la <a href="#/importar/saldos">plantilla de saldos iniciales</a>.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
   <form id="ce" class="stack" novalidate>
     <section class="panel grid-doc">
       <div><label for="cf">Fecha</label><input id="cf" type="date" value="${c.fecha}" required></div>
@@ -4859,13 +4866,13 @@ function vProveedores(m) {
 /* ---------- Importar plantillas (datos descargados de la DIAN con el token) ---------- */
 function vImportar(m, solo) {
   if (solo && !PLANTILLAS[solo]) solo = '';
-  m.innerHTML = `<header class="vhead"><div><h2>${solo ? 'Plantilla de ' + PLANTILLAS[solo].titulo.toLowerCase() : 'Importar plantillas'}</h2><p class="sub">Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.</p></div></header>
+  m.innerHTML = `<header class="vhead"><div><h2>${solo ? 'Plantilla de ' + PLANTILLAS[solo].titulo.toLowerCase() : 'Importar plantillas'}</h2><p class="sub">${solo === 'saldos' ? 'Monta los saldos iniciales de la empresa desde Excel: llena la plantilla, guárdala como CSV y súbela.' : 'Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.'}</p></div></header>
     <section class="panel stack" ${solo ? 'hidden' : ''}><h3>Cómo se hace</h3><ol class="steps-list">
       <li>Con el <b>token de la DIAN</b> de la empresa, entra al catálogo de facturación electrónica y descarga en Excel los documentos <b>emitidos</b> (ventas) y <b>recibidos</b> (compras) del periodo.</li>
       <li>Descarga aquí la plantilla de AGAsoft que corresponda y pasa los datos a sus columnas, sin cambiar los títulos de la primera fila. Puedes dejar los dos ejemplos como guía y borrarlos al final.</li>
       <li>En Excel guarda la plantilla como <b>CSV</b> y súbela aquí. AGAsoft revisa todo y te muestra qué va a cargar antes de guardar nada.</li></ol>
       <p class="hint">Sube primero los terceros si los tienes. Si no, las facturas crean los clientes y proveedores que falten con el NIT y el nombre de la plantilla. Lo que ya existe (misma factura o mismo tercero) no se duplica.</p></section>
-    ${solo ? '<p class="hint">Con el token de la DIAN descarga los documentos, pásalos a esta plantilla, guárdala como CSV y súbela. <a href="#/importar">Ver los pasos</a>.</p>' : ''}
+    ${solo && solo !== 'saldos' ? '<p class="hint">Con el token de la DIAN descarga los documentos, pásalos a esta plantilla, guárdala como CSV y súbela. <a href="#/importar">Ver los pasos</a>.</p>' : ''}
     ${Object.entries(PLANTILLAS).filter(([k]) => !solo || k === solo).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
       <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
       <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
@@ -4878,6 +4885,7 @@ function vImportar(m, solo) {
 }
 function previaImport(cual, rows) {
   const out = $('prev_' + cual);
+  if (cual === 'saldos') return previaSaldos(out, rows);
   const { filas, faltan } = leerFilas(cual, rows);
   if (faltan.length) { out.innerHTML = `<p class="err">No encontré las columnas: ${faltan.map(esc).join(', ')}. Usa la plantilla de AGAsoft sin cambiar los títulos.</p>`; return; }
   if (!filas.length) { out.innerHTML = '<p class="err">El archivo no tiene filas con datos.</p>'; return; }
@@ -4898,6 +4906,40 @@ function previaImport(cual, rows) {
     const b = $('go_' + cual); b.disabled = true; b.textContent = 'Importando…';
     try { const res = await ejecutarImport(cual, r); await cargarEmpresa(); route(); toast(res, /problema/.test(res)); }
     catch (e) { fail(e); b.disabled = false; b.textContent = `Importar ${listos}`; }
+  };
+}
+// Saldos iniciales desde la plantilla: un comprobante SI que debe cuadrar.
+function previaSaldos(out, rows) {
+  const { filas, faltan } = leerFilas('saldos', rows);
+  if (faltan.length) { out.innerHTML = `<p class="err">No encontré las columnas: ${faltan.map(esc).join(', ')}. Usa la plantilla de AGAsoft sin cambiar los títulos.</p>`; return; }
+  if (!filas.length) { out.innerHTML = '<p class="err">El archivo no tiene filas con datos.</p>'; return; }
+  const r = prepararSaldos(filas, { terceros: S.d.terceros, cuentas: S.d.cuentas });
+  const nomT = n => r.terceros.find(t => t.numero === n)?.nombre || S.d.terceros.find(t => t.numero === n)?.nombre || n;
+  const nomC = c => r.cuentasNuevas.find(x => x.codigo === c)?.nombre || nomCta(c);
+  const yaSI = comps().some(c => c.tipo === 'SI' && c.estado !== 'anulado');
+  const defF = `${Number(hoy().slice(0, 4)) - 1}-12-31`;
+  const ok = r.lineas.length && !r.diferencia;
+  out.innerHTML = `<div class="stack imp-prev">
+    <p><b>${r.lineas.length}</b> líneas · débitos <b>${money(r.debito)}</b> · créditos <b>${money(r.credito)}</b>${r.diferencia ? ` · <span class="tag bad">No cuadra: diferencia ${money(r.diferencia)}</span>` : ' · <span class="tag">Cuadra</span>'}${r.terceros.length ? ` · ${r.terceros.length} terceros nuevos` : ''}${r.cuentasNuevas.length ? ` · ${r.cuentasNuevas.length} cuentas nuevas` : ''}</p>
+    ${yaSI ? '<p class="aviso">La empresa ya tiene un comprobante de saldos iniciales. Este se crea aparte: revisa que no dupliques saldos.</p>' : ''}
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+      ${r.lineas.slice(0, 80).map(l => `<tr><td class="mono">${l.cuenta}</td><td>${esc(nomC(l.cuenta))}${r.cuentasNuevas.some(x => x.codigo === l.cuenta) ? ' <span class="tag">Nueva</span>' : ''}</td><td>${esc(nomT(l.tercero))}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('')}
+    </tbody></table></div>${r.lineas.length > 80 ? `<p class="hint">Y ${r.lineas.length - 80} líneas más.</p>` : ''}
+    ${r.errores.length ? `<details class="imp-err" open><summary>No se importan (${r.errores.length})</summary><ul>${r.errores.slice(0, 100).map(e => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+    ${r.diferencia ? '<p class="err">El comprobante no cuadra. Corrige la plantilla (o las filas que no se importan) para que débitos y créditos sean iguales.</p>' : ''}
+    <div class="row end"><div><label for="siF">Fecha de los saldos</label><input id="siF" type="date" value="${defF}"></div><button class="primary" id="go_saldos" ${ok ? '' : 'disabled'}>Crear saldos iniciales</button></div></div>`;
+  $('go_saldos').onclick = async () => {
+    const b = $('go_saldos'), fecha = $('siF').value; if (!fecha) return toast('Escoge la fecha de los saldos.', true);
+    b.disabled = true; b.textContent = 'Creando…';
+    try {
+      const ids = new Map(S.d.terceros.map(t => [t.numero, t.id]));
+      for (const t of r.terceros) { const g = await store.save('terceros', { empresa_id: S.eid, tipo_id: t.tipo_id, numero: t.numero, dv: t.dv, nombre: t.nombre, tipo_persona: t.tipo_persona, razon_social: t.razon_social || '', primer_nombre: t.primer_nombre || '', segundo_nombre: t.segundo_nombre || '', primer_apellido: t.primer_apellido || '', segundo_apellido: t.segundo_apellido || '', direccion: '', ciudad: '', telefono: '', correo: '', es_cliente: false, es_proveedor: false, plazo_dias: 0, responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }); ids.set(t.numero, g.id); }
+      for (const c of r.cuentasNuevas) await store.save('cuentas', { empresa_id: S.eid, codigo: c.codigo, nombre: c.nombre, naturaleza: c.naturaleza, activa: true });
+      await cargarEmpresa();
+      const lineas = r.lineas.map(l => ({ cuenta: l.cuenta, tercero_id: ids.get(l.tercero), detalle: l.detalle, debito: l.debito, credito: l.credito }));
+      const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'SI', numero: siguienteComp('SI'), fecha, descripcion: 'Saldos iniciales (plantilla)', lineas, estado: 'contabilizado' });
+      await cargarEmpresa(); toast(`Saldos iniciales creados con ${lineas.length} líneas.`); location.hash = '#/comp/' + g.id;
+    } catch (e) { fail(e); b.disabled = false; b.textContent = 'Crear saldos iniciales'; }
   };
 }
 async function ejecutarImport(cual, r) {
