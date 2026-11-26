@@ -5186,7 +5186,9 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     </section>
     ${panelCC(esCE ? 'Sin centro propio, cada pago sigue el centro de la factura que paga.' : undefined)}
     ${esCE ? `<section class="panel stack"><h3>Lo que paga</h3><div id="aplK"></div>
-      <div class="grid2"><div><label for="kant">Anticipo o pago sin factura</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"></div></div></section>` :
+      <div class="grid2"><div><label for="kant">Anticipo a proveedor (cuenta ${esc(param().anticipos_prov || '')})</label><input id="kant" type="number" min="0" step="0.01" class="mono" value="${num(c.anticipo) || ''}"><p class="hint">Pago que se cruza después con la factura del proveedor.</p></div></div></section>
+    <section class="panel stack"><div class="vhead"><div><h3>Pago directo a una cuenta</h3><p class="hint">Para pagar algo sin factura pendiente: la cuenta va al débito y el banco o la caja al crédito, con el tercero del egreso.</p></div><button type="button" id="addD">+ Agregar línea</button></div>
+      <datalist id="ctasD">${optsLista(cuentasAux())}</datalist><div id="dirK"></div></section>` :
     `<section class="panel stack"><div class="vhead"><h3>Conceptos</h3><button type="button" id="addK">+ Agregar línea</button></div>
       <datalist id="prodsK">${prodsInv.map(p => `<option value="${esc(p.codigo)} · ${esc(p.nombre)}">`).join('')}</datalist>
       <datalist id="ctasK">${optsLista(cuentasAux().filter(x => CLASES_COMPRA.some(p => x.codigo.startsWith(p))))}</datalist>
@@ -5204,9 +5206,24 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
     <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/compra/' + id : '#/compras/' + tipo}">Cancelar</a><button type="submit" class="primary" id="kSave">Guardar y contabilizar</button></div>
   </form>`;
   selectBuscable($('prv'));
+  if (esCE) {
+    c.lineas = (c.lineas || []).filter(l => l.cuenta || num(l.base)).map(l => ({ cuenta: l.cuenta || '', descripcion: l.descripcion || '', base: l.base || '' }));
+    const pintarDir = () => {
+      $('dirK').innerHTML = c.lineas.length ? `<div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Detalle</th><th class="r">Valor</th><th></th></tr></thead><tbody>
+        ${c.lineas.map((l, i) => `<tr data-i="${i}"><td data-l="Cuenta"><input data-k="cuenta" list="ctasD" class="mono" autocomplete="off" value="${esc(l.cuenta ? `${l.cuenta} ${nomCta(l.cuenta)}` : '')}" placeholder="Ej. 51359501"></td>
+          <td data-l="Detalle"><input data-k="descripcion" maxlength="200" value="${esc(l.descripcion)}"></td>
+          <td data-l="Valor"><input data-k="base" type="number" min="0" step="0.01" class="mono r" value="${l.base}"></td>
+          <td><button type="button" class="ghost sm" data-del="${i}" aria-label="Quitar">✕</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sin pagos directos.</p>';
+    };
+    $('dirK').addEventListener('input', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr) return; const l = c.lineas[+tr.dataset.i], k = el.dataset.k;
+      l[k] = k === 'cuenta' ? el.value.trim().split(' ')[0] : k === 'base' ? el.value : el.value; resumen(); });
+    $('dirK').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (b) { c.lineas.splice(+b.dataset.del, 1); pintarDir(); resumen(); } });
+    $('addD').onclick = () => { c.lineas.push({ cuenta: '', descripcion: '', base: '' }); pintarDir(); $('dirK').querySelector(`tr[data-i="${c.lineas.length - 1}"] [data-k=cuenta]`)?.focus(); };
+    pintarDir();
+  }
   const leer = () => {
     c.tercero_id = $('prv').value; c.fecha = $('kf').value; c.observaciones = $('kob').value.trim();
-    if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); }
+    if (esCE) { c.cuenta_pago = $('kp').value; c.anticipo = num($('kant').value); c.lineas ||= []; }
     else {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
       if ($('kcon')) c.concepto = $('kcon').value;
@@ -5346,7 +5363,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       if (!esCE && c.lineas.some(l => esLineaProducto(l) && !l.bodega_id)) { const b = await asegurarBodega(); const id0 = b?.id || bodegas()[0].id; c.lineas.forEach(l => { if (esLineaProducto(l) && !l.bodega_id) l.bodega_id = id0; }); }
       const t = esCE ? { base: 0, iva: 0, retefuente: 0, reteiva: 0, reteica: 0, total: totalEgreso(c), neto: totalEgreso(c) } : totalesCompra(c.lineas, c);
       const row = { empresa_id: S.eid, tipo, fecha: c.fecha, vence: esCE ? null : (c.vence || null), tercero_id: c.tercero_id, num_proveedor: c.num_proveedor || '', observaciones: c.observaciones || '',
-        lineas: esCE ? [] : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '', retenciones: esCE ? {} : (c.retenciones || {}),
+        lineas: esCE ? (c.lineas || []).filter(l => l.cuenta || num(l.base)).map(l => ({ cuenta: l.cuenta, descripcion: l.descripcion || '', base: r2(num(l.base)) })) : c.lineas, retefuente_pct: num(c.retefuente_pct), reteiva_pct: num(c.reteiva_pct), reteica_milaje: num(c.reteica_milaje), cuenta_retefuente: c.cuenta_retefuente || '', retenciones: esCE ? {} : (c.retenciones || {}),
         cuenta_pago: c.cuenta_pago || '', aplicaciones: esCE ? c.aplicaciones : [], anticipo: esCE ? r2(num(c.anticipo)) : 0, ...t,
         // El centro general solo se envía si la empresa usa centros de costo (requiere 035_centros_documentos.sql).
         ...(ccCfg().activo || tieneDist(c.cc) ? { cc: normDist(c.cc) } : {}),
@@ -5375,7 +5392,7 @@ function hojaCompra(c, imprimir) {
     <div class="grid2"><div><b>${c.tipo === 'CE' ? 'Pagado a' : 'Proveedor'}:</b> ${esc(t?.nombre)}<br><span class="muted">${esc(docId(t))}</span></div>
     <div>${c.tipo === 'NA' ? `<b>Ajusta:</b> ${esc(nomCompra(compraById(c.ref_id) || {}))}${numeroDianCompra(c.ref_id) ? ` <span class="mono">(${esc(numeroDianCompra(c.ref_id))})</span>` : ''}<br><b>Concepto:</b> ${esc(CONCEPTOS_NA.find(x => x[0] === String(c.concepto))?.[1] || '')}<br>` : ''}${c.electronica && numeroDianCompra(c.id) ? `<b>Número DIAN:</b> <span class="mono">${esc(numeroDianCompra(c.id))}</span><br>` : ''}${c.num_proveedor ? `<b>Factura del proveedor:</b> <span class="mono">${esc(c.num_proveedor)}</span><br>` : ''}${c.vence ? `<b>Vence:</b> ${fFecha(c.vence)}<br>` : ''}${c.tipo === 'CE' ? `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), false, c.cuenta_pago))}` : `<b>Forma de pago:</b> ${esc(nomForma(fCompra(), !c.cuenta_pago, c.cuenta_pago))}`}</div></div>
     ${c.tipo === 'CE' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Concepto</th><th class="r">Valor</th></tr></thead><tbody>
-        ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}
+        ${(c.aplicaciones || []).map(a => `<tr><td>Pago ${esc(a.ref || '')}</td><td class="r mono">${money(a.valor)}</td></tr>`).join('')}${num(c.anticipo) ? `<tr><td>Anticipo</td><td class="r mono">${money(c.anticipo)}</td></tr>` : ''}${(c.lineas || []).map(l => `<tr><td><span class="mono">${esc(l.cuenta)}</span> ${esc(nomCta(l.cuenta))}${l.descripcion ? ' · ' + esc(l.descripcion) : ''}</td><td class="r mono">${money(l.base)}</td></tr>`).join('')}
         <tr class="strong"><td>Total pagado</td><td class="r mono">${money(totalEgreso(c))}</td></tr></tbody></table></div><p class="hint letras">${enLetras(totalEgreso(c))}</p>`
     : `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Descripción</th><th class="r">Valor</th><th class="r">IVA</th><th class="r">Total</th></tr></thead><tbody>
         ${(c.lineas || []).map(l => { const iva = r2(num(l.base) * num(l.iva_pct) / 100), p = esLineaProducto(l) && S.d.productos.find(x => x.id === l.producto_id); return `<tr><td class="mono">${esc(l.cuenta)}</td><td>${p ? `<span class="mono">${esc(p.codigo)}</span> ` : ''}${esc(l.descripcion)}${p ? `<br><small class="muted">${cantTxt(l.cantidad, fmtEmp())} ${esc(p.unidad)} × ${money(l.costo)} · ${esc(bodegaDe(l.bodega_id)?.nombre || '')}</small>` : ''}</td><td class="r mono">${money(l.base)}</td><td class="r mono">${iva ? money(iva) : ''}</td><td class="r mono">${money(num(l.base) + iva)}</td></tr>`; }).join('')}</tbody></table></div>
