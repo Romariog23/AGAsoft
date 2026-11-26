@@ -176,8 +176,9 @@ export function existencias(costeados, hasta = '9999-12-31', bodegaDef = '') {
 
 // Asiento del costo: ventas (costo de ventas contra la 14 de la bodega), devoluciones (al revés) y ajustes (14 contra la contrapartida).
 // Las compras ya se contabilizan en su propio asiento.
-export function asientoInventario(costeados, { productos, bodegas, param }) {
-  const P = parametrosDe(param), prods = Object.fromEntries((productos || []).map(p => [p.id, p])), bods = Object.fromEntries((bodegas || []).map(b => [b.id, b]));
+export function asientoInventario(costeados, { productos, bodegas, param, paramDoc }) {
+  const P0 = parametrosDe(param), prods = Object.fromEntries((productos || []).map(p => [p.id, p])), bods = Object.fromEntries((bodegas || []).map(b => [b.id, b]));
+  let P = P0; // por movimiento: la configuración vigente cuando se creó su documento
   const cta14 = id => bods[id]?.cuenta || P.inventario, out = {};
   const mov = (m, cuenta, debito, credito, detalle) => {
     debito = r2(debito); credito = r2(credito); if (!debito && !credito) return;
@@ -187,6 +188,7 @@ export function asientoInventario(costeados, { productos, bodegas, param }) {
   };
   for (const m of costeados) {
     if (m.origen === 'compra' || m.origen === 'devcompra' || !m.total) continue;
+    P = paramDoc ? paramDoc(m.doc_id) : P0;
     if (m.origen === 'traslado') {
       // Entre bodegas con la misma cuenta 14 no hay asiento; con cuentas distintas, de la 14 de origen a la de destino.
       if (cta14(m.bodega_id) === cta14(m.bodega_par)) continue;

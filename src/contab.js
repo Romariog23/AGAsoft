@@ -6,6 +6,7 @@ import { asientoCompra } from './compras.js';
 import { asientoNomina } from './nomina.js';
 import { movimientosInv, costear, asientoInventario } from './inventario.js';
 import { cfgCC, aplicarCC, primeraDist, distPonderada, claveDist } from './centros.js';
+import { versionador } from './cuentas.js';
 import { RUBRO, rubroPorDefecto, naturaleza, nivelDe, parametrosDe, a8, esAuxiliar } from './puc.js';
 
 const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC: 'Recibo de caja' };
@@ -14,7 +15,9 @@ const TIPO_NOMBRE = { FV: 'Factura', NC: 'Nota crédito', ND: 'Nota débito', RC
 // ctx: { items (todas las líneas), aplicaciones, productos, param, docs (para referencias) }
 function asiento(d, ctx) {
   if (d.estado !== 'emitido') return [];
-  const P = parametrosDe(ctx.param);
+  // Configuración vigente cuando se creó el documento (las notas siguen a su factura).
+  const C = ctx.cfgDe ? ctx.cfgDe((d.tipo === 'NC' || d.tipo === 'ND') && d.ref_id ? d.ref_id : d.id) : null;
+  const P = C ? C.param : parametrosDe(ctx.param), tarifas = C ? C.tarifas : ctx.tarifas;
   const ref = `${d.prefijo || ''}${d.prefijo ? ' ' : ''}${d.numero}`;
   const base = { fecha: d.fecha, doc_id: d.id, tipo: d.tipo, ref, tercero_id: d.tercero_id };
   const out = [];
@@ -37,7 +40,8 @@ function asiento(d, ctx) {
     mov(caja, d.total, 0, `${TIPO_NOMBRE.RC} ${ref}`);
     for (const a of apls) {
       const f = docs[a.factura_id];
-      mov(P.clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`, true, distF(a));
+      // El abono va a la cuenta de clientes con que se causó la factura.
+      mov((f && ctx.cfgDe ? ctx.cfgDe(f.id).param : P).clientes, 0, a.valor, `Abono a factura ${f ? `${f.prefijo || ''} ${f.numero}`.trim() : ''}`, true, distF(a));
     }
     mov(P.anticipos, 0, d.anticipo, 'Anticipo recibido');
     const ex = d.retenciones?.excedente;
@@ -67,7 +71,7 @@ function asiento(d, ctx) {
     distPor[k] = dl;
     porCuenta[k] = r2((porCuenta[k] || 0) + l.base);
     // El IVA va a la cuenta de su tarifa (si la tarifa tiene cuenta propia) o a la de los parámetros.
-    const ci = cuentaIva(ctx.tarifas, it.iva_pct, 'venta', P);
+    const ci = cuentaIva(tarifas, it.iva_pct, 'venta', P);
     ivaPor[ci] = r2((ivaPor[ci] || 0) + l.iva);
   }
   const signo = d.tipo === 'NC' ? -1 : 1; // NC invierte débitos y créditos
@@ -175,13 +179,18 @@ function erroresComprobante(c, cuentas) {
 }
 
 function movimientos(S) {
-  const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos, tarifas: S.tarifas };
-  const ctxC = { compras: S.compras, productos: S.productos };
+  // Cada documento con la configuración de cuentas vigente cuando se creó (ver cuentas.js).
+  const ver = versionador(S.contab || {}, { param: parametrosDe(S.param), tarifas: S.tarifas });
+  const creado = {};
+  for (const t of [S.documentos, S.compras, S.inventario_docs]) for (const x of t || []) creado[x.id] = x.creado_en;
+  const cfgDe = id => ver(creado[id]);
+  const ctx = { items: S.items, aplicaciones: S.aplicaciones, productos: S.productos, param: S.param, docs: S.documentos, tarifas: S.tarifas, cfgDe };
+  const ctxC = { compras: S.compras, productos: S.productos, cfgDe };
   const ccEmp = Object.fromEntries((S.empleados || []).map(e => [e.tercero_id, e.cc]));
-  const todos = S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => asientoCompra(c, S.param, S.tarifas, ctxC))).concat((S.nominas || []).flatMap(n => asientoNomina(n, ccEmp)))
+  const todos = S.documentos.filter(d => d.estado === 'emitido').flatMap(d => asiento(d, ctx)).concat((S.comprobantes || []).flatMap(asientoComprobante)).concat((S.compras || []).flatMap(c => { const C = cfgDe(c.tipo === 'NA' && c.ref_id ? c.ref_id : c.id); return asientoCompra(c, C.param, C.tarifas, ctxC); })).concat((S.nominas || []).flatMap(n => asientoNomina(n, ccEmp)))
     // Costo de ventas, devoluciones y ajustes de inventario, costeados con el método de la empresa.
     // Sin el módulo de inventario (S.inventario === false) no hay costo automático: los productos se venden como cualquier ítem.
-    .concat(S.inventario === false ? [] : asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param }));
+    .concat(S.inventario === false ? [] : asientoInventario(costear(movimientosInv(S), S.metodoInv || 'promedio'), { productos: S.productos, bodegas: S.bodegas, param: S.param, paramDoc: id => cfgDe(id).param }));
   // Centros de costo: cada movimiento de una cuenta del alcance se reparte según la distribución de su línea o documento.
   return aplicarCC(todos, S.cc || cfgCC(S.contabilidad)).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.ref.localeCompare(b.ref));
 }

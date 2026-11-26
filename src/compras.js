@@ -48,7 +48,8 @@ function asientoCompra(c, param, tarifas, ctx = {}) {
     const distA = a => primeraDist(c.cc, comps[a.compra_id] ? distCompra(comps[a.compra_id], ctx.productos) : []);
     dist = primeraDist(c.cc, distPonderada((c.aplicaciones || []).map(a => ({ dist: distA(a), valor: a.valor }))));
     // Cada aplicación paga una factura (a proveedores) o un saldo de nómina (a su cuenta: salarios, aportes, prestaciones).
-    for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || P.proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim(), distA(a));
+    // Sin cuenta propia, a la de proveedores con que se causó la factura pagada.
+    for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || (a.compra_id && ctx.cfgDe ? ctx.cfgDe(a.compra_id).param : P).proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim(), distA(a));
     mov(P.anticipos_prov, num(c.anticipo), 0, 'Anticipo a proveedor');
     mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
     return out;

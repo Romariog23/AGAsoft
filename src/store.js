@@ -4,6 +4,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { PLANES_DEMO } from './planes.js';
 import { datosDemo, hoyLocal } from './demo.js';
+import { trasladarLocal } from './cuentas.js';
+import { revisarBloqueo } from './bloqueo.js';
 
 const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo', 'op_tipos', 'op_elementos', 'op_tarifas', 'op_registros', 'op_cortes', 'cotizaciones', 'nominas_e'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -68,6 +70,8 @@ function localStore({ publico = false } = {}) {
     async loadEmpresa(eid) { return Object.fromEntries(TABLAS.map(t => [t, db[t].filter(r => r.empresa_id === eid).map(r => ({ ...r }))])); },
     async save(t, row) {
       const list = db[t];
+      const bloq = id => db.empresas.find(e => e.id === id)?.bloqueado_hasta;
+      { const viejo = row.id && list.find(r => r.id === row.id); revisarBloqueo(t, viejo, { ...(viejo || {}), ...row }, bloq(row.empresa_id || viejo?.empresa_id)); }
       if (row.id) { const i = list.findIndex(r => r.id === row.id); if (i >= 0) { list[i] = { ...list[i], ...row }; persist(); return { ...list[i] }; } }
       const nuevo = { creado_en: ahora(), ...row, id: row.id || uid() };
       if (t === 'empresas') nuevo.owner = user.id;
@@ -75,6 +79,7 @@ function localStore({ publico = false } = {}) {
     },
     async saveMany(t, rows) { for (const r of rows) db[t].push({ creado_en: ahora(), ...r, id: uid() }); persist(); },
     async remove(t, id) {
+      { const v = db[t].find(r => r.id === id); if (v) revisarBloqueo(t, v, null, db.empresas.find(e => e.id === v.empresa_id)?.bloqueado_hasta); }
       db[t] = db[t].filter(r => r.id !== id);
       if (t === 'documentos') { db.items = db.items.filter(r => r.documento_id !== id); db.aplicaciones = db.aplicaciones.filter(r => r.recibo_id !== id); }
       if (t === 'empresas') for (const k of TABLAS) db[k] = db[k].filter(r => r.empresa_id !== id);
@@ -92,6 +97,7 @@ function localStore({ publico = false } = {}) {
     },
     async emitir(id) {
       const d = db.documentos.find(x => x.id === id);
+      if (d) revisarBloqueo('documentos', { ...d, estado: 'emitido' }, null, db.empresas.find(e => e.id === d.empresa_id)?.bloqueado_hasta);
       if (!d || d.estado !== 'borrador') throw new Error('El documento ya no es un borrador.');
       if (d.tipo === 'NC' || d.tipo === 'ND') d.electronica = !!db.documentos.find(x => x.id === d.ref_id)?.electronica;
       if (d.tipo === 'RC') d.electronica = false;
@@ -105,6 +111,7 @@ function localStore({ publico = false } = {}) {
     },
     async anular(id, motivo) {
       const d = db.documentos.find(x => x.id === id);
+      if (d) revisarBloqueo('documentos', { ...d, estado: 'emitido' }, null, db.empresas.find(e => e.id === d.empresa_id)?.bloqueado_hasta);
       if (!d || d.estado !== 'emitido') throw new Error('Solo se anulan documentos guardados.');
       if (d.electronica && d.tipo !== 'RC') throw new Error('Los documentos electrónicos no se anulan: se corrigen con una nota.');
       if (d.tipo === 'FV' && db.documentos.some(x => x.ref_id === id && x.estado === 'emitido')) throw new Error('La factura tiene notas crédito o débito. Anúlalas primero.');
@@ -113,6 +120,7 @@ function localStore({ publico = false } = {}) {
     },
     async eliminar(id) {
       const d = db.documentos.find(x => x.id === id);
+      if (d) revisarBloqueo('documentos', d, null, db.empresas.find(e => e.id === d.empresa_id)?.bloqueado_hasta);
       revisarEliminar(d, db.documentos, db.aplicaciones, db.fe_envios || []);
       db.fe_envios = (db.fe_envios || []).filter(e => e.documento_id !== id);
       if (d.tipo === 'FV') {
@@ -137,6 +145,9 @@ function localStore({ publico = false } = {}) {
     // Notificaciones leídas (en la demostración se reinician con los datos).
     async leidas() { return { ...(db.notif_leidas || {}) }; },
     async marcarLeidas(claves) { db.notif_leidas = db.notif_leidas || {}; const t = ahora(); for (const c of claves) db.notif_leidas[c] = t; persist(); },
+    async trasladarCuenta(eid, a, b) { const n = trasladarLocal(db, eid, a, b); persist(); return { registros: n }; },
+    async bloquearPeriodo(eid, hasta) { const e = db.empresas.find(x => x.id === eid); e.bloqueado_hasta = hasta; (db.bloqueos_log ||= []).push({ empresa_id: eid, hasta, correo: 'demostración', en: ahora() }); persist(); },
+    async bloqueosLog(eid) { return (db.bloqueos_log || []).filter(x => x.empresa_id === eid).slice().reverse(); },
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
   };
   return api;
@@ -191,6 +202,9 @@ function supabaseStore(url, key) {
       if (error) return loc;
       return { ...loc, ...Object.fromEntries((data || []).map(x => [x.clave, x.leida_en])) };
     },
+    async trasladarCuenta(eid, a, b) { return ok(await sb.rpc('trasladar_cuenta', { p_empresa: eid, p_desde: a, p_hasta: b })); },
+    async bloquearPeriodo(eid, hasta) { ok(await sb.rpc('bloquear_periodo', { p_empresa: eid, p_hasta: hasta })); },
+    async bloqueosLog(eid) { const { data, error } = await sb.from('bloqueos_log').select('*').eq('empresa_id', eid).order('en', { ascending: false }).limit(50); return error ? [] : data; },
     async marcarLeidas(claves) {
       const t = ahora(); guardarLeidasLocal(claves, t);
       if (claves.length) await sb.from('notificaciones_leidas').upsert(claves.map(clave => ({ clave, leida_en: t })), { onConflict: 'user_id,clave' });

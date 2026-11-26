@@ -41,7 +41,7 @@ for (const e of empresas) {
     for (const t of TABLAS) d[t] = await todo(t, ['empresa_id', e.id]).catch(err => (t === 'cuentas' || t === 'documentos' ? Promise.reject(err) : []));
     const plan = planes[perfiles[e.owner]?.plan_id] || null;
     const c = e.contabilidad;
-    const ms = movimientos({ ...d, param: parametrosDe(c), tarifas: tarifasIva(c), metodoInv: cfgInventario(c).metodo, cc: cfgCC(c), inventario: tieneModulo(plan, 'inventario') });
+    const ms = movimientos({ ...d, contab: c, param: parametrosDe(c), tarifas: tarifasIva(c), metodoInv: cfgInventario(c).metodo, cc: cfgCC(c), inventario: tieneModulo(plan, 'inventario') });
     const r = auxiliarGeneral(ms, null, hoy);
     const ctas = Object.fromEntries(d.cuentas.map(x => [x.codigo, x.nombre])), ters = Object.fromEntries(d.terceros.map(x => [x.id, x]));
     const dir = join(SALIDA, hoy, limpio(`${e.nit} ${e.nombre}`));
