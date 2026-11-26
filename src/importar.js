@@ -2,7 +2,7 @@
 // El contador descarga de la DIAN (con el token de la empresa) los documentos emitidos y recibidos,
 // pasa los datos a estas plantillas y AGAsoft los valida y los carga. Funciones puras: no tocan la base de datos.
 import { r2, num, parseNit, totales } from './calc.js';
-import { esAuxiliar } from './puc.js';
+import { esAuxiliar, a8 } from './puc.js';
 import { nombreTercero } from './nombres.js';
 
 // Nombre del tercero: persona natural (dos nombres y dos apellidos) o jurídica (razón social).
@@ -63,6 +63,23 @@ const PLANTILLAS = {
     ],
     ejemplo: [['FC', 'FV-5521', '2026-10-03', '2026-11-02', '830122566-1', 'Jurídica', 'Telecomunicaciones Demo S.A.S.', '', '', '', '', '51350501', 'Internet octubre', '250000', '19', '4', '0', '0'],
       ['DS', 'DS-1', '2026-10-10', '', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', '51100501', 'Honorarios', '800000', '0', '10', '0', '0']],
+  },
+  saldos: {
+    titulo: 'Saldos iniciales', archivo: 'plantilla-saldos-iniciales.csv',
+    ayuda: 'El saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft (por ejemplo el balance de prueba por tercero al 31 de diciembre). Una fila por cuenta y tercero; cada línea lleva tercero. Se crea un solo comprobante de saldos iniciales y debe cuadrar (débitos = créditos). Si la cuenta auxiliar no existe y escribes su nombre, se crea dentro de su subcuenta.',
+    cols: [
+      ['cuenta', 'Cuenta', true, ['cuentacontable', 'codigo', 'codigocuenta', 'auxiliar']],
+      ['nombre_cuenta', 'Nombre cuenta', false, ['nombredelacuenta', 'descripcioncuenta']],
+      ['nit', 'NIT o cédula tercero', true, ['nit', 'nittercero', 'identificacion', 'tercero', 'documento', 'cedula']],
+      ...colsNombre(' tercero', ['razonsocialtercero', 'nombretercero', 'razonsocial', 'nombre']),
+      ['detalle', 'Detalle', false, ['concepto', 'descripcion']],
+      ['cruce', 'Documento cruce', false, ['documentocruce', 'doccruce', 'factura', 'numerofactura', 'documentoreferencia']],
+      ['vence', 'Vence', false, ['vencimiento', 'fechavencimiento']],
+      ['debito', 'Débito', false, ['debe', 'debitos', 'saldodebito']], ['credito', 'Crédito', false, ['haber', 'creditos', 'saldocredito']],
+    ],
+    ejemplo: [['11100501', 'Bancos nacionales', '900123456-8', 'Jurídica', 'Banco Ejemplo S.A.', '', '', '', '', 'Saldo en cuenta corriente', '', '', '15000000', ''],
+      ['13050501', 'Clientes nacionales', '900123456-8', 'Jurídica', 'Banco Ejemplo S.A.', '', '', '', '', 'Factura pendiente', 'FE 1520', '31/01/2027', '2500000', ''],
+      ['31050501', 'Capital suscrito y pagado', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', 'Aporte del socio', '', '', '', '17500000']],
   },
 };
 
@@ -236,4 +253,32 @@ function prepararCompras(filas, ctx, totalesCompra) {
   return { terceros: [...nuevos.values()], marcar: [], docs, errores };
 }
 
+// Saldos iniciales: líneas del comprobante SI, terceros y cuentas auxiliares que faltan. ctx.cuentas, ctx.terceros.
+function prepararSaldos(filas, ctx) {
+  const nuevos = new Map(), cuentasNuevas = new Map(), lineas = [], errores = [];
+  const existe = c => ctx.cuentas.some(x => x.codigo === c) || cuentasNuevas.has(c);
+  for (const f of filas) {
+    const raw = String(f.cuenta || '').replace(/\D/g, '');
+    const cuenta = raw.length === 6 ? a8(raw) : raw;
+    if (!esAuxiliar(cuenta)) { errores.push(`Fila ${f._fila}: la cuenta "${f.cuenta}" no es auxiliar (8 dígitos).`); continue; }
+    if (!existe(cuenta)) {
+      const padre = ctx.cuentas.find(x => x.codigo === cuenta.slice(0, 6));
+      if (!padre || !f.nombre_cuenta) { errores.push(`Fila ${f._fila}: la cuenta ${cuenta} no existe${padre ? '; escribe su nombre en la columna Nombre cuenta para crearla' : ` y tampoco su subcuenta ${cuenta.slice(0, 6)}`}.`); continue; }
+      cuentasNuevas.set(cuenta, { codigo: cuenta, nombre: f.nombre_cuenta, naturaleza: padre.naturaleza });
+    }
+    let d = parseValor(f.debito), c = parseValor(f.credito);
+    if (d < 0) { c += -d; d = 0; } if (c < 0) { d += -c; c = 0; }
+    d = r2(d); c = r2(c);
+    if (!d && !c) continue;
+    const t = terceroDe(f, ctx, nuevos, '');
+    if (t.error) { errores.push(`Fila ${f._fila}: ${t.error}`); continue; }
+    const vence = f.vence ? parseFecha(f.vence) : '';
+    if (f.vence && !vence) { errores.push(`Fila ${f._fila}: la fecha de vencimiento "${f.vence}" no se entiende (usa DD/MM/AAAA).`); continue; }
+    lineas.push({ cuenta, tercero: t.numero, detalle: f.detalle || 'Saldo inicial', debito: d > c ? r2(d - c) : 0, credito: c > d ? r2(c - d) : 0, ...(f.cruce ? { cruce: String(f.cruce).trim() } : {}), ...(vence ? { vence } : {}) });
+  }
+  const debito = r2(lineas.reduce((x, l) => x + l.debito, 0)), credito = r2(lineas.reduce((x, l) => x + l.credito, 0));
+  return { terceros: [...nuevos.values()], cuentasNuevas: [...cuentasNuevas.values()], lineas, debito, credito, diferencia: r2(debito - credito), errores, docs: [], marcar: [] };
+}
+
+export { prepararSaldos };
 export { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor, parseFecha, leerId };

@@ -82,3 +82,38 @@ export function trasladarLocal(db, eid, a, b) {
   if (e) e.contabilidad = reemplazar(e.contabilidad || {}, a, b);
   return n;
 }
+
+// Cuentas con cartera: sus movimientos se siguen por tercero y documento cruce (cartera, CxP, edades).
+// Cada cuenta puede marcarse (cartera: true/false); si no, hereda de su cuenta padre y, al final, de las de siempre.
+export const CARTERA_DEFECTO = ['1305', '1330', '2205'];
+export function manejaCartera(codigo, idx = {}) {
+  const c = String(codigo || '');
+  for (let n = c.length; n > 0; n -= n > 2 ? 2 : 1) { const v = idx[c.slice(0, n)]?.cartera; if (v === true || v === false) return v; }
+  return CARTERA_DEFECTO.some(p => c.startsWith(p));
+}
+const natDe = (codigo, idx) => { const c = String(codigo); for (let n = c.length; n > 0; n -= n > 2 ? 2 : 1) if (idx[c.slice(0, n)]?.naturaleza) return idx[c.slice(0, n)].naturaleza; return /^[1567]/.test(c) ? 'D' : 'C'; };
+
+// Saldos por documento cruce que dejan los comprobantes (saldos iniciales y comprobantes manuales) en cuentas con cartera.
+// lado 'cobrar' = cuentas débito (clientes, anticipos); 'pagar' = cuentas crédito (proveedores).
+export function carteraComprobantes(comprobantes = [], idx = {}, lado = 'cobrar', hoy = new Date().toISOString().slice(0, 10)) {
+  const g = new Map(), nat = lado === 'cobrar' ? 'D' : 'C';
+  for (const c of comprobantes) {
+    if (c.estado === 'anulado') continue;
+    for (const l of c.lineas || []) {
+      const cuenta = String(l.cuenta || '');
+      if (!manejaCartera(cuenta, idx) || natDe(cuenta, idx) !== nat) continue;
+      const d = Number(l.debito) || 0, k = Number(l.credito) || 0; if (!d && !k) continue;
+      const cruce = String(l.cruce || '').trim(), key = `${l.tercero_id || ''}|${cuenta}|${cruce}`;
+      const x = g.get(key) || { tercero_id: l.tercero_id || null, cuenta, cruce, fecha: c.fecha, vence: '', comp_id: c.id, valor: 0, abonos: 0 };
+      const sube = nat === 'D' ? d - k : k - d;
+      if (sube > 0) { x.valor += sube; if (!x.vence && l.vence) x.vence = l.vence; if (c.fecha < x.fecha || !x.valor) { x.fecha = c.fecha; x.comp_id = c.id; } }
+      else x.abonos += -sube;
+      g.set(key, x);
+    }
+  }
+  return [...g.values()].map(x => {
+    const valor = Math.round(x.valor * 100) / 100, abonos = Math.round(x.abonos * 100) / 100, vence = x.vence || x.fecha;
+    const dias = Math.round((new Date(hoy + 'T12:00:00') - new Date(vence + 'T12:00:00')) / 864e5);
+    return { ...x, valor, abonos, vence, saldo: Math.round((valor - abonos) * 100) / 100, dias };
+  });
+}

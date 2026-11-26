@@ -13,11 +13,11 @@ import { AREAS, CONTRATOS, RIESGOS, PERIODOS, CONCEPTOS as CONCEPTOS_NOM, CONCEP
 import { jsonNominaE, jsonNotaNE, totalesNE, erroresNE, avisosNE, lineasDelMes, prestacionesPagadas, fechasPago, referenciaNE } from './nominae.js';
 import { TIPOS_RET, conceptosRet, tarifasIva, tarifaAplicada, fotoRet, naturalezaRet } from './impuestos.js';
 import { COLORES, MODOS, leerTema, guardarLocal, aplicarTema, normalizar } from './tema.js';
-import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, parseValor } from './importar.js';
+import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, prepararCompras, prepararSaldos, parseValor } from './importar.js';
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
 import { xlsx } from './xlsx.js';
-import { conVersion, inactiva, usosCuenta, trasladarLocal } from './cuentas.js';
+import { conVersion, inactiva, usosCuenta, trasladarLocal, manejaCartera, carteraComprobantes } from './cuentas.js';
 import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
@@ -230,7 +230,7 @@ const MENU = [
   { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
-  { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras']] },
+  { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'], ['importar/saldos', 'Plantilla de saldos iniciales']] },
   { k: 'config', t: 'Configuración', i: 'config' },
 ];
 const NAV_ICO = {
@@ -545,6 +545,7 @@ async function guardarEmpresa(fd, e = {}) {
     responsable_iva: fd.get('responsable_iva') === 'on', direccion: fd.get('direccion').trim(),
     departamento: fd.get('departamento') || '', ciudad: fd.get('ciudad') || '', telefono: fd.get('telefono').trim(), correo: fd.get('correo').trim(), pie_factura: fd.get('pie_factura').trim() };
   if (!row.nombre) throw new Error('Escribe el nombre de la empresa.');
+  if (e.id && row.nit !== String(e.nit) && nitBloqueado(e.id)) throw new Error('El NIT no se puede cambiar: la empresa ya emitió facturas electrónicas en producción con este NIT.');
   if (!row.direccion || !row.ciudad) throw new Error('Escribe la dirección y escoge el departamento y el municipio: salen en las facturas.');
   const g = await store.save('empresas', e.id ? { ...row, id: e.id } : row);
   if (!e.id) {
@@ -562,7 +563,11 @@ function formEmpresa(e = {}) {
     location.hash = e.id ? '#/config' : '#/numeraciones'; route();
   }, { ancho: true });
   activarNit(f);
+  // Después de la primera factura electrónica en producción el NIT queda fijo (la DIAN la emitió a ese NIT).
+  if (e.id && nitBloqueado(e.id)) { const i = f.querySelector('[name=nit]'); i.readOnly = true; i.title = 'No se puede cambiar'; i.closest('div:not(.nitrow)').insertAdjacentHTML('beforeend', '<p class="hint">Fijo: la empresa ya emitió facturas electrónicas en producción con este NIT.</p>'); }
 }
+// ¿La empresa ya tiene un documento electrónico aceptado por la DIAN en producción?
+const nitBloqueado = eid => eid === S.eid && (S.d?.fe_envios || []).some(x => x.estado === 'aceptado' && x.ambiente === 'produccion');
 // Íconos de línea para las tarjetas de Configuración.
 const ICO = {
   empresa: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1',
@@ -1571,10 +1576,29 @@ function imprimir(d) {
 }
 
 /* ---------- Cartera ---------- */
+// Cartera viva: facturas (o compras) pendientes más los documentos cruce que dejan los comprobantes en las cuentas con cartera.
+// Un comprobante con el número de una factura de AGAsoft como documento cruce abona (o suma) a esa factura.
+const normCruce = v => String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+function carteraViva(lado = 'cobrar', sinComp = null) {
+  const docs = lado === 'cobrar'
+    ? cartera(S.d.documentos, S.d.aplicaciones).map(x => ({ id: x.factura.id, tercero_id: x.factura.tercero_id, doc: numDoc(x.factura), claves: [numDoc(x.factura)], href: '#/doc/' + x.factura.id,
+      fecha: x.factura.fecha, vence: x.factura.vence, valor: x.neto, ajustes: r2(x.nd - x.nc), abonos: x.pagos, saldo: x.saldo, dias: x.diasVencida, cuenta: param().clientes }))
+    : cxp().map(x => ({ id: x.compra.id, tercero_id: x.compra.tercero_id, doc: `${TIPOS_COMPRA[x.compra.tipo].corto} ${x.compra.numero}${x.compra.num_proveedor ? ' · ' + x.compra.num_proveedor : ''}`,
+      claves: [`${TIPOS_COMPRA[x.compra.tipo].corto} ${x.compra.numero}`, x.compra.num_proveedor].filter(Boolean), href: '#/compra/' + x.compra.id,
+      fecha: x.compra.fecha, vence: x.compra.vence, valor: x.neto, ajustes: 0, abonos: x.pagado, saldo: x.saldo, dias: x.diasVencida, cuenta: param().proveedores }));
+  const comps = (S.d.comprobantes || []).filter(c => c.id !== sinComp);
+  const out = [];
+  for (const x of carteraComprobantes(comps, idxCuentas(), lado, hoy())) {
+    const d = x.cruce && docs.find(o => o.tercero_id === x.tercero_id && o.claves.some(k => normCruce(k) === normCruce(x.cruce)));
+    if (d) { d.ajustes = r2(d.ajustes + x.valor); d.abonos = r2(d.abonos + x.abonos); d.saldo = r2(d.saldo + x.valor - x.abonos); continue; }
+    out.push({ id: `${x.comp_id}|${x.cuenta}|${x.cruce}`, tercero_id: x.tercero_id, doc: `${x.cruce || 'Sin documento cruce'} · ${x.cuenta}`, cruce: x.cruce, cuenta: x.cuenta, href: '#/comp/' + x.comp_id,
+      fecha: x.fecha, vence: x.vence, valor: x.valor, ajustes: 0, abonos: x.abonos, saldo: x.saldo, dias: x.dias });
+  }
+  return docs.map(d => ({ ...d, cruce: d.claves[0] })).concat(out);
+}
 function vCartera(m) {
-  const items = cartera(S.d.documentos, S.d.aplicaciones).filter(x => x.saldo > 0.009).map(x => ({ id: x.factura.id, tercero_id: x.factura.tercero_id, doc: numDoc(x.factura), href: '#/doc/' + x.factura.id,
-    fecha: x.factura.fecha, vence: x.factura.vence, valor: x.neto, ajustes: r2(x.nd - x.nc), abonos: x.pagos, saldo: x.saldo, dias: x.diasVencida }));
-  vSaldos(m, { titulo: 'Cartera', quien: 'Cliente', quienes: 'clientes', vacio: 'No hay facturas pendientes de cobro.', archivo: `cartera-${emp().nit}-${hoy()}.csv`, abonos: 'Abonos', ajustes: 'Notas (ND − NC)', items, clave: 'cartera' });
+  const items = carteraViva('cobrar').filter(x => x.saldo > 0.009);
+  vSaldos(m, { titulo: 'Cartera', quien: 'Cliente', quienes: 'clientes', vacio: 'No hay facturas pendientes de cobro.', archivo: `cartera-${emp().nit}-${hoy()}.csv`, abonos: 'Abonos', ajustes: 'Notas y cargos', items, clave: 'cartera' });
 }
 // Cartera y cuentas por pagar con la misma pantalla: resumen por tercero que se despliega, o lista de todos los documentos.
 const EDADES = [['0', 'Por vencer', d => d <= 0], ['30', '1 a 30 días', d => d > 0 && d <= 30], ['60', '31 a 60', d => d > 30 && d <= 60], ['90', '61 a 90', d => d > 60 && d <= 90], ['mas', 'Más de 90', d => d > 90]];
@@ -2048,7 +2072,7 @@ function vPuc(m) {
     $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl puc"><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Nat.</th><th>Rubro NIIF</th><th></th></tr></thead><tbody>
       ${l.slice(0, 800).map(c => { const r = rubroDe(c.codigo, idx); const propio = !!c.niif_rubro; const hijas = conHijas.has(c.codigo); const ab = pucAbiertas.has(c.codigo);
         return `<tr class="lv${c.codigo.length} ${hijas && !filtrando ? 'click' : ''}" ${hijas && !filtrando ? `data-tg="${c.codigo}"` : ''}>
-        <td class="mono nowrap">${!filtrando ? `<span class="tg" aria-hidden="true">${hijas ? (ab ? '▾' : '▸') : ''}</span>` : ''}${c.codigo}</td><td>${esc(c.nombre)}${c.activa === false ? ' <span class="tag">Inactiva</span>' : ''}</td><td class="muted">${nivelDe(c.codigo)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
+        <td class="mono nowrap">${!filtrando ? `<span class="tg" aria-hidden="true">${hijas ? (ab ? '▾' : '▸') : ''}</span>` : ''}${c.codigo}</td><td>${esc(c.nombre)}${c.activa === false ? ' <span class="tag">Inactiva</span>' : ''}${c.codigo.length === 8 && manejaCartera(c.codigo, idx) ? ' <span class="tag ok" title="Maneja cartera por documento cruce">Cartera</span>' : ''}</td><td class="muted">${nivelDe(c.codigo)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
         <td class="${propio ? '' : 'muted'}">${r ? esc(RUBRO[r]?.nombre) : '—'}${r && RUBRO[r]?.estado !== '—' ? ` <span class="tag">${RUBRO[r].estado}</span>` : ''}</td>
         <td class="r nowrap">${conMov.has(c.codigo) ? `<a class="btn ghost sm" href="#/auxiliar?cuenta=${c.codigo}">Auxiliar</a>` : ''}${c.codigo.length < 8 ? `<button class="ghost sm" data-sub="${c.codigo}" title="Crear una cuenta dentro de ${c.codigo}">+ Crear</button>` : ''}<button class="ghost sm" data-ed="${c.id}">Editar</button></td></tr>`; }).join('')}
       </tbody></table></div>${l.length > 800 ? '<p class="hint">Se muestran las primeras 800 cuentas. Usa el buscador.</p>' : ''}`;
@@ -3658,6 +3682,7 @@ function formCuenta(c = {}, padre = '') {
     ${campo('niif_codigo', 'Código en el plan NIIF (opcional)', c.niif_codigo, 'class="mono" maxlength="20"')}</div>
     <div><label for="f_rub">Rubro NIIF (línea del estado financiero)</label><select id="f_rub" name="niif_rubro"><option value="">Igual que la cuenta padre</option>
       ${['ESF', 'ER', '—'].map(e => `<optgroup label="${e === 'ESF' ? 'Estado de situación financiera' : e === 'ER' ? 'Estado de resultados' : 'Otros'}">${RUBROS.filter(r => r.estado === e).map(r => `<option value="${r.id}" ${r.id === c.niif_rubro ? 'selected' : ''}>${esc(r.seccion)} · ${esc(r.nombre)}</option>`).join('')}</optgroup>`).join('')}</select></div>
+    ${check('cartera', 'Maneja cartera (se sigue por tercero y documento cruce, con edades y vencimiento)', c.codigo ? manejaCartera(c.codigo, idxCuentas()) : !!(padre && manejaCartera(padre, idxCuentas())))}<p class="hint">Vienen marcadas 1305 Clientes, 1330 Anticipos y 2205 Proveedores. Las cuentas hijas heredan lo que marques aquí. Sus saldos salen en Cartera (cuentas débito) o en Cuentas por pagar (cuentas crédito).</p>
     ${nueva ? '' : `${check('activa', 'Activa (se puede usar en registros nuevos)', c.activa !== false)}<p class="hint">Inactiva: no aparece para registros nuevos, pero sus movimientos y saldos quedan igual. Para pasar sus movimientos a otra cuenta usa Trasladar movimientos.</p>`}
     ${!nueva && !usada && !tieneHijas && c.codigo.length > 4 ? '<div class="row"><button value="del" class="ghost">Borrar cuenta</button></div>' : ''}
     ${pie()}`, async (fd, btn) => {
@@ -3679,7 +3704,12 @@ function formCuenta(c = {}, padre = '') {
       if (!idxCuentas()[padreDe(cod)]) throw new Error(`Primero debe existir la cuenta ${padreDe(cod)}.`);
       row.codigo = cod; row.activa = true;
     }
-    await store.save('cuentas', nueva ? row : { ...row, id: c.id });
+    // Solo se guarda si cambia lo que la cuenta hereda (así funciona aunque no se haya corrido 045_cuentas_cartera.sql).
+    const car = fd.get('cartera') === 'on', cod = nueva ? row.codigo : c.codigo;
+    const hereda = manejaCartera(cod, { ...idxCuentas(), [cod]: undefined });
+    if (car !== hereda || (c.cartera !== undefined && c.cartera !== null)) row.cartera = car === hereda ? null : car;
+    try { await store.save('cuentas', nueva ? row : { ...row, id: c.id }); }
+    catch (e) { throw /cartera/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/045_cuentas_cartera.sql para marcar las cuentas con cartera.') : e; }
     if (nueva) { for (let p = padreDe(row.codigo); p; p = padreDe(p)) pucAbiertas?.add(p); try { localStorage.setItem('agasoft-puc', JSON.stringify([...(pucAbiertas || [])])); } catch (_) {} }
     await cargarEmpresa(); toast('Cuenta guardada.'); route();
   });
@@ -3689,6 +3719,7 @@ function formCuenta(c = {}, padre = '') {
       const cod = i.value.trim(), p = idxCuentas()[padreDe(cod)];
       $('ctaPadre').textContent = /^(\d{2}|\d{4}|\d{6}|\d{8})$/.test(cod) ? (p ? `${nivelDe(cod)} dentro de ${p.codigo} ${p.nombre}.${cod.length === 8 ? ' Recibe movimientos.' : ' Para registrar movimientos crea luego una auxiliar de 8 dígitos.'}` : `No existe la cuenta ${padreDe(cod)}.`) : 'Grupo de 2 dígitos, cuenta de 4, subcuenta de 6 o auxiliar de 8.';
       if (p) f.querySelector('[name=naturaleza]').value = p.naturaleza;
+      if (p) f.querySelector('[name=cartera]').checked = manejaCartera(cod, idxCuentas());
     };
     if (padre) { i.focus(); i.setSelectionRange(padre.length, padre.length); }
   }
@@ -4011,14 +4042,16 @@ function vCertificados(m, tid) {
   const desde = `${certAnio}-01-01`, hasta = `${certAnio}-12-31`;
   const ids = tercerosConRetencion(S.d.compras, desde, hasta), lista = ids.map(terc).filter(Boolean).sort((a, b) => a.nombre.localeCompare(b.nombre));
   m.innerHTML = `<header class="vhead noprint"><div><h2>Certificados de retención</h2><p class="sub">El certificado de las retenciones que la empresa le practicó a cada proveedor en el año. Se imprime o se guarda en PDF para enviarlo.</p></div></header>
-    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div></div>
+    <div class="row filters noprint"><div><label for="cA">Año</label><select id="cA">${anios.map(a => `<option ${a === certAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="grow"><label for="cQ">Proveedor</label><input id="cQ" type="search" list="cQL" autocomplete="off" placeholder="Nombre, NIT o cédula"><datalist id="cQL">${lista.map(t => `<option value="${esc(t.nombre)}">${esc(docId(t))}</option>`).join('')}</datalist></div></div>
     <section class="panel stack noprint">${lista.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Proveedor</th><th>Documento</th><th class="r">Retefuente</th><th class="r">ReteIVA</th><th class="r">ReteICA</th><th></th></tr></thead><tbody>
       ${lista.map(t => { const c = certificado(S.d.compras, t.id, desde, hasta), tot = k => r2(c.porTipo[k].reduce((s, g) => s + g.valor, 0));
-        return `<tr><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
+        return `<tr data-q="${esc(`${t.nombre} ${t.numero} ${docId(t)}`.toLowerCase())}"><td>${esc(t.nombre)}</td><td class="mono nowrap">${esc(docId(t))}</td><td class="r mono">${money(tot('retefuente'))}</td><td class="r mono">${money(tot('reteiva'))}</td><td class="r mono">${money(tot('reteica'))}</td>
           <td class="r nowrap"><button class="sm" data-ver="${t.id}">Ver</button> <button class="sm" data-pdf="${t.id}">Imprimir / PDF</button></td></tr>`; }).join('')}</tbody></table></div>`
       : '<p class="muted">No hay retenciones practicadas en ese año.</p>'}</section>
     <section class="panel" id="cert" ${tid ? '' : 'hidden'}></section>`;
   $('cA').onchange = () => { certAnio = +$('cA').value; vCertificados(m, ''); };
+  $('cQ').oninput = () => { const q = $('cQ').value.trim().toLowerCase().replace(/[.\s-]/g, ''); m.querySelectorAll('tr[data-q]').forEach(tr => { tr.hidden = !!q && !tr.dataset.q.replace(/[.\s-]/g, '').includes(q); }); };
   const hoja = id => {
     const t = terc(id), c = certificado(S.d.compras, id, desde, hasta), e = emp();
     const tabla = ([k, nombre]) => { const gs = c.porTipo[k]; if (!gs.length) return '';
@@ -4368,7 +4401,7 @@ function vCompEditor(m, { id, tipo }) {
   // Cada línea lleva tercero: la nueva toma el de la línea anterior para no escogerlo cada vez.
   const nuevaLinea = () => ({ cuenta: '', tercero_id: c.lineas?.filter(l => l.tercero_id).at(-1)?.tercero_id || '', detalle: '', debito: '', credito: '' });
   m.innerHTML = `<header class="vhead"><div><a class="back" href="#/comprobantes">← Comprobantes</a><h2>${id ? `Editar ${esc(nomComp(c))}` : `Nuevo: ${T.nombre.toLowerCase()}`}</h2>
-    <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
+    <p class="sub">${c.tipo === 'SI' ? 'Registra el saldo de cada cuenta a la fecha en que empiezas a llevar la contabilidad en AGAsoft. Puedes importarlo desde el balance de prueba de Alegra o World Office, o subir la <a href="#/importar/saldos">plantilla de saldos iniciales</a>.' : 'Cada línea lleva débito o crédito. El comprobante debe cuadrar (sumas iguales) para guardarse.'}</p></div></header>
   <form id="ce" class="stack" novalidate>
     <section class="panel grid-doc">
       <div><label for="cf">Fecha</label><input id="cf" type="date" value="${c.fecha}" required></div>
@@ -4377,22 +4410,45 @@ function vCompEditor(m, { id, tipo }) {
     </section>
     <section class="panel stack"><div class="vhead"><h3>Movimientos</h3><div class="row"><button type="button" id="impL">Importar CSV</button><button type="button" id="addL">+ Agregar línea</button></div></div>
       <datalist id="ctasComp">${optsLista(aux)}</datalist>
-      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero <span class="hint">(obligatorio)</span></th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th>Detalle</th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl items comp"><thead><tr><th>Cuenta</th><th>Tercero <span class="hint">(obligatorio)</span></th>${ccCfg().activo ? '<th>Centro de costo</th>' : ''}<th>Detalle</th><th>Documento cruce <span class="hint">(cuentas con cartera)</span></th><th class="r">Débito</th><th class="r">Crédito</th><th></th></tr></thead><tbody id="lns"></tbody></table></div>
       <div class="totbox" id="ctot"></div>
     </section>
     <div class="err" id="ceErr" hidden></div>
     <div class="row end sticky-actions"><span class="spacer"></span><a class="btn ghost" href="${id ? '#/comp/' + id : '#/comprobantes'}">Cancelar</a><button type="submit" class="primary" id="ceSave">Guardar</button></div>
   </form>`;
   const nomDe = cod => cod ? (idx[cod]?.nombre || 'No existe en el plan') : '';
+  const conCartera = cod => /^\d{8}$/.test(String(cod || '')) && manejaCartera(cod, idx);
+  const celCruce = (l, i) => conCartera(l.cuenta) ? `<input data-k="cruce" value="${esc(l.cruce || '')}" maxlength="40" class="mono w-cod" aria-label="Documento cruce" placeholder="Ej.: FE 1234"><input data-k="vence" type="date" value="${esc(l.vence || '')}" aria-label="Vence" title="Vencimiento"><button type="button" class="ghost sm" data-pend="${i}" title="Escoger documentos pendientes de este tercero">Pendientes</button>` : '<span class="muted">—</span>';
+  // Documentos pendientes (cartera viva) del tercero en la cuenta de la línea: los escogidos se abonan, una línea por documento.
+  const lado = cod => (idx[cod]?.naturaleza || (/^[1567]/.test(cod) ? 'D' : 'C')) === 'D' ? 'cobrar' : 'pagar';
+  const pendientes = i => {
+    const l = c.lineas[i];
+    if (!l.tercero_id) return fail(new Error('Escoge primero el tercero de la línea.'));
+    const ld = lado(l.cuenta);
+    const items = carteraViva(ld, id || null).filter(x => x.tercero_id === l.tercero_id && x.saldo > 0.009 && (x.cuenta === l.cuenta || (!x.href.startsWith('#/comp/') && String(x.cuenta).slice(0, 4) === l.cuenta.slice(0, 4))));
+    if (!items.length) return fail(new Error(`${terc(l.tercero_id)?.nombre || 'Este tercero'} no tiene documentos pendientes en la cuenta ${l.cuenta}.`));
+    const lado_ = ld === 'cobrar' ? 'credito' : 'debito';
+    dialogo(`<h2>Documentos pendientes</h2><p class="hint">${esc(terc(l.tercero_id)?.nombre)} · cuenta ${esc(l.cuenta)} ${esc(nomDe(l.cuenta))}. Marca los que vas a abonar; puedes cambiar el valor. Cada uno queda en una línea al ${lado_ === 'credito' ? 'crédito' : 'débito'} con su documento cruce.</p>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th></th><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Saldo</th><th class="r">Abono</th></tr></thead><tbody>
+      ${items.map((x, k) => `<tr><td><input type="checkbox" name="p${k}" aria-label="Abonar ${esc(x.cruce || x.doc)}"></td><td class="mono">${esc(x.cruce || x.doc)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.saldo)}</td><td class="r"><input name="v${k}" type="number" min="0" step="0.01" class="r mono w-val" value="${x.saldo}"></td></tr>`).join('')}
+      </tbody></table></div>${pie('Agregar')}`, fd => {
+      const sel = items.map((x, k) => ({ x, v: r2(num(fd.get('v' + k))), on: fd.get('p' + k) === 'on' })).filter(o => o.on && o.v > 0);
+      if (!sel.length) throw new Error('Marca al menos un documento con valor.');
+      const mayor = sel.find(o => o.v > o.x.saldo + 0.009); if (mayor) throw new Error(`El abono a ${mayor.x.cruce || mayor.x.doc} supera su saldo (${money(mayor.x.saldo)}).`);
+      const nuevas = sel.map(o => ({ cuenta: l.cuenta, tercero_id: l.tercero_id, detalle: l.detalle || `Abono ${o.x.cruce || ''}`.trim(), cruce: o.x.cruce || '', vence: o.x.vence || '', debito: lado_ === 'debito' ? o.v : '', credito: lado_ === 'credito' ? o.v : '', ...(l.cc1 ? { cc1: l.cc1, cc2: l.cc2, cc3: l.cc3 } : {}) }));
+      c.lineas.splice(i, 1, ...nuevas); pintar();
+    }, { ancho: true });
+  };
   const pintar = () => {
     $('lns').innerHTML = c.lineas.map((l, i) => `<tr data-i="${i}">
       <td data-l="Cuenta"><input data-k="cuenta" list="ctasComp" class="mono w-cod" value="${esc(l.cuenta)}" aria-label="Cuenta" autocomplete="off" placeholder="Código o nombre"><small class="hint" data-n="${i}">${esc(nomDe(l.cuenta))}</small></td>
       <td data-l="Tercero"><select data-k="tercero_id" aria-label="Tercero" required><option value="">Escoge…</option>${terceros.map(t => `<option value="${t.id}" ${t.id === l.tercero_id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></td>
       ${ccCfg().activo ? `<td data-l="Centro de costo" class="c-cc" data-ccw="${i}">${selCC(l, i)}</td>` : ''}
       <td data-l="Detalle" class="c-desc"><input data-k="detalle" value="${esc(l.detalle)}" maxlength="200" aria-label="Detalle"></td>
+      <td data-l="Documento cruce" class="c-cruce" data-cru="${i}">${celCruce(l, i)}</td>
       <td data-l="Débito"><input data-k="debito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.debito) || ''}" aria-label="Débito"></td>
       <td data-l="Crédito"><input data-k="credito" type="number" min="0" step="0.01" class="r mono w-val" value="${num(l.credito) || ''}" aria-label="Crédito"></td>
-      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin líneas.</td></tr>';
+      <td class="c-del"><button type="button" class="ghost" data-del="${i}" aria-label="Quitar línea">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Sin líneas.</td></tr>';
     totales_();
   };
   const totales_ = () => {
@@ -4404,6 +4460,7 @@ function vCompEditor(m, { id, tipo }) {
     const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || !el.dataset.k) return;
     const l = c.lineas[Number(tr.dataset.i)];
     l[el.dataset.k] = el.dataset.k === 'cuenta' ? el.value.trim().split(' ')[0] : el.value;
+    if (el.dataset.k === 'cuenta') { const cw = m.querySelector(`[data-cru="${tr.dataset.i}"]`); if (cw && !!cw.querySelector('input') !== conCartera(l.cuenta)) cw.innerHTML = celCruce(l, Number(tr.dataset.i)); }
     if (el.dataset.k === 'cuenta') { m.querySelector(`[data-n="${tr.dataset.i}"]`).textContent = nomDe(l.cuenta); const w = m.querySelector(`[data-ccw="${tr.dataset.i}"]`); if (w && (w.querySelector('select')?.disabled ?? true) === cuentaConCC(ccCfg(), l.cuenta)) w.innerHTML = selCC(l, Number(tr.dataset.i)); }
     if (el.dataset.k === 'debito' || el.dataset.k === 'credito') {
       // Cada línea lleva solo débito o solo crédito: al escribir en uno se borra el otro.
@@ -4413,7 +4470,7 @@ function vCompEditor(m, { id, tipo }) {
     }
   });
   $('lns').addEventListener('change', ev => { const el = ev.target, tr = el.closest('tr[data-i]'); if (!tr || el.tagName !== 'SELECT') return; if (el.dataset.cc) c.lineas[Number(tr.dataset.i)]['cc' + el.dataset.cc] = el.value; else c.lineas[Number(tr.dataset.i)].tercero_id = el.value; });
-  $('lns').addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });
+  $('lns').addEventListener('click', ev => { const pb = ev.target.closest('[data-pend]'); if (pb) return pendientes(Number(pb.dataset.pend)); const b = ev.target.closest('[data-del]'); if (!b) return; c.lineas.splice(Number(b.dataset.del), 1); pintar(); });
   $('addL').onclick = () => {
     // La línea nueva propone el valor que falta para cuadrar.
     const dif = r2(c.lineas.reduce((s, l) => s + num(l.debito) - num(l.credito), 0));
@@ -4425,7 +4482,7 @@ function vCompEditor(m, { id, tipo }) {
     ev.preventDefault();
     c.fecha = $('cf').value; c.descripcion = $('cd').value.trim();
     const lineas = c.lineas.filter(l => String(l.cuenta || '').trim() || num(l.debito) || num(l.credito))
-      .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '' }, ccCfg()));
+      .map(l => limpiarCC({ cuenta: String(l.cuenta).trim(), tercero_id: l.tercero_id || '', detalle: String(l.detalle || '').trim(), debito: r2(num(l.debito)), credito: r2(num(l.credito)), cc1: l.cc1 || '', cc2: l.cc2 || '', cc3: l.cc3 || '', ...(conCartera(String(l.cuenta).trim()) && String(l.cruce || '').trim() ? { cruce: String(l.cruce).trim() } : {}), ...(conCartera(String(l.cuenta).trim()) && l.vence ? { vence: l.vence } : {}) }, ccCfg()));
     const errs = erroresComprobante({ ...c, lineas }, S.d.cuentas).concat(erroresCC(lineas, ccCfg(), centros()));
     if (errs.length) { $('ceErr').innerHTML = errs.slice(0, 8).map(esc).join('<br>') + (errs.length > 8 ? `<br>…y ${errs.length - 8} más.` : ''); $('ceErr').hidden = false; return; }
     $('ceErr').hidden = true; $('ceSave').disabled = true;
@@ -4833,8 +4890,7 @@ function vCompra(m, id) {
 }
 
 function vCxp(m) {
-  const items = cxp().filter(x => x.saldo > 0.009).map(x => ({ id: x.compra.id, tercero_id: x.compra.tercero_id, doc: `${TIPOS_COMPRA[x.compra.tipo].corto} ${x.compra.numero}${x.compra.num_proveedor ? ' · ' + x.compra.num_proveedor : ''}`, href: '#/compra/' + x.compra.id,
-    fecha: x.compra.fecha, vence: x.compra.vence, valor: x.neto, ajustes: 0, abonos: x.pagado, saldo: x.saldo, dias: x.diasVencida }));
+  const items = carteraViva('pagar').filter(x => x.saldo > 0.009);
   vSaldos(m, { titulo: 'Cuentas por pagar', quien: 'Proveedor', quienes: 'proveedores', vacio: 'No hay facturas de proveedor pendientes de pago.', archivo: `cuentas-por-pagar-${emp().nit}-${hoy()}.csv`, abonos: 'Pagos', ajustes: 'Ajustes', items, clave: 'cxp' });
 }
 
@@ -4859,13 +4915,13 @@ function vProveedores(m) {
 /* ---------- Importar plantillas (datos descargados de la DIAN con el token) ---------- */
 function vImportar(m, solo) {
   if (solo && !PLANTILLAS[solo]) solo = '';
-  m.innerHTML = `<header class="vhead"><div><h2>${solo ? 'Plantilla de ' + PLANTILLAS[solo].titulo.toLowerCase() : 'Importar plantillas'}</h2><p class="sub">Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.</p></div></header>
+  m.innerHTML = `<header class="vhead"><div><h2>${solo ? 'Plantilla de ' + PLANTILLAS[solo].titulo.toLowerCase() : 'Importar plantillas'}</h2><p class="sub">${solo === 'saldos' ? 'Monta los saldos iniciales de la empresa desde Excel: llena la plantilla, guárdala como CSV y súbela.' : 'Carga en AGAsoft las facturas de venta, las facturas de compra y los terceros que la empresa ya tiene en la DIAN.'}</p></div></header>
     <section class="panel stack" ${solo ? 'hidden' : ''}><h3>Cómo se hace</h3><ol class="steps-list">
       <li>Con el <b>token de la DIAN</b> de la empresa, entra al catálogo de facturación electrónica y descarga en Excel los documentos <b>emitidos</b> (ventas) y <b>recibidos</b> (compras) del periodo.</li>
       <li>Descarga aquí la plantilla de AGAsoft que corresponda y pasa los datos a sus columnas, sin cambiar los títulos de la primera fila. Puedes dejar los dos ejemplos como guía y borrarlos al final.</li>
       <li>En Excel guarda la plantilla como <b>CSV</b> y súbela aquí. AGAsoft revisa todo y te muestra qué va a cargar antes de guardar nada.</li></ol>
       <p class="hint">Sube primero los terceros si los tienes. Si no, las facturas crean los clientes y proveedores que falten con el NIT y el nombre de la plantilla. Lo que ya existe (misma factura o mismo tercero) no se duplica.</p></section>
-    ${solo ? '<p class="hint">Con el token de la DIAN descarga los documentos, pásalos a esta plantilla, guárdala como CSV y súbela. <a href="#/importar">Ver los pasos</a>.</p>' : ''}
+    ${solo && solo !== 'saldos' ? '<p class="hint">Con el token de la DIAN descarga los documentos, pásalos a esta plantilla, guárdala como CSV y súbela. <a href="#/importar">Ver los pasos</a>.</p>' : ''}
     ${Object.entries(PLANTILLAS).filter(([k]) => !solo || k === solo).map(([k, p]) => `<section class="panel stack"><header class="vhead"><h3>${p.titulo}</h3><div class="row"><button data-plt="${k}">Descargar plantilla</button>
       <label class="btn primary">Subir CSV<input type="file" accept=".csv,text/csv" data-sub="${k}" hidden></label></div></header>
       <p class="hint">${p.ayuda}</p><p class="hint">Columnas: ${p.cols.map(c => c[2] ? `<b>${esc(c[1])}</b>` : esc(c[1])).join(' · ')}. Las de negrilla son obligatorias.</p><div id="prev_${k}"></div></section>`).join('')}`;
@@ -4878,6 +4934,7 @@ function vImportar(m, solo) {
 }
 function previaImport(cual, rows) {
   const out = $('prev_' + cual);
+  if (cual === 'saldos') return previaSaldos(out, rows);
   const { filas, faltan } = leerFilas(cual, rows);
   if (faltan.length) { out.innerHTML = `<p class="err">No encontré las columnas: ${faltan.map(esc).join(', ')}. Usa la plantilla de AGAsoft sin cambiar los títulos.</p>`; return; }
   if (!filas.length) { out.innerHTML = '<p class="err">El archivo no tiene filas con datos.</p>'; return; }
@@ -4898,6 +4955,40 @@ function previaImport(cual, rows) {
     const b = $('go_' + cual); b.disabled = true; b.textContent = 'Importando…';
     try { const res = await ejecutarImport(cual, r); await cargarEmpresa(); route(); toast(res, /problema/.test(res)); }
     catch (e) { fail(e); b.disabled = false; b.textContent = `Importar ${listos}`; }
+  };
+}
+// Saldos iniciales desde la plantilla: un comprobante SI que debe cuadrar.
+function previaSaldos(out, rows) {
+  const { filas, faltan } = leerFilas('saldos', rows);
+  if (faltan.length) { out.innerHTML = `<p class="err">No encontré las columnas: ${faltan.map(esc).join(', ')}. Usa la plantilla de AGAsoft sin cambiar los títulos.</p>`; return; }
+  if (!filas.length) { out.innerHTML = '<p class="err">El archivo no tiene filas con datos.</p>'; return; }
+  const r = prepararSaldos(filas, { terceros: S.d.terceros, cuentas: S.d.cuentas });
+  const nomT = n => r.terceros.find(t => t.numero === n)?.nombre || S.d.terceros.find(t => t.numero === n)?.nombre || n;
+  const nomC = c => r.cuentasNuevas.find(x => x.codigo === c)?.nombre || nomCta(c);
+  const yaSI = comps().some(c => c.tipo === 'SI' && c.estado !== 'anulado');
+  const defF = `${Number(hoy().slice(0, 4)) - 1}-12-31`;
+  const ok = r.lineas.length && !r.diferencia;
+  out.innerHTML = `<div class="stack imp-prev">
+    <p><b>${r.lineas.length}</b> líneas · débitos <b>${money(r.debito)}</b> · créditos <b>${money(r.credito)}</b>${r.diferencia ? ` · <span class="tag bad">No cuadra: diferencia ${money(r.diferencia)}</span>` : ' · <span class="tag">Cuadra</span>'}${r.terceros.length ? ` · ${r.terceros.length} terceros nuevos` : ''}${r.cuentasNuevas.length ? ` · ${r.cuentasNuevas.length} cuentas nuevas` : ''}</p>
+    ${yaSI ? '<p class="aviso">La empresa ya tiene un comprobante de saldos iniciales. Este se crea aparte: revisa que no dupliques saldos.</p>' : ''}
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Cuenta</th><th>Nombre</th><th>Tercero</th><th class="r">Débito</th><th class="r">Crédito</th></tr></thead><tbody>
+      ${r.lineas.slice(0, 80).map(l => `<tr><td class="mono">${l.cuenta}</td><td>${esc(nomC(l.cuenta))}${r.cuentasNuevas.some(x => x.codigo === l.cuenta) ? ' <span class="tag">Nueva</span>' : ''}</td><td>${esc(nomT(l.tercero))}</td><td class="r mono">${valor(l.debito)}</td><td class="r mono">${valor(l.credito)}</td></tr>`).join('')}
+    </tbody></table></div>${r.lineas.length > 80 ? `<p class="hint">Y ${r.lineas.length - 80} líneas más.</p>` : ''}
+    ${r.errores.length ? `<details class="imp-err" open><summary>No se importan (${r.errores.length})</summary><ul>${r.errores.slice(0, 100).map(e => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+    ${r.diferencia ? '<p class="err">El comprobante no cuadra. Corrige la plantilla (o las filas que no se importan) para que débitos y créditos sean iguales.</p>' : ''}
+    <div class="row end"><div><label for="siF">Fecha de los saldos</label><input id="siF" type="date" value="${defF}"></div><button class="primary" id="go_saldos" ${ok ? '' : 'disabled'}>Crear saldos iniciales</button></div></div>`;
+  $('go_saldos').onclick = async () => {
+    const b = $('go_saldos'), fecha = $('siF').value; if (!fecha) return toast('Escoge la fecha de los saldos.', true);
+    b.disabled = true; b.textContent = 'Creando…';
+    try {
+      const ids = new Map(S.d.terceros.map(t => [t.numero, t.id]));
+      for (const t of r.terceros) { const g = await store.save('terceros', { empresa_id: S.eid, tipo_id: t.tipo_id, numero: t.numero, dv: t.dv, nombre: t.nombre, tipo_persona: t.tipo_persona, razon_social: t.razon_social || '', primer_nombre: t.primer_nombre || '', segundo_nombre: t.segundo_nombre || '', primer_apellido: t.primer_apellido || '', segundo_apellido: t.segundo_apellido || '', direccion: '', ciudad: '', telefono: '', correo: '', es_cliente: false, es_proveedor: false, plazo_dias: 0, responsable_iva: false, retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }); ids.set(t.numero, g.id); }
+      for (const c of r.cuentasNuevas) await store.save('cuentas', { empresa_id: S.eid, codigo: c.codigo, nombre: c.nombre, naturaleza: c.naturaleza, activa: true });
+      await cargarEmpresa();
+      const lineas = r.lineas.map(l => ({ cuenta: l.cuenta, tercero_id: ids.get(l.tercero), detalle: l.detalle, debito: l.debito, credito: l.credito, ...(l.cruce ? { cruce: l.cruce } : {}), ...(l.vence ? { vence: l.vence } : {}) }));
+      const g = await store.save('comprobantes', { empresa_id: S.eid, tipo: 'SI', numero: siguienteComp('SI'), fecha, descripcion: 'Saldos iniciales (plantilla)', lineas, estado: 'contabilizado' });
+      await cargarEmpresa(); toast(`Saldos iniciales creados con ${lineas.length} líneas.`); location.hash = '#/comp/' + g.id;
+    } catch (e) { fail(e); b.disabled = false; b.textContent = 'Crear saldos iniciales'; }
   };
 }
 async function ejecutarImport(cual, r) {

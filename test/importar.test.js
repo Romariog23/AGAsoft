@@ -20,7 +20,7 @@ test('las plantillas de ejemplo se leen completas', () => {
   for (const k of Object.keys(PLANTILLAS)) {
     const r = filasDe(k, csvPlantilla(k));
     assert.deepEqual(r.faltan, [], k);
-    assert.equal(r.filas.length, 2, k);
+    assert.equal(r.filas.length, PLANTILLAS[k].ejemplo.length, k);
   }
 });
 
@@ -67,4 +67,17 @@ test('terceros: persona natural con dos nombres y dos apellidos, jurídica con r
   assert.equal(nombreTercero({ razon_social: 'Pedro Ruiz' }, '13').nombre, 'Pedro Ruiz'); // plantilla vieja con el nombre en una casilla
   const c = prepararCompras(filasDe('compras', csvPlantilla('compras')).filas, ctx, totalesCompra);
   assert.equal(c.terceros.find(t => t.numero === '1045678901').nombre, 'María José Pérez Gómez');
+});
+
+test('plantilla de saldos iniciales', async () => {
+  const { PLANTILLAS, leerFilas, prepararSaldos } = await import('../src/importar.js');
+  const rows = [PLANTILLAS.saldos.cols.map(c => c[1]), ...PLANTILLAS.saldos.ejemplo, ['130505', '', '900123456-8', '', '', '', '', '', '', '', '', '', '(500)', ''], ['99999999', '', '900123456-8', '', '', '', '', '', '', '', '', '', '1', '']];
+  const { filas } = leerFilas('saldos', rows);
+  const r = prepararSaldos(filas, { cuentas: [{ codigo: '111005', naturaleza: 'D' }, { codigo: '11100501' }, { codigo: '310505', naturaleza: 'C' }, { codigo: '13050501' }], terceros: [{ numero: '900123456' }] });
+  assert.equal(r.lineas.length, 4);
+  assert.deepEqual(r.lineas[1], { cuenta: '13050501', tercero: '900123456', detalle: 'Factura pendiente', debito: 2500000, credito: 0, cruce: 'FE 1520', vence: '2027-01-31' });
+  assert.deepEqual(r.lineas[3], { cuenta: '13050501', tercero: '900123456', detalle: 'Saldo inicial', debito: 0, credito: 500 });
+  assert.equal(r.cuentasNuevas[0].codigo, '31050501');
+  assert.equal(r.diferencia, -500);
+  assert.equal(r.errores.length, 1);
 });
