@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { PLANES_DEMO } from './planes.js';
 import { datosDemo, hoyLocal } from './demo.js';
+import { trasladarLocal } from './cuentas.js';
 
 const TABLAS = ['cuentas', 'terceros', 'productos', 'numeraciones', 'documentos', 'items', 'aplicaciones', 'miembros', 'comprobantes', 'compras', 'empleados', 'nominas', 'fe_envios', 'bodegas', 'inventario_docs', 'centros_costo', 'op_tipos', 'op_elementos', 'op_tarifas', 'op_registros', 'op_cortes', 'cotizaciones', 'nominas_e'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -137,6 +138,7 @@ function localStore({ publico = false } = {}) {
     // Notificaciones leídas (en la demostración se reinician con los datos).
     async leidas() { return { ...(db.notif_leidas || {}) }; },
     async marcarLeidas(claves) { db.notif_leidas = db.notif_leidas || {}; const t = ahora(); for (const c of claves) db.notif_leidas[c] = t; persist(); },
+    async trasladarCuenta(eid, a, b) { const n = trasladarLocal(db, eid, a, b); persist(); return { registros: n }; },
     borrarDemo() { try { localStorage.removeItem(KEY); } catch (_) {} },
   };
   return api;
@@ -191,6 +193,7 @@ function supabaseStore(url, key) {
       if (error) return loc;
       return { ...loc, ...Object.fromEntries((data || []).map(x => [x.clave, x.leida_en])) };
     },
+    async trasladarCuenta(eid, a, b) { return ok(await sb.rpc('trasladar_cuenta', { p_empresa: eid, p_desde: a, p_hasta: b })); },
     async marcarLeidas(claves) {
       const t = ahora(); guardarLeidasLocal(claves, t);
       if (claves.length) await sb.from('notificaciones_leidas').upsert(claves.map(clave => ({ clave, leida_en: t })), { onConflict: 'user_id,clave' });

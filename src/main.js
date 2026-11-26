@@ -17,6 +17,7 @@ import { PLANTILLAS, csvPlantilla, leerFilas, prepararTerceros, prepararVentas, 
 import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO, PARAMETROS, nivelDe } from './puc.js';
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
 import { xlsx } from './xlsx.js';
+import { conVersion, inactiva, usosCuenta, trasladarLocal } from './cuentas.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
@@ -933,12 +934,14 @@ function ligarRet(uso, mapa, base) {
   for (const [tipo, [idS, idP]] of Object.entries(mapa)) if ($(idS)) $(idS).onchange = () => { const c = conceptoSel(uso, tipo, idS); if (c) { $(idP).value = tarifaAplicada(c, base()) || ''; } $(idP).dispatchEvent(new Event('input', { bubbles: true })); };
 }
 // Antes de calcular: respeta la base mínima de cada concepto y devuelve la foto de los conceptos para guardar en el documento.
-function leerRet(uso, mapa, base) {
+// previo: las retenciones guardadas del documento que se edita; si el concepto es el mismo conserva su cuenta (lo registrado no cambia).
+function leerRet(uso, mapa, base, previo = {}) {
   const out = {};
   for (const [tipo, [idS, idP]] of Object.entries(mapa)) {
     const c = $(idS) && conceptoSel(uso, tipo, idS); if (!c) { if ($(idS + 'H')) $(idS + 'H').textContent = ''; continue; }
     if (num(c.base_minima) > 0) { const t = tarifaAplicada(c, base); if (num($(idP).value) !== t) $(idP).value = t || ''; $(idS + 'H').textContent = t ? '' : `No aplica: la base es menor que ${money(c.base_minima)}.`; }
-    out[tipo] = fotoRet(c);
+    const p = previo?.[tipo];
+    out[tipo] = p?.concepto === c.id ? { ...fotoRet(c), cuenta: p.cuenta, naturaleza: p.naturaleza } : fotoRet(c);
   }
   return out;
 }
@@ -948,13 +951,14 @@ const optsIva = actual => { const ts = tarifasIva(emp()?.contabilidad); const v 
 function retDe(t) { return t ? { retefuente_pct: num(t.retefuente_pct), reteiva_pct: num(t.reteiva_pct), reteica_milaje: num(t.reteica_milaje) } : { retefuente_pct: 0, reteiva_pct: 0, reteica_milaje: 0 }; }
 
 function vEditor(m, { id, tipo, ref, tercero, clase }) {
-  let doc, items, apl;
+  let doc, items, apl, retGuardadas = {};
   if (id) {
     const d = docById(id);
     if (!d) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
     // Guardados se pueden editar; los electrónicos solo hasta que la DIAN los acepte.
     if (d.estado !== 'borrador' && (d.estado !== 'emitido' || (d.electronica && envioAceptado(id)))) { location.replace('#/doc/' + id); return; }
     doc = { ...d }; items = itemsDe(id).map(i => ({ ...i })); apl = aplDe(id).map(a => ({ ...a })); tipo = d.tipo;
+    retGuardadas = JSON.parse(JSON.stringify(d.retenciones || {}));
   } else {
     if (!TIPOS[tipo]) { location.replace('#/inicio'); return; }
     const f = ref && docById(ref);
@@ -1035,7 +1039,7 @@ function vEditor(m, { id, tipo, ref, tercero, clase }) {
     if ($('rfp')) doc.cuenta_pago = $('rfp').value;
     if ($('ref')) { doc.ref_id = $('ref').value; doc.concepto = $('con').value; }
     doc.observaciones = $('obs').value;
-    if ($('rf')) { doc.retenciones = leerRet('venta', RET_V, r2(items.reduce((s2, it) => s2 + linea(it).base, 0))); Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) }); }
+    if ($('rf')) { doc.retenciones = leerRet('venta', RET_V, r2(items.reduce((s2, it) => s2 + linea(it).base, 0)), retGuardadas); Object.assign(doc, { retefuente_pct: num($('rf').value), reteiva_pct: num($('ri').value), reteica_milaje: num($('rica').value) }); }
     if ($('ant')) doc.anticipo = num($('ant').value);
   };
   // Cuenta que usará la línea si no se escoge otra: la del producto o la de la empresa.
@@ -1740,6 +1744,13 @@ function formProducto(p = {}) {
     const row = { empresa_id: S.eid, codigo, nombre, unidad: String(fd.get('unidad')).trim() || 'UND', precio: num(fd.get('precio')), iva_pct: num(fd.get('iva_pct')), cuenta_ingreso: fd.get('cuenta_ingreso') || '', cuenta_devolucion: fd.get('cuenta_devolucion') || '', activo: p.id ? fd.get('activo') === 'on' : true,
       tipo, cuenta_costo: tipo === 'producto' ? (conInv() ? fd.get('cuenta_costo') || '' : p.cuenta_costo || '') : fd.get('cuenta_servicio') || '', bodega_id: tipo === 'producto' ? (conInv() ? fd.get('bodega_id') || null : p.bodega_id || null) : null };
     if (getCC) { const d = getCC(), errs = erroresDist(d, ccCfg(), centros()); if (errs.length) throw new Error(errs.join(' ')); row.cc = d; }
+    // Lo ya registrado no cambia: el costo de ventas usa la cuenta del producto, y las facturas viejas sin cuenta por línea también.
+    if (p.id) {
+      const conCosto = (p.cuenta_costo || '') !== row.cuenta_costo && movimientosInv(S.d).some(x => x.producto_id === p.id && ['venta', 'devolucion'].includes(x.origen));
+      const sinCta = S.d.items.some(i => i.producto_id === p.id && !String(i.cuenta || '').trim());
+      const cambia = conCosto || (sinCta && ((p.cuenta_ingreso || '') !== row.cuenta_ingreso || (p.cuenta_devolucion || '') !== row.cuenta_devolucion));
+      if (cambia) throw new Error('Este producto ya tiene movimientos contabilizados con su cuenta actual. Para no cambiar lo registrado, la cuenta no se cambia aquí: usa Plan de cuentas › Trasladar movimientos, o crea un producto nuevo.');
+    }
     try { await store.save('productos', p.id ? { ...row, id: p.id } : row); }
     catch (e) { throw /\bcc\b/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/035_centros_documentos.sql.') : /tipo|cuenta_costo|bodega_id/.test(e.message) && /column|schema/i.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : e; }
     await cargarEmpresa(); toast('Guardado.'); route();
@@ -1972,7 +1983,7 @@ const nomForma = (formas, credito, cuenta) => { if (credito) return formas.find(
 const optsContado = (formas, cuenta) => { const fs = formas.filter(f => !f.credito); const sel = fs.find(f => f.cuenta === cuenta) || (cuenta ? null : fs[0]);
   return (cuenta && !sel ? `<option value="${esc(cuenta)}" selected>${esc(cuenta)} ${esc(nomCta(cuenta))}</option>` : '') + fs.map(f => `<option value="${esc(f.cuenta)}" ${f === sel ? 'selected' : ''}>${esc(f.nombre)} · ${esc(f.cuenta)}</option>`).join(''); };
 const ctxContable = () => ({ items: S.d.items, aplicaciones: S.d.aplicaciones, productos: S.d.productos, param: param(), docs: S.d.documentos, tarifas: tarifasIva(emp()?.contabilidad) });
-const movs = () => movimientos({ ...S.d, param: param(), tarifas: tarifasIva(emp()?.contabilidad), metodoInv: cfgInventario(emp()?.contabilidad).metodo, cc: ccCfg(), inventario: conInv() });
+const movs = () => movimientos({ ...S.d, contab: emp()?.contabilidad, param: param(), tarifas: tarifasIva(emp()?.contabilidad), metodoInv: cfgInventario(emp()?.contabilidad).metodo, cc: ccCfg(), inventario: conInv() });
 // ¿El plan incluye el control de inventario? Sin él quedan Productos y servicios y Unidades, sin existencias ni costo.
 const conInv = () => tieneModulo(S.plan, 'inventario');
 const idxCuentas = () => Object.fromEntries(S.d.cuentas.map(c => [c.codigo, c]));
@@ -2020,7 +2031,7 @@ function vPuc(m) {
       <div class="row end span-all"><button class="primary">Guardar cuentas</button></div></form>
     <datalist id="ctasAux">${optsLista(cuentasAux())}</datalist></details>
   <div class="row filters"><input id="q" type="search" placeholder="Buscar por código o nombre"><label class="check"><input type="checkbox" id="sm"> Solo cuentas con movimiento</label>
-    <span class="spacer"></span><button class="sm" id="expT">Abrir todo</button><button class="sm" id="conT">Cerrar todo</button></div>
+    <span class="spacer"></span><button class="sm" id="tras">Trasladar movimientos</button><button class="sm" id="expT">Abrir todo</button><button class="sm" id="conT">Cerrar todo</button></div>
   <section class="panel" id="lst"></section>`;
   const conMov = new Set(movs().flatMap(x => [1, 2, 4, 6, 8].map(n => x.cuenta.slice(0, n))));
   const pintar = () => {
@@ -2034,7 +2045,7 @@ function vPuc(m) {
     $('lst').innerHTML = `<div class="tbl-wrap"><table class="tbl puc"><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Nat.</th><th>Rubro NIIF</th><th></th></tr></thead><tbody>
       ${l.slice(0, 800).map(c => { const r = rubroDe(c.codigo, idx); const propio = !!c.niif_rubro; const hijas = conHijas.has(c.codigo); const ab = pucAbiertas.has(c.codigo);
         return `<tr class="lv${c.codigo.length} ${hijas && !filtrando ? 'click' : ''}" ${hijas && !filtrando ? `data-tg="${c.codigo}"` : ''}>
-        <td class="mono nowrap">${!filtrando ? `<span class="tg" aria-hidden="true">${hijas ? (ab ? '▾' : '▸') : ''}</span>` : ''}${c.codigo}</td><td>${esc(c.nombre)}</td><td class="muted">${nivelDe(c.codigo)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
+        <td class="mono nowrap">${!filtrando ? `<span class="tg" aria-hidden="true">${hijas ? (ab ? '▾' : '▸') : ''}</span>` : ''}${c.codigo}</td><td>${esc(c.nombre)}${c.activa === false ? ' <span class="tag">Inactiva</span>' : ''}</td><td class="muted">${nivelDe(c.codigo)}</td><td>${c.naturaleza === 'D' ? 'Débito' : 'Crédito'}</td>
         <td class="${propio ? '' : 'muted'}">${r ? esc(RUBRO[r]?.nombre) : '—'}${r && RUBRO[r]?.estado !== '—' ? ` <span class="tag">${RUBRO[r].estado}</span>` : ''}</td>
         <td class="r nowrap">${conMov.has(c.codigo) ? `<a class="btn ghost sm" href="#/auxiliar?cuenta=${c.codigo}">Auxiliar</a>` : ''}${c.codigo.length < 8 ? `<button class="ghost sm" data-sub="${c.codigo}" title="Crear una cuenta dentro de ${c.codigo}">+ Crear</button>` : ''}<button class="ghost sm" data-ed="${c.id}">Editar</button></td></tr>`; }).join('')}
       </tbody></table></div>${l.length > 800 ? '<p class="hint">Se muestran las primeras 800 cuentas. Usa el buscador.</p>' : ''}`;
@@ -2050,12 +2061,14 @@ function vPuc(m) {
     const cod = tr.dataset.tg; if (pucAbiertas.has(cod)) pucAbiertas.delete(cod); else pucAbiertas.add(cod); recordar(); pintar();
   };
   $('nueva').onclick = () => formCuenta();
+  $('tras').onclick = () => formTraslado();
   $('parF').oninput = ev => { const k = ev.target.name; const h = m.querySelector(`[data-n="${k}"]`); if (h) h.textContent = nomCta(ev.target.value.trim()); };
   $('parF').onsubmit = async ev => {
     ev.preventDefault();
     const fd = new FormData($('parF')); const idx = idxCuentas(); const nuevo = {};
-    for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!esAuxiliar(v)) return toast(`La cuenta ${v} no es auxiliar: usa una cuenta de 8 dígitos.`, true); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); nuevo[k] = v; }
-    try { await store.save('empresas', { id: S.eid, contabilidad: { ...(emp()?.contabilidad || {}), ...nuevo } }); await recargar(); toast('Cuentas guardadas. Los informes ya usan estas cuentas.'); } catch (e) { fail(e); }
+    for (const k of Object.keys(PARAMETROS)) { const v = String(fd.get(k)).trim(); if (!esAuxiliar(v)) return toast(`La cuenta ${v} no es auxiliar: usa una cuenta de 8 dígitos.`, true); if (!idx[v]) return toast(`La cuenta ${v} no existe en el plan. Créala primero.`, true); if (inactiva(v, idx) && v !== P[k]) return toast(`La cuenta ${v} está inactiva.`, true); nuevo[k] = v; }
+    const antes = emp()?.contabilidad || {};
+    try { await store.save('empresas', { id: S.eid, contabilidad: conVersion(antes, { ...antes, ...nuevo }) }); await recargar(); toast('Cuentas guardadas. Se usan en los documentos nuevos; lo ya registrado no cambia.'); } catch (e) { fail(e); }
   };
   pintar();
 }
@@ -2083,7 +2096,10 @@ function vInventarioCfg(m) {
     </tbody></table></div>
     <p class="hint">Cada bodega lleva una cuenta auxiliar de la clase 14. Las bodegas solo trasladan cantidades: un traslado entre bodegas con cuentas distintas se contabiliza entre esas cuentas 14; si comparten la cuenta, no hay asiento.</p>
   </section>`;
-  const guardarCfg = async () => { try { await guardarContab('inventario', { ...(e.contabilidad?.inventario || {}), metodo: $('f_inv_metodo').value, negativo: $('f_inv_neg').value }); toast('Inventario guardado.'); } catch (er) { fail(er); } };
+  const guardarCfg = async () => {
+    const met = cfgInventario(e.contabilidad).metodo;
+    if ($('f_inv_metodo').value !== met && movimientosInv(S.d).length) { $('f_inv_metodo').value = met; return fail(new Error('Ya hay movimientos de inventario: cambiar el método de costeo cambiaría el costo ya registrado. Se conserva el método actual.')); }
+    try { await guardarContab('inventario', { ...(e.contabilidad?.inventario || {}), metodo: $('f_inv_metodo').value, negativo: $('f_inv_neg').value }); toast('Inventario guardado.'); } catch (er) { fail(er); } };
   $('f_inv_metodo').onchange = guardarCfg; $('f_inv_neg').onchange = guardarCfg;
   // La bodega principal que aún no existe (se crea al primer uso) también se edita: al guardar se crea con la cuenta escogida.
   const formB = (b = {}, principal = false) => dialogo(`<h2>${b.id || principal ? 'Editar bodega' : 'Nueva bodega'}</h2>
@@ -2096,7 +2112,8 @@ function vInventarioCfg(m) {
     const row = { empresa_id: S.eid, codigo: String(fd.get('codigo')).trim(), nombre: String(fd.get('nombre')).trim(), cuenta: String(fd.get('cuenta')).trim().split(' ')[0], activa: b.id ? fd.get('activa') === 'on' : true, vende: fd.get('vende') === 'on' };
     if ((!row.vende || !row.activa) && !bodegas().some(x => x.id !== (b.id || '') && x.activa !== false && bodegaVende(x))) throw new Error('Debe quedar al menos una bodega activa que venda. Crea otra bodega que venda antes de desmarcar esta.');
     const errs = erroresBodega({ ...row, id: b.id }, reales, S.d.cuentas); if (errs.length) throw new Error(errs.join(' '));
-    if (b.id && b.cuenta !== row.cuenta && usada(b.id) && !await confirmar('Cambiar la cuenta de la bodega', 'Las compras ya registradas conservan la cuenta con que se contabilizaron. Solo las nuevas usarán la cuenta nueva.', 'Cambiar')) return false;
+    // Cambiar la cuenta de una bodega con movimientos cambiaría el costo ya registrado: se usa Trasladar movimientos.
+    if (b.id && b.cuenta !== row.cuenta && (usada(b.id) || movimientosInv(S.d).some(x => (x.bodega_id || '') === b.id || x.bodega_par === b.id))) throw new Error(`La bodega ya tiene movimientos con la cuenta ${b.cuenta}. Para no cambiar lo registrado, la cuenta no se cambia aquí: usa Plan de cuentas › Trasladar movimientos (pasa todo de ${b.cuenta} a la cuenta nueva y actualiza la bodega).`);
     try { await store.save('bodegas', b.id ? { ...row, id: b.id } : row); } catch (er) { throw /vende/.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/036_bodega_ventas.sql.') : /bodegas/.test(er.message) && /exist|schema|relation/i.test(er.message) ? new Error('Falta correr en Supabase el archivo supabase/032_inventario.sql.') : er; }
     await cargarEmpresa(); toast('Bodega guardada.'); route();
   });
@@ -3472,7 +3489,8 @@ function vExogenaCfg(m, fSel) {
 
 /* ---------- Impuestos ---------- */
 // Guarda una lista de impuestos dentro de la configuración contable de la empresa.
-const guardarContab = async (clave, valor) => { await store.save('empresas', { id: S.eid, contabilidad: { ...(emp()?.contabilidad || {}), [clave]: valor } }); await recargar(); };
+// Si cambia algo que afecta los asientos (tarifas de IVA), se guarda la versión anterior: lo ya registrado no cambia.
+const guardarContab = async (clave, valor) => { const antes = emp()?.contabilidad || {}; await store.save('empresas', { id: S.eid, contabilidad: conVersion(antes, { ...antes, [clave]: valor }) }); await recargar(); };
 function vRetenciones(m) {
   const P = param(), todos = conceptosRet(emp()?.contabilidad, P);
   const nat = c => c.naturaleza === 'D' ? 'Débito' : 'Crédito';
@@ -3549,6 +3567,41 @@ function vTarifasIva(m) {
     try { await guardar(ts.filter(x => x.id !== t.id)); toast('Tarifa quitada.'); } catch (e) { fail(e); }
   });
 }
+// Trasladar movimientos: todo lo de una cuenta pasa a otra, en todos los periodos (reescribe la historia), y la configuración también.
+function formTraslado() {
+  const ms = movs(), idx = idxCuentas();
+  const conMov = [...new Set(ms.map(x => x.cuenta))].sort();
+  const f = dialogo(`<h2>Trasladar movimientos</h2>
+    <p>Pasa <b>todos</b> los movimientos de una cuenta auxiliar a otra, en todos los periodos: facturas, compras, comprobantes, nómina e inventario, y también la configuración que la usa (parámetros, productos, bodegas, retenciones y formas de pago).</p>
+    <div class="grid2"><div><label for="trA">De la cuenta</label><input id="trA" name="a" list="trAL" class="mono" autocomplete="off" required placeholder="Ej. 13050501"><p class="hint" id="trAN"></p></div>
+    <div><label for="trB">A la cuenta</label><input id="trB" name="b" list="trBL" class="mono" autocomplete="off" required placeholder="Ej. 13050502"><p class="hint" id="trBN"></p></div></div>
+    <datalist id="trAL">${conMov.map(c => `<option value="${c}">${esc(nomCta(c))}${idx[c]?.activa === false ? ' (inactiva)' : ''}</option>`).join('')}</datalist>
+    <datalist id="trBL">${optsLista(cuentasAux())}</datalist>
+    ${check('inact', 'Inactivar la cuenta de origen al terminar', true)}
+    <p class="hint" id="trRes"></p>
+    <p class="aviso">Los balances e informes de los periodos anteriores cambian, incluso los ya cerrados o declarados. La cuenta de origen queda en cero.</p>
+    ${pie('Trasladar')}`, async fd => {
+    const a = String(fd.get('a')).trim().split(' ')[0], b = String(fd.get('b')).trim().split(' ')[0];
+    if (!esAuxiliar(a) || !esAuxiliar(b)) throw new Error('Escoge dos cuentas auxiliares de 8 dígitos.');
+    if (a === b) throw new Error('Escoge dos cuentas distintas.');
+    if (!idx[a]) throw new Error(`La cuenta ${a} no existe.`);
+    if (!idx[b]) throw new Error(`La cuenta ${b} no existe. Créala primero en el plan de cuentas.`);
+    if (inactiva(b, idx)) throw new Error(`La cuenta ${b} está inactiva.`);
+    if ((S.d.bodegas || []).some(x => x.cuenta === a) && !/^14/.test(b)) throw new Error(`La cuenta ${a} es de una bodega: la cuenta nueva debe ser de la clase 14.`);
+    const n = ms.filter(x => x.cuenta === a).length;
+    if (!await confirmar('Trasladar movimientos', `${n} movimiento${n === 1 ? '' : 's'} de ${a} ${nomCta(a)} pasarán a ${b} ${nomCta(b)}, en todos los periodos. Esto cambia los balances anteriores y no se deshace solo.`, 'Trasladar')) return false;
+    // Las cuentas que la empresa no ha cambiado vienen por defecto del programa: se dejan escritas para que el traslado las alcance.
+    const c0 = emp()?.contabilidad || {}, P0 = parametrosDe(c0);
+    await store.save('empresas', { id: S.eid, contabilidad: { ...c0, ...Object.fromEntries(Object.keys(PARAMETROS).map(k => [k, P0[k]])), tarifas_iva: tarifasIva(c0), retenciones: conceptosRet(c0, P0).map(({ naturaleza: _n, ...x }) => x) } });
+    const r = await store.trasladarCuenta(S.eid, a, b);
+    await recargar();
+    if (fd.get('inact') === 'on') { const c = S.d.cuentas.find(x => x.codigo === a); if (c && c.activa !== false) await store.save('cuentas', { id: c.id, activa: false }); await cargarEmpresa(); }
+    toast(`Listo: ${r?.registros ?? 0} registros pasaron de ${a} a ${b}.`); route();
+  });
+  const ver = (id, l) => { const v = f.querySelector('#' + id).value.trim().split(' ')[0]; f.querySelector('#' + id + 'N').textContent = v ? nomCta(v) : ''; return v; };
+  const res = () => { const a = ver('trA'), b = ver('trB'); const n = ms.filter(x => x.cuenta === a), sd = r2(n.reduce((s2, x) => s2 + x.debito - x.credito, 0)); f.querySelector('#trRes').textContent = a ? `${n.length} movimientos · saldo ${money(sd)}${b ? ` → ${b}` : ''}` : ''; };
+  f.querySelector('#trA').oninput = res; f.querySelector('#trB').oninput = res;
+}
 function formCuenta(c = {}, padre = '') {
   const nueva = !c.id;
   const usada = c.codigo && movs().some(x => x.cuenta.startsWith(c.codigo));
@@ -3561,11 +3614,20 @@ function formCuenta(c = {}, padre = '') {
     ${campo('niif_codigo', 'Código en el plan NIIF (opcional)', c.niif_codigo, 'class="mono" maxlength="20"')}</div>
     <div><label for="f_rub">Rubro NIIF (línea del estado financiero)</label><select id="f_rub" name="niif_rubro"><option value="">Igual que la cuenta padre</option>
       ${['ESF', 'ER', '—'].map(e => `<optgroup label="${e === 'ESF' ? 'Estado de situación financiera' : e === 'ER' ? 'Estado de resultados' : 'Otros'}">${RUBROS.filter(r => r.estado === e).map(r => `<option value="${r.id}" ${r.id === c.niif_rubro ? 'selected' : ''}>${esc(r.seccion)} · ${esc(r.nombre)}</option>`).join('')}</optgroup>`).join('')}</select></div>
+    ${nueva ? '' : `${check('activa', 'Activa (se puede usar en registros nuevos)', c.activa !== false)}<p class="hint">Inactiva: no aparece para registros nuevos, pero sus movimientos y saldos quedan igual. Para pasar sus movimientos a otra cuenta usa Trasladar movimientos.</p>`}
     ${!nueva && !usada && !tieneHijas && c.codigo.length > 4 ? '<div class="row"><button value="del" class="ghost">Borrar cuenta</button></div>' : ''}
     ${pie()}`, async (fd, btn) => {
     if (btn === 'del') { await store.remove('cuentas', c.id); await cargarEmpresa(); toast('Cuenta borrada.'); route(); return; }
     const row = { empresa_id: S.eid, nombre: String(fd.get('nombre')).trim(), naturaleza: fd.get('naturaleza'), niif_rubro: fd.get('niif_rubro') || null, niif_codigo: String(fd.get('niif_codigo') || '').trim() };
     if (!row.nombre) throw new Error('Escribe el nombre de la cuenta.');
+    if (!nueva) {
+      row.activa = fd.get('activa') === 'on';
+      if (!row.activa && c.activa !== false) {
+        // No se inactiva mientras la configuración la use para documentos nuevos.
+        const usos = cuentasAux().filter(x => x.codigo.startsWith(c.codigo)).flatMap(x => usosCuenta(x.codigo, { contab: emp()?.contabilidad, productos: S.d.productos, bodegas: S.d.bodegas || [], retenciones: conceptosRet(emp()?.contabilidad, param()), formas: [...fVenta(), ...fCompra()] }).map(u => `${x.codigo}: ${u}`));
+        if (usos.length) throw new Error(`No se puede inactivar: la configuración la usa para los documentos nuevos (${[...new Set(usos)].slice(0, 5).join('; ')}). Cámbiala allí primero o usa Trasladar movimientos.`);
+      }
+    }
     if (nueva) {
       const cod = String(fd.get('codigo')).trim();
       if (!/^(\d{2}|\d{4}|\d{6}|\d{8})$/.test(cod)) throw new Error('El código lleva 2, 4, 6 u 8 dígitos (grupo, cuenta, subcuenta o auxiliar).');
@@ -4221,7 +4283,8 @@ const optsLista = l => l.map(x => `<option value="${x.codigo} ${esc(x.nombre)}">
 // Al escoger de la lista queda solo el código en la casilla.
 document.addEventListener('change', ev => { const el = ev.target; if (el.matches?.('input[list^="ctas"]') && el.value.includes(' ')) { el.value = el.value.trim().split(' ')[0]; el.dispatchEvent(new Event('input', { bubbles: true })); } });
 function cuentasAux() {
-  return S.d.cuentas.filter(c => c.activa !== false && esAuxiliar(c.codigo)).sort((a, b) => a.codigo.localeCompare(b.codigo));
+  const idx = idxCuentas();
+  return S.d.cuentas.filter(c => esAuxiliar(c.codigo) && !inactiva(c.codigo, idx)).sort((a, b) => a.codigo.localeCompare(b.codigo));
 }
 function vComprobantes(m) {
   let q = '', tipo = '', anulados = false;
@@ -4443,11 +4506,11 @@ function vCompras(m, tipo) {
 }
 
 function vCompraEditor(m, { id, tipo, tercero, ref }) {
-  let c;
+  let c, retGuardadas = {};
   if (id) {
     const x = compraById(id); if (!x) { m.innerHTML = '<p>No se encontró el documento.</p>'; return; }
     if (x.estado === 'anulado' || compraValidada(id)) { location.replace('#/compra/' + id); return; }
-    c = JSON.parse(JSON.stringify(x)); tipo = x.tipo;
+    c = JSON.parse(JSON.stringify(x)); tipo = x.tipo; retGuardadas = JSON.parse(JSON.stringify(x.retenciones || {}));
   } else if (tipo === 'NA') {
     // La nota de ajuste nace de un documento soporte electrónico validado: copia el proveedor, las líneas y las retenciones.
     const ds = ref && compraById(ref);
@@ -4509,7 +4572,7 @@ function vCompraEditor(m, { id, tipo, tercero, ref }) {
       c.vence = $('kv').value || ''; if ($('knp')) c.num_proveedor = $('knp').value.trim();
       if ($('kcon')) c.concepto = $('kcon').value;
       if ($('kfp')) { const f = fCompra().find(x => x.id === $('kfp').value) || fCompra()[0]; c.cuenta_pago = f.credito ? '' : f.cuenta; }
-      c.retenciones = leerRet('compra', RET_C, r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)));
+      c.retenciones = leerRet('compra', RET_C, r2((c.lineas || []).reduce((s2, l) => s2 + num(l.base), 0)), retGuardadas);
       Object.assign(c, { retefuente_pct: num($('krf').value), reteiva_pct: num($('kri').value), reteica_milaje: num($('krica').value) });
       Object.assign(c, totalesCompra(c.lineas, c));
     }
