@@ -73,10 +73,13 @@ const PLANTILLAS = {
       ['nit', 'NIT o cédula tercero', true, ['nit', 'nittercero', 'identificacion', 'tercero', 'documento', 'cedula']],
       ...colsNombre(' tercero', ['razonsocialtercero', 'nombretercero', 'razonsocial', 'nombre']),
       ['detalle', 'Detalle', false, ['concepto', 'descripcion']],
+      ['cruce', 'Documento cruce', false, ['documentocruce', 'doccruce', 'factura', 'numerofactura', 'documentoreferencia']],
+      ['vence', 'Vence', false, ['vencimiento', 'fechavencimiento']],
       ['debito', 'Débito', false, ['debe', 'debitos', 'saldodebito']], ['credito', 'Crédito', false, ['haber', 'creditos', 'saldocredito']],
     ],
-    ejemplo: [['11100501', 'Bancos nacionales', '900123456-8', 'Jurídica', 'Banco Ejemplo S.A.', '', '', '', '', 'Saldo en cuenta corriente', '15000000', ''],
-      ['31050501', 'Capital suscrito y pagado', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', 'Aporte del socio', '', '15000000']],
+    ejemplo: [['11100501', 'Bancos nacionales', '900123456-8', 'Jurídica', 'Banco Ejemplo S.A.', '', '', '', '', 'Saldo en cuenta corriente', '', '', '15000000', ''],
+      ['13050501', 'Clientes nacionales', '900123456-8', 'Jurídica', 'Banco Ejemplo S.A.', '', '', '', '', 'Factura pendiente', 'FE 1520', '31/01/2027', '2500000', ''],
+      ['31050501', 'Capital suscrito y pagado', '1045678901', 'Natural', '', 'María', 'José', 'Pérez', 'Gómez', 'Aporte del socio', '', '', '', '17500000']],
   },
 };
 
@@ -269,7 +272,9 @@ function prepararSaldos(filas, ctx) {
     if (!d && !c) continue;
     const t = terceroDe(f, ctx, nuevos, '');
     if (t.error) { errores.push(`Fila ${f._fila}: ${t.error}`); continue; }
-    lineas.push({ cuenta, tercero: t.numero, detalle: f.detalle || 'Saldo inicial', debito: d > c ? r2(d - c) : 0, credito: c > d ? r2(c - d) : 0 });
+    const vence = f.vence ? parseFecha(f.vence) : '';
+    if (f.vence && !vence) { errores.push(`Fila ${f._fila}: la fecha de vencimiento "${f.vence}" no se entiende (usa DD/MM/AAAA).`); continue; }
+    lineas.push({ cuenta, tercero: t.numero, detalle: f.detalle || 'Saldo inicial', debito: d > c ? r2(d - c) : 0, credito: c > d ? r2(c - d) : 0, ...(f.cruce ? { cruce: String(f.cruce).trim() } : {}), ...(vence ? { vence } : {}) });
   }
   const debito = r2(lineas.reduce((x, l) => x + l.debito, 0)), credito = r2(lineas.reduce((x, l) => x + l.credito, 0));
   return { terceros: [...nuevos.values()], cuentasNuevas: [...cuentasNuevas.values()], lineas, debito, credito, diferencia: r2(debito - credito), errores, docs: [], marcar: [] };
