@@ -18,6 +18,7 @@ import { planInicial, completarPlan, a8, esAuxiliar, parametrosDe, RUBROS, RUBRO
 import { libroVentas, ventasPorCliente, ventasPorProducto, libroCompras, comprasPorProveedor, flujoEfectivo, cambiosPatrimonio, flujoCaja, enlacesPagos, CATEGORIAS_CAJA, auxiliarGeneral, hojasAuxiliarGeneral } from './reportes.js';
 import { xlsx } from './xlsx.js';
 import { conVersion, inactiva, usosCuenta, trasladarLocal } from './cuentas.js';
+import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
 import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
@@ -252,7 +253,7 @@ const navIco = (k, c = 'nav-ico') => `<span class="${c}"><svg viewBox="0 0 24 24
 const HUB = {
   informes: ['esf', 'er', 'ercomp', 'ercc', 'balance', 'auxiliar', 'auxgeneral', 'iva', 'retpracticadas', 'certificados', 'exogena', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor', 'flujoefectivo', 'patrimonio', 'flujocaja'],
   operacion: ['oprecibos', 'opproyectos', 'opoperadores', 'opmaquinas', 'opprogramar', 'opfacturar', 'ophorascliente', 'opporcerrar', 'opcorte'],
-  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg'],
+  config: ['empresa', 'disenofactura', 'habilitacion', 'numeraciones', 'formaspago', 'puc', 'usuarios', 'miplan', 'retenciones', 'tarifasiva', 'exogenacfg', 'centroscfg', 'unidades', 'inventariocfg', 'bloqueo'],
 };
 // Avisos del menú: facturas de venta y de proveedor vencidas con saldo.
 function avisosNav() {
@@ -372,6 +373,7 @@ function route() {
     if (v === 'auxiliar') return vAuxiliar(m, q);
     if (v === 'auxgeneral') return vAuxGeneral(m);
     if (v === 'informes') return vInformes(m);
+    if (v === 'bloqueo') return vBloqueo(m);
     if (v === 'calendario') return vCalendario(m);
     if (v === 'esf') return vEsf(m);
     if (v === 'er') return vEr(m);
@@ -682,6 +684,7 @@ function vEmpresa(m) {
       ['puc', 'puc', 'Plan de cuentas', `${d.cuentas.length} cuentas · PUC y NIIF`, '#/puc'],
       ['retenciones', 'ret', 'Conceptos de retención', 'Bases y tarifas', '#/retenciones'],
       ['tarifasiva', 'iva', 'Tarifas de IVA', 'Cuenta por tarifa', '#/tarifasiva'],
+      ['bloqueo', 'lista', 'Bloqueo de periodos', e.bloqueado_hasta ? `Bloqueado hasta el ${fFecha(e.bloqueado_hasta)}` : 'Sin meses bloqueados', '#/bloqueo', null, e.bloqueado_hasta ? ['ok', 'Activo'] : null],
       ['exogenacfg', 'exogena', 'Medios magnéticos', 'Formatos y conceptos', '#/exogenacfg'],
       ['nominacfg', 'nomina', 'Nómina', 'Valores del año y entidades', '#/nominacfg'],
       ['centroscfg', 'capas', 'Centros de costo', ccCfg().activo ? `${nivelesActivos(ccCfg()).map(n => n.nombre).join(' · ')} · ${ccCfg().alcance === 'todo' ? 'balance y resultado' : 'solo resultado'}` : 'Desactivados', '#/centroscfg', { id: 'ccOn', on: ccCfg().activo }],
@@ -3567,6 +3570,45 @@ function vTarifasIva(m) {
     try { await guardar(ts.filter(x => x.id !== t.id)); toast('Tarifa quitada.'); } catch (e) { fail(e); }
   });
 }
+/* ---------- Bloqueo de periodos (no es el comprobante de cierre) ---------- */
+const MESES_B = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+let bloqAnio = null;
+async function vBloqueo(m) {
+  const e = emp(), h = e.bloqueado_hasta || '';
+  const dueno = store.mode === 'local' || S.perfil?.es_admin || e.owner === S.user?.id;
+  const anios = aniosConDatos();
+  if (!bloqAnio || !anios.includes(bloqAnio)) bloqAnio = h ? h.slice(0, 4) : anios[0];
+  const ym = i => `${bloqAnio}-${String(i + 1).padStart(2, '0')}`;
+  const cerrado = i => h && `${ym(i)}-01` <= h;
+  const cuenta = i => ['documentos', 'compras', 'comprobantes', 'nominas'].reduce((n, t) => n + (S.d[t] || []).filter(x => String(x.fecha || '').startsWith(ym(i)) && x.estado !== 'anulado' && x.estado !== 'borrador').length, 0);
+  m.innerHTML = `<header class="vhead"><div><h2>Bloqueo de periodos</h2><p class="sub">Un mes bloqueado no deja crear, editar, anular ni eliminar documentos con fecha en ese mes: facturas, notas, recibos, compras, egresos, comprobantes, nómina e inventario. No es el comprobante de cierre: no mueve cuentas.</p></div></header>
+    <section class="panel stack">
+      <div class="row filters"><div><label for="bA">Año</label><select id="bA">${anios.map(a => `<option ${a === bloqAnio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+        <p class="grow"><b>${h ? `Bloqueado hasta el ${fFecha(h)}` : 'Ningún mes bloqueado'}</b><br><span class="hint">El bloqueo va en orden: al bloquear un mes quedan bloqueados también los anteriores.${dueno ? '' : ' Solo el dueño de la empresa puede cambiarlo.'}</span></p>
+        ${dueno ? `<div class="row end"><button id="bAnio" class="primary">${cerrado(11) ? `Desbloquear ${bloqAnio}` : `Bloquear todo ${bloqAnio}`}</button></div>` : ''}</div>
+      <div class="bloq-grid">${MESES_B.map((n, i) => `<div class="bloq-mes ${cerrado(i) ? 'on' : ''}"><div><b>${n}</b><br><small class="muted">${cuenta(i)} documentos</small></div>
+        <span class="tag ${cerrado(i) ? '' : 'muted'}">${cerrado(i) ? 'Bloqueado' : 'Abierto'}</span>
+        ${dueno ? `<button class="sm ${cerrado(i) ? 'ghost' : ''}" data-b="${i}">${cerrado(i) ? 'Desbloquear' : 'Bloquear'}</button>` : ''}</div>`).join('')}</div>
+    </section>
+    <section class="panel"><h3>Historial</h3><div id="bLog" class="muted">Cargando…</div></section>`;
+  $('bA').onchange = () => { bloqAnio = $('bA').value; vBloqueo(m); };
+  const aplicar = async (nuevo, texto) => {
+    if (!await confirmar('Bloqueo de periodos', texto, 'Confirmar')) return;
+    try { await store.bloquearPeriodo(S.eid, nuevo); await recargar(); toast(nuevo ? `Bloqueado hasta el ${fFecha(nuevo)}.` : 'Ningún mes bloqueado.'); vBloqueo(m); } catch (er) { fail(er); }
+  };
+  m.querySelectorAll('[data-b]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.b;
+    if (cerrado(i)) { const n = hastaAlDesbloquear(ym(i)); aplicar(n, `Se desbloquea ${MESES_B[i].toLowerCase()} de ${bloqAnio}${i < 11 || (h && h > `${bloqAnio}-12-31`) ? ' y los meses siguientes' : ''}. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
+    else { const n = hastaAlBloquear(ym(i)); aplicar(n, `Se bloquea hasta el ${fFecha(n)}, incluidos todos los meses anteriores. Nadie podrá crear, editar, anular ni eliminar documentos con esas fechas.`); }
+  });
+  if ($('bAnio')) $('bAnio').onclick = () => {
+    if (cerrado(11)) { const n = hastaAlDesbloquear(`${bloqAnio}-01`); aplicar(n, `Se desbloquea todo ${bloqAnio} y lo que sigue. ${n ? `Queda bloqueado hasta el ${fFecha(n)}.` : 'No queda ningún mes bloqueado.'}`); }
+    else { const n = `${bloqAnio}-12-31`; aplicar(n, `Se bloquea todo ${bloqAnio} y los años anteriores (hasta el ${fFecha(n)}).`); }
+  };
+  const log = await store.bloqueosLog?.(S.eid) || [];
+  if ($('bLog')) $('bLog').innerHTML = log.length ? `<table class="tbl"><thead><tr><th>Fecha</th><th>Quién</th><th>Bloqueado hasta</th><th>Antes</th></tr></thead><tbody>${log.map(x => `<tr><td class="nowrap">${new Date(x.en).toLocaleString('es-CO')}</td><td>${esc(x.correo || '')}</td><td>${x.hasta ? fFecha(x.hasta) : 'Sin bloqueo'}</td><td class="muted">${x.anterior ? fFecha(x.anterior) : '—'}</td></tr>`).join('')}</tbody></table>` : 'Aún no se ha bloqueado ningún periodo.';
+}
+
 // Trasladar movimientos: todo lo de una cuenta pasa a otra, en todos los periodos (reescribe la historia), y la configuración también.
 function formTraslado() {
   const ms = movs(), idx = idxCuentas();
@@ -3589,6 +3631,8 @@ function formTraslado() {
     if (inactiva(b, idx)) throw new Error(`La cuenta ${b} está inactiva.`);
     if ((S.d.bodegas || []).some(x => x.cuenta === a) && !/^14/.test(b)) throw new Error(`La cuenta ${a} es de una bodega: la cuenta nueva debe ser de la clase 14.`);
     const n = ms.filter(x => x.cuenta === a).length;
+    const hb = emp()?.bloqueado_hasta, enBloq = hb ? ms.filter(x => x.cuenta === a && x.fecha <= hb).length : 0;
+    if (enBloq && !await confirmar('Periodo bloqueado', `${enBloq} de esos movimientos están en meses bloqueados (hasta el ${fFecha(hb)}). El traslado también los cambia. ¿Seguir?`, 'Sí, trasladar también los bloqueados')) return false;
     if (!await confirmar('Trasladar movimientos', `${n} movimiento${n === 1 ? '' : 's'} de ${a} ${nomCta(a)} pasarán a ${b} ${nomCta(b)}, en todos los periodos. Esto cambia los balances anteriores y no se deshace solo.`, 'Trasladar')) return false;
     // Las cuentas que la empresa no ha cambiado vienen por defecto del programa: se dejan escritas para que el traslado las alcance.
     const c0 = emp()?.contabilidad || {}, P0 = parametrosDe(c0);
