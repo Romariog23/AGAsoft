@@ -2603,7 +2603,9 @@ function formFormaPago(f, todas, guardar) {
 }
 /* ---------- Cierre contable ---------- */
 function vCierre(m) {
-  const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort().reverse();
+  // Los movimientos se calculan solo al generar (con mucha información tarda).
+  let ms0; const ms = () => ms0 ||= movs();
+  const anios = aniosConDatos();
   const actual = String(Number(hoy().slice(0, 4)) - (hoy().slice(5) < '12-31' ? 1 : 0));
   let anio = anios.includes(actual) ? actual : anios[0] || actual;
   const P = { util: '36050501', perd: '36100501' };
@@ -3371,8 +3373,19 @@ function vNominaPago(m, { modo, tercero, concepto }) {
 }
 
 /* ---------- Medios magnéticos ---------- */
+// Los informes no se calculan al abrir: primero se escogen los filtros y se pulsa Generar.
+// Después de generar, cambiar un filtro lo vuelve a calcular.
+function alGenerar(pintar, id = 'out') {
+  const o = $(id); if (!o) return pintar();
+  o.innerHTML = `<div class="gen-inf"><p class="muted">Escoge los filtros y pulsa <b>Generar</b>. El informe se calcula solo cuando lo pides.</p><button class="primary" id="genInf">Generar informe</button></div>`;
+  $('genInf').onclick = () => { $('genInf').disabled = true; $('genInf').textContent = 'Generando…'; setTimeout(pintar, 30); };
+}
+// Años con documentos (sin calcular la contabilidad).
+const aniosConDatos = () => { const a = new Set([hoy().slice(0, 4)]); for (const t of ['documentos', 'compras', 'comprobantes', 'nominas']) for (const x of S.d[t] || []) if (x.fecha) a.add(String(x.fecha).slice(0, 4)); return [...a].sort().reverse(); };
 function vExogena(m) {
-  const ms = movs(), anios = [...new Set(ms.map(x => x.fecha.slice(0, 4)))].sort().reverse();
+  // Los movimientos se calculan solo al generar (con mucha información tarda).
+  let ms0; const ms = () => ms0 ||= movs();
+  const anios = aniosConDatos();
   const def = String(Number(hoy().slice(0, 4)) - 1);
   m.innerHTML = `<header class="vhead"><div><h2>Medios magnéticos</h2><p class="sub">Información exógena para la DIAN, sacada de la contabilidad por tercero.</p></div></header>
     <section class="panel stack"><div class="row filters">
@@ -3382,7 +3395,7 @@ function vExogena(m) {
       <p class="hint">Cada cuenta va al formato, concepto y columna que tengas en Configurar medios magnéticos (por ejemplo 5110 honorarios = 5002). Revísalos antes de pasarlos al prevalidador de la DIAN. Para persona natural se usan los nombres y apellidos del tercero; para jurídica, la razón social. Los terceros sin nombres separados o sin dirección hay que completarlos en Clientes o Proveedores.</p></section>
     <section class="panel" id="xOut"></section>`;
   const reglas = reglasExogena(emp()?.contabilidad);
-  const datos = () => ({ anio: $('xa').value, cod: $('xf').value, filas: formato($('xf').value, ms, $('xa').value, reglas) });
+  const datos = () => ({ anio: $('xa').value, cod: $('xf').value, filas: formato($('xf').value, ms(), $('xa').value, reglas) });
   const pintar = () => {
     const { cod, filas } = datos(), F = FORMATOS[cod], con = F.concepto;
     $('xc').href = `#/exogenacfg?f=${cod}`;
@@ -3397,7 +3410,7 @@ function vExogena(m) {
     const url = URL.createObjectURL(new Blob([csvFormato(cod, filas, S.d.terceros)], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `formato-${cod}-${anio}-${(emp()?.nit || 'empresa')}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  pintar();
+  alGenerar(pintar, 'xOut');
 }
 
 // Qué cuentas se revisan en cada formato para avisar las que tienen movimiento y no tienen regla.
@@ -3616,7 +3629,7 @@ function vBalance(m) {
     }
     descargar(`balance${balOpc.detalle || balOpc.tercero ? '-terceros' : ''}-${emp().nit}-${F.hasta}.csv`, '﻿' + filas.map(r => r.map(x => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   };
-  pintar();
+  alGenerar(pintar);
 }
 
 function vAuxiliar(m, q) {
@@ -3655,7 +3668,7 @@ function vAuxiliar(m, q) {
   for (const id of ['cta', 'cta2']) { $(id).onchange = () => ir(id); $(id).onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ir(id); } }; }
   $('ter').onchange = () => { tercero = $('ter').value; pintar(); };
   ligarCC(pintar);
-  pintar();
+  alGenerar(pintar);
 }
 
 const linkDocTxt = g => { const h = g.origen === 'nomina' ? `#/nominadoc/${g.doc_id}` : g.origen === 'compra' ? `#/compra/${g.doc_id}` : g.origen === 'comp' ? `#/comp/${g.doc_id}` : TIPOS[g.tipo] ? `#/doc/${g.doc_id}` : ''; return h ? `<a class="mono" href="${h}">${esc(g.documento)}</a>` : `<span class="mono">${esc(g.documento)}</span>`; };
@@ -3686,7 +3699,7 @@ function vAuxGeneral(m) {
     descargarXlsx(`auxiliar-general-${e.nit || ''}-${F.desde || 'inicio'}-a-${F.hasta}.xlsx`, hojasAuxiliarGeneral(r, { empresa: e, desde: F.desde, hasta: F.hasta, nomCta, tercero: terc, generado: new Date().toLocaleString('es-CO') }));
   };
   ligarCC(pintar);
-  pintar();
+  alGenerar(pintar);
 }
 
 // Nivel de detalle de los estados financieros: solo rubros NIIF (desplegables) o cuentas del PUC hasta el nivel escogido.
@@ -3757,7 +3770,7 @@ function vEsf(m) {
       <p class="hint">El resultado del ejercicio incluye los ingresos, costos y gastos que aún no se han cerrado contra la cuenta 36.</p>`;
   };
   filtrosInf(pintar); ligarCC(pintar);
-  pintar();
+  alGenerar(pintar);
 }
 function vEr(m) {
   m.innerHTML = `<header class="vhead"><h2>Estado de resultados</h2></header>${filtroFechas('fr', true, () => pintar())}${selNivelInf()}${filtroCC()}<section class="panel" id="out"></section>`;
@@ -3769,7 +3782,7 @@ function vEr(m) {
         : sx.lineas.length ? `<h4>${sx.titulo}${sx.resta ? ' <span class="muted">(menos)</span>' : ''}</h4>${sx.lineas.map(lineaInforme).join('')}` : '').join('')}</div>`;
   };
   filtrosInf(pintar); ligarCC(pintar);
-  pintar();
+  alGenerar(pintar);
 }
 
 /* ---------- Informes de impuestos ---------- */
@@ -3860,7 +3873,7 @@ function vIva(m) {
       { titulo: 'Devoluciones en ventas (notas crédito)', filas: fs.filter(f => f.seccion === 'devoluciones'), colValor: 'IVA' },
       { titulo: 'IVA descontable en compras', filas: fs.filter(f => f.seccion === 'compras'), colValor: 'IVA' },
       { titulo: 'Retenciones de IVA que le practicaron', filas: fs.filter(f => f.seccion === 'reteiva').map(f => ({ ...f, concepto: 'Base: IVA de la factura' })), colValor: 'Retenido' }] }; });
-  pintar();
+  alGenerar(pintar);
 }
 
 function vRetPracticadas(m) {
@@ -3882,7 +3895,7 @@ function vRetPracticadas(m) {
   $('imp').onclick = () => botonImprimir('Retenciones practicadas', html);
   botonesAnexo('Retenciones practicadas', () => { const { desde, hasta } = rangoPer(true), fs = anexoRetenciones(S.d.compras, movs(), desde, hasta, cts);
     return { desde, sub: `${MESES_C[PER.mes - 1]} de ${PER.anio}`, grupos: TIPOS_RETENCION.map(([k, nombre]) => ({ titulo: nombre, filas: fs.filter(f => f.tipo === k).map(f => ({ ...f, milaje: k === 'reteica' })), colValor: 'Retenido' })) }; });
-  pintar();
+  alGenerar(pintar);
 }
 
 let certAnio = null;
@@ -4012,7 +4025,7 @@ function vErComp(m, porCC = false) {
   };
   if ($('ccNiv')) $('ccNiv').onchange = () => { ercOpc.nivelCC = $('ccNiv').value; vErComp(m, true); };
   ligarCC(pintar);
-  pintarMeses(); pintar();
+  pintarMeses(); alGenerar(pintar);
 }
 
 /* ---------- Informes de ventas y compras ---------- */
@@ -4032,7 +4045,7 @@ function informeTabla(m, titulo, desc, archivo, armar) {
   const pintar = () => { $('out').innerHTML = html(); };
   $('imp').onclick = () => botonImprimir(titulo, html);
   $('csv').onclick = () => { if (!r) return; descargar(`${archivo}-${emp().nit}-${F.desde}-${F.hasta}.csv`, csvTxt([r.head.map(([t]) => t), ...r.csv])); };
-  pintar();
+  alGenerar(pintar);
 }
 const mon = v => `<span class="mono">${money(v)}</span>`;
 function vLibroVentas(m) {
@@ -4107,7 +4120,7 @@ function vFlujoEfectivo(m) {
   };
   const pintar = () => { $('out').innerHTML = html(); };
   $('imp').onclick = () => botonImprimir('Estado de flujos de efectivo', html);
-  pintar();
+  alGenerar(pintar);
 }
 function vPatrimonio(m) {
   m.innerHTML = `<header class="vhead noprint"><div><h2>Estado de cambios en el patrimonio</h2><p class="sub">Cómo cambió cada cuenta del patrimonio en el período: capital, reservas y resultados.</p></div><div class="row"><button id="csv">Descargar CSV</button><button id="imp">Imprimir</button></div></header>
@@ -4124,7 +4137,7 @@ function vPatrimonio(m) {
   const pintar = () => { $('out').innerHTML = html(); };
   $('imp').onclick = () => botonImprimir('Estado de cambios en el patrimonio', html);
   $('csv').onclick = () => descargar(`cambios-patrimonio-${emp().nit}-${F.desde}-${F.hasta}.csv`, csvTxt([['Cuenta', 'Concepto', 'Saldo inicial', 'Aumentos', 'Disminuciones', 'Saldo final'], ...r.filas.map(x => [x.codigo === 'sin' ? '' : x.codigo, x.nombre, nCsv(x.inicial), nCsv(x.aumentos), nCsv(x.disminuciones), nCsv(x.final)])]));
-  pintar();
+  alGenerar(pintar);
 }
 
 /* ---------- Flujo de caja comparativo (método directo, una columna por mes) ---------- */
@@ -4188,7 +4201,7 @@ function vFlujoCaja(m) {
   $('fcT3').onchange = () => { fcOpc.tercero = $('fcT3').value; pintar(); };
   $('imp').onclick = () => botonImprimir('Flujo de caja', html);
   $('csv').onclick = () => descargar(`flujo-de-caja-${emp().nit}-${fcOpc.anio}.csv`, csvTxt([['Concepto', ...cols.map(c => c.nombre), 'Total'], ...tabla.map(f => [f.texto, ...(f.tipo === 'tit' ? cols.map(() => '') : f.vals.map(nCsv)), f.tipo === 'tit' ? '' : nCsv(f.total)])]));
-  pintarMeses(); pintar();
+  pintarMeses(); alGenerar(pintar);
 }
 
 iniciar().catch(e => { document.body.insertAdjacentHTML('afterbegin', `<p class="err" style="padding:16px">No se pudo iniciar AGAsoft: ${esc(e.message)}</p>`); });
