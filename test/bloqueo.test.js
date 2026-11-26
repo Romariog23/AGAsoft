@@ -14,3 +14,8 @@ test('bloqueo de periodos', () => {
   assert.equal(hastaAlDesbloquear('2026-03'), '2026-02-28');
   assert.equal(hastaAlDesbloquear('2026-01'), '2025-12-31');
 });
+
+test('el comprobante de cierre se hace con el año bloqueado', () => {
+  assert.doesNotThrow(() => revisarBloqueo('comprobantes', null, { tipo: 'CI', fecha: '2026-12-31' }, '2026-12-31'));
+  assert.throws(() => revisarBloqueo('comprobantes', null, { tipo: 'CC', fecha: '2026-12-31' }, '2026-12-31'));
+});

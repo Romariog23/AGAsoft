@@ -3,8 +3,9 @@
 export const TABLAS_BLOQUEO = ['documentos', 'compras', 'comprobantes', 'nominas', 'inventario_docs'];
 const dmy = f => String(f || '').slice(0, 10).split('-').reverse().join('/');
 export const mensajeBloqueo = (hasta, fecha) => `El periodo está bloqueado hasta el ${dmy(hasta)}: no se puede crear, modificar, anular ni eliminar un documento con fecha ${dmy(fecha)}. El dueño puede desbloquearlo en Configuración › Bloqueo de periodos.`;
-// ¿La fila cae en el periodo bloqueado? (los borradores de ventas no cuentan: no tienen contabilidad)
-const cuenta = (t, r) => r && r.fecha && !(t === 'documentos' && r.estado === 'borrador');
+// ¿La fila cae en el periodo bloqueado? (los borradores de ventas no cuentan: no tienen contabilidad;
+// el comprobante de cierre CI tampoco: se hace con el año ya bloqueado)
+const cuenta = (t, r) => r && r.fecha && !(t === 'documentos' && r.estado === 'borrador') && !(t === 'comprobantes' && r.tipo === 'CI');
 export function revisarBloqueo(t, viejo, nuevo, hasta) {
   if (!hasta || !TABLAS_BLOQUEO.includes(t)) return;
   for (const r of [viejo, nuevo]) if (cuenta(t, r) && String(r.fecha).slice(0, 10) <= hasta) throw new Error(mensajeBloqueo(hasta, r.fecha));
