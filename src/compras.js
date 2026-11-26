@@ -23,7 +23,8 @@ function totalesCompra(lineas, ret = {}) {
   const total = r2(base + iva);
   return { base, iva, retefuente, reteiva, reteica, total, neto: r2(total - retefuente - reteiva - reteica) };
 }
-const totalEgreso = c => r2((c.aplicaciones || []).reduce((s, a) => s + num(a.valor), 0) + num(c.anticipo));
+// Egreso: pagos a facturas o saldos + anticipo + pagos directos a una cuenta (c.lineas: [{cuenta, descripcion, base}]).
+const totalEgreso = c => r2((c.aplicaciones || []).reduce((s, a) => s + num(a.valor), 0) + num(c.anticipo) + (c.tipo === 'CE' ? (c.lineas || []).reduce((s, l) => s + num(l.base), 0) : 0));
 
 const numCompra = c => `${c.tipo} ${c.numero}`;
 // Centro de costo de cada línea de compra: el suyo, el del producto o el general del documento.
@@ -51,6 +52,7 @@ function asientoCompra(c, param, tarifas, ctx = {}) {
     // Sin cuenta propia, a la de proveedores con que se causó la factura pagada.
     for (const a of c.aplicaciones || []) mov(String(a.cuenta || '').trim() || (a.compra_id && ctx.cfgDe ? ctx.cfgDe(a.compra_id).param : P).proveedores, num(a.valor), 0, `Pago ${a.ref || 'factura'}`.trim(), distA(a));
     mov(P.anticipos_prov, num(c.anticipo), 0, 'Anticipo a proveedor');
+    for (const l of c.lineas || []) mov(l.cuenta, num(l.base), 0, l.descripcion || 'Pago directo', primeraDist(c.cc));
     mov(c.cuenta_pago || P.bancos, 0, totalEgreso(c), `${nom} ${c.numero}`);
     return out;
   }
@@ -96,8 +98,9 @@ function erroresCompra(c, cuentas, productos) {
   if (!c.fecha) out.push('Escribe la fecha.');
   const cta = (cod, que) => { if (!esAuxiliar(cod)) out.push(`${que}: la cuenta ${cod || '(vacía)'} no es auxiliar de 8 dígitos.`); else if (!idx[cod]) out.push(`${que}: la cuenta ${cod} no existe en el plan de cuentas.`); };
   if (c.tipo === 'CE') {
-    if (totalEgreso(c) <= 0) out.push('Escribe cuánto se paga a cada factura o el anticipo.');
+    if (totalEgreso(c) <= 0) out.push('Escribe cuánto se paga a cada factura, el anticipo o un pago directo a una cuenta.');
     if ((c.aplicaciones || []).some(a => num(a.valor) < 0) || num(c.anticipo) < 0) out.push('Los valores no pueden ser negativos.');
+    (c.lineas || []).filter(l => l.cuenta || num(l.base)).forEach((l, i) => { cta(l.cuenta, `Pago directo ${i + 1}`); if (num(l.base) <= 0) out.push(`Pago directo ${i + 1}: el valor debe ser mayor que cero.`); });
     cta(c.cuenta_pago, 'Cuenta de pago');
     return out;
   }
