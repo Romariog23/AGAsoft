@@ -15,3 +15,13 @@ test('egreso con pago directo a una cuenta', () => {
   // Las facturas de compra no suman sus líneas al total del egreso.
   assert.equal(totalEgreso({ tipo: 'FC', lineas: [{ base: 10 }] }), 0);
 });
+
+test('recibo de caja que abona un saldo inicial', async () => {
+  const { asiento } = await import('../src/contab.js');
+  const rc = { id: 'r1', tipo: 'RC', estado: 'emitido', prefijo: 'RC', numero: 1, fecha: '2026-11-26', tercero_id: 'c1', medio_pago: 'efectivo', cuenta_pago: '11050501', total: 200000, anticipo: 0,
+    cruces: [{ cuenta: '13050501', cruce: '', valor: 200000, ref: 'Saldos iniciales 2' }] };
+  const a = asiento(rc, {}, { aplicaciones: [], docs: [] });
+  assert.deepEqual(a.map(m => [m.cuenta, m.debito, m.credito]), [['11050501', 200000, 0], ['13050501', 0, 200000]]);
+  assert.equal(a[1].detalle, 'Abono Saldos iniciales 2');
+  assert.equal(a[1].tercero_id, 'c1');
+});
