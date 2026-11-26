@@ -24,7 +24,7 @@ import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnua
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
-import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto } from './inventario.js';
+import { METODOS, cfgInventario, esInventariable, TIPOS_ITEM, bodegasDe, erroresBodega, esLineaProducto, lineaProducto, TIPOS_INV, CONCEPTOS_AI, bodegaVende, bodegaVentaDe, movimientosInv, costear, existencias, asientoInventario, kardex, costoPorProducto, costoPorVenta } from './inventario.js';
 import { iniciarOperacion, operacionActiva, tiposOp, vOperacion, vOpCorte, vOpFacturar, vOpPorCerrar, ICONO_MENU as ICONO_OP } from './operacion-ui.js';
 import { iniciarMaquinaria, tipoMaq, vRecibos, vProyectos, vOperadores, vMaquinas, vProgramar, vHorasCliente, vInicioOp } from './maquinaria-ui.js';
 import { iniciarCotizaciones, vCotizaciones, vCotizacion } from './cotizaciones-ui.js';
@@ -227,7 +227,7 @@ const MENU = [
   { t: 'Nómina', i: 'nomina', l: [['nomina', 'Liquidaciones de nómina'], ['nominapagos', 'Pagos de nómina'], ['nominapasivos', 'Seguridad social y prestaciones'], ['nominae', 'Nómina electrónica'], ['empleados', 'Empleados'], ['nominacfg', 'Configuración de nómina']] },
   { t: 'Contabilidad', i: 'conta', l: [['comprobantes', 'Comprobantes contables'], ['cierre', 'Cierre contable']] },
   { k: 'informes', t: 'Informes', i: 'informes' },
-  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto']] },
+  { t: 'Inventario', i: 'inventario', l: [['productos', 'Productos y servicios'], ['existencias', 'Existencias'], ['kardex', 'Kardex'], ['ajustesinv', 'Ajustes de inventario'], ['traslados', 'Traslados entre bodegas'], ['costoproducto', 'Costo de ventas por producto'], ['costoventas', 'Costo detallado por venta']] },
   { t: 'Operación', i: 'operacion', op: true, k: 'operacion' },
   { t: 'Terceros', i: 'datos', l: [['clientes', 'Clientes'], ['proveedores', 'Proveedores']] },
   { t: 'Importar plantillas', i: 'importar', l: [['importar', 'Cómo importar'], ['importar/terceros', 'Plantilla de terceros'], ['importar/ventas', 'Plantilla de facturas de venta'], ['importar/compras', 'Plantilla de compras'], ['importar/saldos', 'Plantilla de saldos iniciales']] },
@@ -338,6 +338,7 @@ function route() {
     if (v === 'traslado') return vTraslado(m, arg);
     if (v === 'kardex') return vKardex(m, q);
     if (v === 'costoproducto') return vCostoProducto(m);
+    if (v === 'costoventas') return vCostoVentas(m);
     if (v === 'retenciones') return vRetenciones(m);
     if (v === 'tarifasiva') return vTarifasIva(m);
     if (v === 'cierre') return vCierre(m);
@@ -2510,6 +2511,19 @@ function vCostoProducto(m) {
       csv: ls.map(x => [x.p?.codigo || '', x.p?.nombre || '', nCsv(x.cantidad), nCsv(x.venta), nCsv(x.costo), nCsv(x.cantidad ? x.costo / x.cantidad : 0), nCsv(x.utilidad), nCsv(x.margen)]),
       pie: ['<b>Total</b>', '', '', mon(t.venta), mon(t.costo), '', mon(ut), `<span class="mono">${t.venta ? pc(ut / t.venta * 100) : ''}</span>`],
       nota: 'Ventas antes de IVA, con descuentos. El costo es el de la salida de inventario de cada factura (y la reversión en las notas crédito de devolución).' };
+  });
+}
+function vCostoVentas(m) {
+  informeTabla(m, 'Costo detallado por venta', 'Cada producto vendido en cada factura: valor de la venta, costo con que salió del inventario y margen de utilidad. Las notas crédito de devolución restan.', 'costo-por-venta', (desde, hasta) => {
+    const ls = costoPorVenta(invCosteado(), S.d.items, desde, hasta).sort((a, b) => a.fecha.localeCompare(b.fecha) || String(a.ref).localeCompare(String(b.ref), 'es', { numeric: true }));
+    const t = ls.reduce((s2, x) => ({ venta: s2.venta + x.venta, costo: s2.costo + x.costo }), { venta: 0, costo: 0 }), ut = r2(t.venta - t.costo);
+    const pc = v => `${String(r2(v)).replace('.', ',')} %`, prod = id => S.d.productos.find(p => p.id === id);
+    const docTxt = x => `${TIPOS[x.tipo]?.corto || x.tipo} ${x.ref}`;
+    return { head: [['Fecha'], ['Documento'], ['Cliente'], ['Producto'], ['Cantidad', 'r'], ['Valor venta', 'r'], ['Costo unitario', 'r'], ['Costo', 'r'], ['Utilidad', 'r'], ['Margen', 'r']],
+      filas: ls.map(x => ({ go: '#/doc/' + x.doc_id, c: [fFecha(x.fecha), `<span class="mono">${esc(docTxt(x))}</span>`, esc(nomTer(x.tercero_id)), `<span class="mono">${esc(prod(x.producto_id)?.codigo || '')}</span> ${esc(prod(x.producto_id)?.nombre || '')}`, `<span class="mono">${cantTxt(x.cantidad, fmtEmp())}</span>`, mon(x.venta), mon(x.costo_unitario), mon(x.costo), `<span class="mono ${x.utilidad < 0 ? 'neg' : ''}">${money(x.utilidad)}</span>`, `<span class="mono ${x.margen < 0 ? 'neg' : ''}">${pc(x.margen)}</span>`] })),
+      csv: ls.map(x => [x.fecha, docTxt(x), nomTer(x.tercero_id), prod(x.producto_id)?.codigo || '', prod(x.producto_id)?.nombre || '', nCsv(x.cantidad), nCsv(x.venta), nCsv(x.costo_unitario), nCsv(x.costo), nCsv(x.utilidad), nCsv(x.margen)]),
+      pie: ['', `${new Set(ls.map(x => x.doc_id)).size} documentos`, '', `${ls.length} líneas`, '', mon(t.venta), '', mon(t.costo), mon(ut), `<span class="mono">${t.venta ? pc(ut / t.venta * 100) : ''}</span>`],
+      nota: 'Valor de la venta antes de IVA y con descuentos. El costo es el de la salida de inventario de cada factura según el método de costeo de la empresa. Margen = utilidad ÷ venta. Solo productos inventariables (los servicios no tienen costo).' };
   });
 }
 /* ---------- Centros de costo ---------- */
