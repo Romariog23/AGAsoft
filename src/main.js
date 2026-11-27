@@ -23,7 +23,7 @@ import { TIPOS_ACTIVO_DEF, tiposActivo, depreciable, costoTotal, mesSig, finDeMe
 import { conVersion, inactiva, usosCuenta, trasladarLocal, manejaCartera, carteraComprobantes } from './cuentas.js';
 import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
-import { MODULOS, moduloDeRuta, tieneModulo, apagadoEnCuenta, fijarModulosCuenta, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
+import { MODULOS, moduloDeRuta, tieneModulo, apagadoEnCuenta, fijarModulosCuenta, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
@@ -68,12 +68,6 @@ let registro = false;
 const irForm = quiereRegistro => { if (registro !== quiereRegistro) $('aToggle').click(); $('authForm').scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => (quiereRegistro ? $('aNombre') : $('aEmail')).focus({ preventScroll: true }), 350); };
 $('lpEntrar').onclick = () => irForm(false);
 $('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
-// Planes públicos (si la base los deja ver sin sesión: supabase/022_planes_publicos.sql).
-(async () => { try { const ps = await store.planesActivos(); if (!ps?.length) return;
-  $('lpPlanesList').innerHTML = ps.map((p, i) => tarjetaPlan(p, ps.length > 2 && i === 1, true)).join('');
-  $('lpPlanesList').querySelectorAll('[data-prueba]').forEach(b => b.onclick = () => irForm(true));
-  if (!$('lpProx')) $('lpPlanesList').insertAdjacentHTML('afterend', `<p class="hint" id="lpProx"><b>Próximamente:</b> ${PROXIMAMENTE.join(', ')}.</p>`);
-  $('lpPlanes').hidden = false; $('lpNavPlanes').hidden = false; } catch (_) {} })();
 $('aToggle').onclick = () => {
   registro = !registro;
   $('fNombre').hidden = !registro;
