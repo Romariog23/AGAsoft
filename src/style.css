@@ -641,3 +641,5 @@ button.cfg-main:hover{background:none}
 @media (max-width:700px){.grid3.grid-af{grid-template-columns:minmax(0,1fr)}.grid-af .span2{grid-column:auto}}
 .tbl.conc.af td:first-child{width:auto;text-align:left}
 .sel-busca { flex: 1; min-width: 0; }
+.saldo-acc{margin-top:4px;white-space:nowrap}
+@media print{.saldo-acc{display:none!important}}
