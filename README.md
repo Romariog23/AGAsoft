@@ -38,6 +38,8 @@ npm test        # pruebas de cálculos (DV, totales, retenciones, cartera, valor
 
 En Supabase > Authentication > Providers > Email puedes apagar "Confirm email" si no quieres que lleguen correos de confirmación.
 
+Para montar una copia vacía en otra base y otro dominio, ver [docs/instalar-en-otro-dominio.md](docs/instalar-en-otro-dominio.md) (usa `supabase/instalar_todo.sql`, que se arma con `node scripts/armar-instalacion.mjs`).
+
 ## Estructura
 
 | Archivo | Qué hace |

@@ -23,7 +23,7 @@ import { TIPOS_ACTIVO_DEF, tiposActivo, depreciable, costoTotal, mesSig, finDeMe
 import { conVersion, inactiva, usosCuenta, trasladarLocal, manejaCartera, carteraComprobantes } from './cuentas.js';
 import { hastaAlBloquear, hastaAlDesbloquear } from './bloqueo.js';
 import { PERIODOS_IVA, periodo, periodoDe, informeIva, informeRetenciones, certificado, tercerosConRetencion, TIPOS_RETENCION, anexoIva, anexoRetenciones } from './informes.js';
-import { MODULOS, moduloDeRuta, tieneModulo, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
+import { MODULOS, moduloDeRuta, tieneModulo, apagadoEnCuenta, fijarModulosCuenta, docsFeMes, precioCuenta, precioAnual, avisoCupo, planDesde, incluye, PROXIMAMENTE } from './planes.js';
 import { avisosEmpresa, avisosVencimientos, pendientes } from './notificaciones.js';
 import { formatoDe, moneyTxt, cantTxt } from './formato.js';
 import { ALCANCES, cfgCC, nivelesActivos, cuentaConCC, centrosDe, erroresCC, limpiarCC, erroresCentro, normDist, tieneDist, erroresDist, sinCentro, textoDist, aplicarCC } from './centros.js';
@@ -128,6 +128,8 @@ async function iniciar() {
   $('salir').hidden = store.mode === 'local';
   $('who').textContent = store.mode === 'local' ? '' : (S.perfil?.nombre || S.user.email);
   S.plan = null;
+  // Módulos que el administrador le dejó a esta cuenta (lo apagado ahí no sale en el menú).
+  fijarModulosCuenta(store.mode === 'supabase' && !S.perfil?.es_admin ? S.perfil?.modulos : null);
   if (store.mode === 'supabase' && !S.perfil?.es_admin) { try { S.plan = (await store.miPlan())?.plan || null; } catch (_) { /* falta 009: sin límites */ } }
   S.empresas = await store.listEmpresas();
   let guardada = null; try { guardada = localStorage.getItem('agasoft-empresa'); } catch (_) {}
@@ -275,6 +277,10 @@ function renderNav(actual) {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un solo enlace a sus tarjetas.
     if (x.op && !operacionActiva()) return '';
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
+    // Lo que el administrador apagó en la cuenta no se muestra (lo del plan sale con "Plan superior").
+    const fuera = k => apagadoEnCuenta(moduloDeRuta(k.split('/')[0]));
+    if (x.k && fuera(x.k)) return '';
+    if (x.l) { x = { ...x, l: x.l.filter(([k]) => !fuera(k)) }; if (!x.l.length && !x.k) return ''; }
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
     const n = x.l.reduce((s, [k]) => s + (av[k]?.[0] || 0), 0);
@@ -302,6 +308,7 @@ function route() {
   try {
     if (v === 'miplan') return vMiPlan(m);
     const mod = moduloDeRuta(v);
+    if (apagadoEnCuenta(mod)) return vApagado(m, mod);
     if (!tieneModulo(S.plan, mod)) return vBloqueado(m, mod);
     if (v === 'inicio') return vInicio(m);
     if (v === 'operacion') return operacionActiva() ? vInicioOp(m) : vOperacion(m);
@@ -615,13 +622,14 @@ function pintarTarjetas(m, titulo, sub, grupos, buscar) {
   const acciones = {};
   const tarjeta = ([k, ic, t, est, acc, sw, tag]) => {
     if (acc) acciones[k] = acc;
+    if (typeof acc === 'string' && apagadoEnCuenta(moduloDeRuta(acc.slice(2).split('/')[0]))) return '';
     const bloq = typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2).split('/')[0]));
     const cuerpo = `${ico(ic)}<span class="cfg-t"><b>${esc(t)}${tag ? ` <span class="tag ${tag[0]}">${tag[1]}</span>` : ''}${bloq ? ' <span class="tag">Plan superior</span>' : ''}</b><small>${esc(est)}</small></span>`;
     const main = acc ? `<button type="button" class="cfg-main" data-acc="${k}">${cuerpo}${sw ? '' : '<span class="cfg-arrow" aria-hidden="true">›</span>'}</button>` : `<span class="cfg-main">${cuerpo}</span>`;
     return `<div class="cfg-tile" data-q="${esc((t + ' ' + est).toLowerCase())}">${main}${sw ? `<label class="switch" title="${esc(t)}"><input type="checkbox" id="${sw.id}" ${sw.on ? 'checked' : ''} aria-label="${esc(t)}"><i></i></label>` : ''}</div>`;
   };
   m.innerHTML = `<header class="vhead cfg-top"><div><h2>${titulo}</h2><p class="sub">${sub}</p></div><input type="search" id="cfgBuscar" class="cfg-buscar" placeholder="${buscar}" aria-label="${buscar}"></header>
-  ${grupos.filter(Boolean).map(([g, l]) => `<section class="cfg-g"><h3>${g}</h3><div class="cfg-grid">${l.filter(Boolean).map(tarjeta).join('')}</div></section>`).join('')}
+  ${grupos.filter(Boolean).map(([g, l]) => { const t = l.filter(Boolean).map(tarjeta).join(''); return t ? `<section class="cfg-g"><h3>${g}</h3><div class="cfg-grid">${t}</div></section>` : ''; }).join('')}
   <p class="cfg-nada muted" hidden>Nada coincide con la búsqueda.</p>`;
   m.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { const a = acciones[b.dataset.acc]; if (typeof a === 'string') location.hash = a; else a(); });
   $('cfgBuscar').oninput = () => {
@@ -5710,6 +5718,12 @@ function sinModulo(id, mod, limpiar) {
   const el = $(id); if (!el || tieneModulo(S.plan, mod)) return;
   limpiar?.(); el.value = ''; el.disabled = true; el.title = 'No incluido en tu plan';
   el.insertAdjacentHTML('afterend', '<small class="hint">Desde el plan Pyme · <a href="#/miplan">Mi plan</a></small>');
+}
+// Módulo que el administrador de AGAsoft no ha activado en esta cuenta.
+function vApagado(m, mod) {
+  m.innerHTML = `<section class="panel stack bloq"><h2>${esc(MODULOS[mod].nombre)}</h2>
+    <p class="sub">Este módulo todavía no está activo en tu cuenta. Pídele a AGAsoft que te lo active.</p>
+    <div class="row"><a class="btn primary" href="#/inicio">Volver al inicio</a></div></section>`;
 }
 // Módulo apagado por el plan.
 async function vBloqueado(m, mod) {
