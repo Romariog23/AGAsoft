@@ -1641,7 +1641,9 @@ function carteraViva(lado = 'cobrar', sinComp = null, sinDoc = null) {
 }
 function vCartera(m) {
   const items = carteraViva('cobrar').filter(x => x.saldo > 0.009);
-  vSaldos(m, { titulo: 'Cartera', quien: 'Cliente', quienes: 'clientes', vacio: 'No hay facturas pendientes de cobro.', archivo: `cartera-${emp().nit}-${hoy()}.csv`, abonos: 'Abonos', ajustes: 'Notas y cargos', items, clave: 'cartera' });
+  vSaldos(m, { titulo: 'Cartera', quien: 'Cliente', quienes: 'clientes', vacio: 'No hay facturas pendientes de cobro.', archivo: `cartera-${emp().nit}-${hoy()}.csv`, abonos: 'Abonos', ajustes: 'Notas y cargos', items, clave: 'cartera',
+    // Botón en cada documento: recibo de caja que abona a esa factura (o al saldo del cliente si viene de un comprobante).
+    accion: x => `<a class="btn sm saldo-acc" href="${x.href.startsWith('#/doc/') ? `#/nuevo/RC?ref=${x.id}` : `#/nuevo/RC?tercero=${x.tercero_id}`}" title="Hacer recibo de caja para bajar este saldo">Recibo de caja</a>` });
 }
 // Cartera y cuentas por pagar con la misma pantalla: resumen por tercero que se despliega, o lista de todos los documentos.
 const EDADES = [['0', 'Por vencer', d => d <= 0], ['30', '1 a 30 días', d => d > 0 && d <= 30], ['60', '31 a 60', d => d > 30 && d <= 60], ['90', '61 a 90', d => d > 60 && d <= 90], ['mas', 'Más de 90', d => d > 90]];
@@ -1671,11 +1673,11 @@ function vSaldos(m, cfg) {
     const ordDoc = (a, b) => o.orden === 'dias' ? b.dias - a.dias : o.orden === 'nombre' ? (terc(a.tercero_id)?.nombre || '').localeCompare(terc(b.tercero_id)?.nombre || '') : o.orden === 'vence' ? String(a.vence || a.fecha).localeCompare(String(b.vence || b.fecha)) : b.saldo - a.saldo;
     const mas = n => n > o.limite ? `<p class="center"><button type="button" class="ghost" id="mas">Ver más (${n - o.limite} restantes)</button></p>` : '';
     const detalle = ds => `<table class="tbl tbl-det"><thead><tr><th>Documento</th><th>Fecha</th><th>Vence</th><th class="r">Valor</th><th class="r">${cfg.ajustes}</th><th class="r">${cfg.abonos}</th><th class="r">Saldo</th><th>Mora</th></tr></thead><tbody>
-      ${ds.map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a></td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.ajustes ? money(x.ajustes) : ''}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}</tbody></table>`;
+      ${ds.map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a>${cfg.accion ? `<br>${cfg.accion(x)}` : ''}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.ajustes ? money(x.ajustes) : ''}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}</tbody></table>`;
     if (o.vista === 'doc') {
       const ds = [...l].sort(ordDoc);
       $('out').innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Documento</th><th>${cfg.quien}</th><th>Fecha</th><th>Vence</th><th class="r">Valor</th><th class="r">${cfg.abonos}</th><th class="r">Saldo</th><th>Mora</th></tr></thead><tbody>
-        ${ds.slice(0, o.limite * 2).map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a></td><td class="cli">${esc(terc(x.tercero_id)?.nombre)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}
+        ${ds.slice(0, o.limite * 2).map(x => `<tr class="click" data-go="${x.href}"><td><a class="mono" href="${x.href}">${esc(x.doc)}</a>${cfg.accion ? `<br>${cfg.accion(x)}` : ''}</td><td class="cli">${esc(terc(x.tercero_id)?.nombre)}</td><td class="nowrap">${fCor(x.fecha)}</td><td class="nowrap">${fCor(x.vence)}</td><td class="r mono">${money(x.valor)}</td><td class="r mono">${x.abonos ? money(x.abonos) : ''}</td><td class="r mono strong">${money(x.saldo)}</td><td class="nowrap">${estado(x)}</td></tr>`).join('')}
         </tbody><tfoot><tr><td colspan="6"><b>${ds.length} documentos</b></td><td class="r mono strong">${money(ds.reduce((s, x) => s + x.saldo, 0))}</td><td></td></tr></tfoot></table></div>${o.limite * 2 < ds.length ? `<p class="center"><button type="button" class="ghost" id="mas">Ver más (${ds.length - o.limite * 2} restantes)</button></p>` : ''}`;
     } else {
       const g = {};
