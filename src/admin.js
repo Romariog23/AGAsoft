@@ -2,6 +2,7 @@
 // Entra con su propio login y solo deja pasar al administrador. Los límites de cada plan los hace cumplir la base de datos.
 import './style.css';
 import { crearStore } from './store.js';
+import { MODULOS } from './planes.js';
 
 const store = crearStore();
 const $ = id => document.getElementById(id);
@@ -17,7 +18,15 @@ const fail = e => toast(e?.message || String(e), true);
 function apiNube(sb) {
   const ok = ({ data, error }) => { if (error) throw new Error(/exist|schema|find/i.test(error.message) && /admin_eliminar_cuenta/.test(error.message) ? 'Falta correr en Supabase el archivo supabase/011_eliminar_cuenta.sql.' : /exist|schema|find/i.test(error.message) && /admin_cuentas|planes/.test(error.message) ? 'Falta correr en Supabase el archivo supabase/009_planes.sql.' : error.message); return data; };
   return {
-    async cuentas() { return ok(await sb.rpc('admin_cuentas')); },
+    async cuentas() {
+      const l = ok(await sb.rpc('admin_cuentas'));
+      // Módulos fijados a cada cuenta (050). Sin ese SQL, las cuentas siguen según su plan.
+      const { data, error } = await sb.from('perfiles').select('id, modulos');
+      S.falta050 = !!error; const m = new Map((data || []).map(x => [x.id, x.modulos]));
+      return l.map(c => ({ ...c, modulos: m.get(c.id) ?? null }));
+    },
+    async ajustes() { const { data, error } = await sb.from('ajustes_app').select('*').eq('id', 1).maybeSingle(); if (error) { S.falta050 = true; return {}; } return data || {}; },
+    async guardarAjustes(campos) { ok(await sb.from('ajustes_app').upsert({ id: 1, ...campos, actualizado_en: new Date().toISOString() })); },
     async planes() { return ok(await sb.from('planes').select('*').order('orden').order('nombre')); },
     async guardarPlan(p) { const { id, creado_en, ...c } = p; return id ? ok(await sb.from('planes').update(c).eq('id', id)) : ok(await sb.from('planes').insert(c)); },
     async borrarPlan(id) { ok(await sb.from('planes').delete().eq('id', id)); },
@@ -52,6 +61,8 @@ function apiDemo() {
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) {} };
   return {
     async cuentas() { return db.cuentas.map(x => ({ ...x })); },
+    async ajustes() { return { ...(db.ajustes || {}) }; },
+    async guardarAjustes(campos) { db.ajustes = { ...(db.ajustes || {}), ...campos }; save(); },
     async planes() { return [...db.planes].sort((a, b) => a.orden - b.orden); },
     async guardarPlan(p) { if (p.id) Object.assign(db.planes.find(x => x.id === p.id), p); else db.planes.push({ ...p, id: id() }); save(); },
     async borrarPlan(pid) { db.planes = db.planes.filter(x => x.id !== pid); save(); },
@@ -88,7 +99,7 @@ $('authForm').onsubmit = async ev => {
 };
 $('salir').onclick = async () => { await store.signOut(); location.reload(); };
 
-let S = { tab: 'cuentas', filtro: '', cuentas: [], planes: [], empresas: [] };
+let S = { tab: 'cuentas', filtro: '', cuentas: [], planes: [], empresas: [], ajustes: {}, falta050: false };
 async function entrar(p) {
   $('auth').hidden = true; $('app').hidden = false;
   $('who').textContent = p.nombre || p.correo || '';
@@ -96,7 +107,7 @@ async function entrar(p) {
   await cargar();
 }
 async function cargar() {
-  try { [S.cuentas, S.planes, S.empresas] = await Promise.all([api.cuentas(), api.planes(), api.empresas()]); pintar(); }
+  try { [S.cuentas, S.planes, S.empresas, S.ajustes] = await Promise.all([api.cuentas(), api.planes(), api.empresas(), api.ajustes()]); pintar(); }
   catch (e) { $('main').innerHTML = `<section class="panel"><p class="err">${esc(e.message)}</p></section>`; }
 }
 
@@ -142,10 +153,10 @@ function pintar() {
       <div class="kpi ${pend ? 'warn' : ''}"><span>Por aprobar</span><b class="mono">${pend}</b></div>
       <div class="kpi ${vencen ? 'warn' : ''}"><span>Planes que vencen en 15 días</span><b class="mono">${vencen}</b></div>
     </section>
-    <div class="row tabs" role="tablist"><button class="${S.tab === 'cuentas' ? 'primary' : ''}" data-tab="cuentas">Cuentas</button><button class="${S.tab === 'empresas' ? 'primary' : ''}" data-tab="empresas">Contabilidades</button><button class="${S.tab === 'planes' ? 'primary' : ''}" data-tab="planes">Planes</button></div>
+    <div class="row tabs" role="tablist"><button class="${S.tab === 'cuentas' ? 'primary' : ''}" data-tab="cuentas">Cuentas</button><button class="${S.tab === 'empresas' ? 'primary' : ''}" data-tab="empresas">Contabilidades</button><button class="${S.tab === 'planes' ? 'primary' : ''}" data-tab="planes">Planes</button><button class="${S.tab === 'modulos' ? 'primary' : ''}" data-tab="modulos">Módulos de cuentas nuevas</button></div>
     <section class="panel stack" id="tabC"></section>`;
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.filtro = ''; pintar(); });
-  S.tab === 'cuentas' ? pintarCuentas() : S.tab === 'empresas' ? pintarEmpresas() : pintarPlanes();
+  S.tab === 'cuentas' ? pintarCuentas() : S.tab === 'empresas' ? pintarEmpresas() : S.tab === 'modulos' ? pintarModulosNuevas() : pintarPlanes();
 }
 
 function pintarCuentas() {
@@ -160,14 +171,15 @@ function pintarCuentas() {
       <td>${c.es_admin ? '—' : p ? `${esc(p.nombre)}<br><small class="muted">${money(p.precio_mensual)}/mes</small>` : c.prueba_hasta ? 'Prueba gratis' : '<span class="muted">Sin plan</span>'}${pedidoDe(c) ? `<br><small><b>Pidió:</b> ${esc(pedidoDe(c).nombre)}</small>` : ''}</td>
       <td>${c.es_admin ? '—' : c.prueba_hasta && !p ? fFecha(c.prueba_hasta) : fFecha(c.plan_vence)}</td>
       <td>${uso(c.empresas, c.es_admin ? null : p?.max_empresas)}</td><td>${uso(c.documentos_mes, c.es_admin ? null : p?.max_documentos_mes)}</td><td>${uso(c.usuarios, c.es_admin ? null : p?.max_usuarios)}</td>
-      <td><span class="tag ${cls}">${est}</span>${sobreLimite(c) ? ' <span class="tag bad">En el límite</span>' : ''}</td>
-      <td class="r nowrap">${c.es_admin ? '' : `${porAprobar(c) ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}<button class="sm ghost bad" data-del="${c.id}">Eliminar</button>`}</td></tr>`; }).join('')}
+      <td><span class="tag ${cls}">${est}</span>${sobreLimite(c) ? ' <span class="tag bad">En el límite</span>' : ''}${!c.es_admin && c.modulos ? ` <span class="tag" title="${esc(resumenMods(c.modulos))}">Módulos a mano</span>` : ''}</td>
+      <td class="r nowrap">${c.es_admin ? '' : `${porAprobar(c) ? `<button class="sm primary" data-ap="${c.id}">Aprobar</button>` : ''}<button class="sm" data-ed="${c.id}">Plan</button><button class="sm" data-mod="${c.id}">Módulos</button>${c.aprobado ? `<button class="sm ghost" data-sus="${c.id}">${c.suspendido ? 'Reactivar' : 'Suspender'}</button>` : ''}<button class="sm ghost bad" data-del="${c.id}">Eliminar</button>`}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   $('q').oninput = () => { S.filtro = $('q').value; const pos = $('q').selectionStart; pintarCuentas(); $('q').focus(); $('q').setSelectionRange(pos, pos); };
   $('tabC').onclick = async ev => {
     const b = ev.target.closest('button'); if (!b) return;
-    const c = S.cuentas.find(x => x.id === (b.dataset.ap || b.dataset.ed || b.dataset.sus || b.dataset.del)); if (!c) return;
+    const c = S.cuentas.find(x => x.id === (b.dataset.ap || b.dataset.ed || b.dataset.sus || b.dataset.del || b.dataset.mod)); if (!c) return;
     if (b.dataset.del) return formEliminar(c);
+    if (b.dataset.mod) return formModulos(c);
     if (b.dataset.ed || b.dataset.ap) return formCuenta(c, !!b.dataset.ap);
     try { await api.setCuenta(c.id, { suspendido: !c.suspendido }); toast(c.suspendido ? 'Cuenta reactivada.' : 'Cuenta suspendida: ya no puede entrar a sus contabilidades.'); await cargar(); } catch (e) { fail(e); }
   };
@@ -242,7 +254,50 @@ function formDueno(e) {
   });
 }
 
-const MODS = [['nomina', 'Nómina'], ['exogena', 'Medios magnéticos'], ['importar', 'Importar plantillas'], ['informes', 'Informes de ventas y cartera'], ['avanzados', 'Informes avanzados y exportar a Excel'], ['consulta', 'Usuarios de solo consulta'], ['inventario', 'Control de inventario'], ['operacion', 'Operación (horas máquina y otros)'], ['cotizaciones', 'Cotizaciones']];
+// Todos los módulos que se pueden encender o apagar (src/planes.js). La base no se apaga nunca.
+const MODS = Object.entries(MODULOS).map(([k, m]) => [k, m.nombre + (m.requiere ? ` (requiere ${MODULOS[m.requiere].nombre.toLowerCase()})` : '')]);
+const BASE = 'Ventas (facturas, notas crédito y débito, recibos de caja, cartera), compras y gastos (facturas de proveedor, documento soporte, notas de ajuste, comprobantes de egreso, cuentas por pagar), comprobantes contables, terceros, productos y servicios, configuración y documentos electrónicos ante la DIAN.';
+const encendido = (mods, k) => Object.hasOwn(mods, k) ? mods[k] !== false : Object.hasOwn(mods, '*') ? mods['*'] !== false : true;
+const resumenMods = mods => { const on = MODS.filter(([k]) => encendido(mods, k)).map(([, t]) => t); return on.length ? 'Activos: ' + on.join(', ') : 'Solo la base'; };
+const casillas = mods => `<p class="hint"><b>Siempre incluido:</b> ${BASE}</p>
+  <div class="row"><button type="button" class="sm ghost" data-todos="1">Marcar todos</button><button type="button" class="sm ghost" data-todos="0">Solo la base</button></div>
+  ${MODS.map(([k, t]) => `<label class="check"><input type="checkbox" name="mod_${k}" ${encendido(mods, k) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}`;
+const leerCasillas = fd => ({ '*': false, ...Object.fromEntries(MODS.map(([k]) => [k, fd.get('mod_' + k) === 'on'])) });
+const conBotonesTodos = f => f.querySelectorAll('[data-todos]').forEach(b => b.onclick = () => f.querySelectorAll('input[name^="mod_"]').forEach(i => { i.checked = b.dataset.todos === '1'; }));
+const aviso050 = () => S.falta050 ? '<p class="aviso bad">Falta correr en Supabase el archivo supabase/050_modulos_por_cuenta.sql.</p>' : '';
+
+// Módulos de una cuenta: según su plan (como siempre) o escogidos a mano. Lo escogido gana sobre el plan.
+function formModulos(c) {
+  const amano = !!c.modulos, p = planDe(c);
+  const f = dialogo(`<h2>Módulos de la cuenta</h2><p><b>${esc(c.nombre)}</b> · ${esc(c.correo)}</p>${aviso050()}
+    <label class="check"><input type="radio" name="modo" value="plan" ${amano ? '' : 'checked'}> Según su plan${p ? ` (${esc(p.nombre)})` : ' (sin plan: todo activo)'}</label>
+    <label class="check"><input type="radio" name="modo" value="mano" ${amano ? 'checked' : ''}> Escoger los módulos a mano</label>
+    <fieldset class="stack" id="fMods"><legend>Módulos activos en esta cuenta</legend>${casillas(c.modulos || (p?.modulos ?? {}))}
+      <p class="hint">Lo que apagues aquí no le aparece en el menú. Los módulos nuevos que se agreguen a AGAsoft le llegan apagados hasta que los actives.</p></fieldset>`, async fd => {
+    const modulos = fd.get('modo') === 'mano' ? leerCasillas(fd) : null;
+    try { await api.setCuenta(c.id, { modulos }); } catch (e) { throw /modulos/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/050_modulos_por_cuenta.sql.') : e; }
+    toast(modulos ? 'Módulos guardados. La cuenta los ve al volver a entrar.' : 'La cuenta vuelve a usar los módulos de su plan.'); await cargar();
+  });
+  const sync = () => { f.querySelector('#fMods').disabled = f.querySelector('input[name="modo"]:checked').value !== 'mano'; };
+  f.querySelectorAll('input[name="modo"]').forEach(r => r.onchange = sync); sync(); conBotonesTodos(f);
+}
+
+// Con qué módulos entran las cuentas que se registran de aquí en adelante.
+function pintarModulosNuevas() {
+  const m = S.ajustes?.modulos_nuevos || null;
+  $('tabC').innerHTML = `${aviso050()}<p class="hint">Así quedan las cuentas que se registren de ahora en adelante. Después puedes darle más módulos a cada cuenta con el botón <b>Módulos</b> en Cuentas. Las cuentas que ya existen no cambian.</p>
+    <form id="fNuevas" class="stack">
+      <label class="check"><input type="radio" name="modo" value="plan" ${m ? '' : 'checked'}> Según su plan (en la prueba gratis, todo activo)</label>
+      <label class="check"><input type="radio" name="modo" value="mano" ${m ? 'checked' : ''}> Solo los módulos que marque</label>
+      <fieldset class="stack" id="fMods"><legend>Módulos de las cuentas nuevas</legend>${casillas(m || {})}</fieldset>
+      <div class="row end"><button class="primary">Guardar</button></div></form>`;
+  const f = $('fNuevas'), sync = () => { f.querySelector('#fMods').disabled = f.querySelector('input[name="modo"]:checked').value !== 'mano'; };
+  f.querySelectorAll('input[name="modo"]').forEach(r => r.onchange = sync); sync(); conBotonesTodos(f);
+  f.onsubmit = async ev => {
+    ev.preventDefault(); const fd = new FormData(f);
+    try { await api.guardarAjustes({ modulos_nuevos: fd.get('modo') === 'mano' ? leerCasillas(fd) : null }); toast('Guardado: así entran las cuentas nuevas.'); await cargar(); } catch (e) { fail(/ajustes_app/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/050_modulos_por_cuenta.sql.') : e); }
+  };
+}
 function pintarPlanes() {
   const usan = id => S.cuentas.filter(c => c.plan_id === id).length;
   const lim = v => v === null || v === undefined ? 'Sin límite' : Number(v).toLocaleString('es-CO');

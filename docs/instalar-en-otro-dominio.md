@@ -93,6 +93,8 @@ Si al facturar sale un error 401 de la función, entra a la función › **Detai
 2. **El primer usuario que se registra queda como administrador** (sin prueba de 15 días). Los demás entran con prueba gratis y los ves en `https://tu-dominio-nuevo.com/admin`.
 3. En `/admin` revisa los planes: quedan Emprendedor, Pyme y Empresa con los precios y módulos de la migración 030. Si en la instalación actual marcaste módulos o precios distintos desde `/admin`, eso **no** se copia (vive en los datos, no en el código): márcalos igual en la nueva.
 
+4. En `/admin` › **Módulos de cuentas nuevas** escoge con qué módulos entran las cuentas que se registren (por ejemplo, solo la base). A cada cuenta le das más con el botón **Módulos** en *Cuentas*.
+
 ## 8. Lo que no se copia solo
 
 - **Datos**: ninguno, a propósito. Cada empresa nueva arranca con el PUC que carga la app al crearla.

@@ -1,8 +1,17 @@
 // Permisos de los planes (supabase/029_planes_permisos.sql): módulos que se apagan y topes por empresa.
 // Sin plan (administrador, prueba gratis o demostración) no hay límites.
 
+// Base que nunca se apaga: ventas (facturas, notas, recibos, cartera), compras y gastos (FC, DS, NA, egresos, CxP),
+// comprobantes contables, terceros, productos, configuración y documentos electrónicos.
 export const MODULOS = {
+  contables: { nombre: 'Informes contables e IVA', rutas: ['esf', 'er', 'balance', 'auxgeneral', 'iva', 'flujoefectivo', 'patrimonio'] },
+  calendario: { nombre: 'Calendario tributario', rutas: ['calendario'] },
+  conciliacion: { nombre: 'Conciliación bancaria', rutas: ['conciliacion'] },
+  activos: { nombre: 'Activos fijos', rutas: ['activos', 'activonuevo', 'activoeditar', 'activostipos', 'depreciar'] },
+  cierre: { nombre: 'Cierre contable', rutas: ['cierre'] },
+  centros: { nombre: 'Centros de costo', rutas: ['centroscfg'] },
   nomina: { nombre: 'Nómina', rutas: ['nomina', 'nominanueva', 'nominaeditar', 'nominadoc', 'nominacfg', 'nominapasivos', 'nominapagos', 'nominapago', 'empleados'] },
+  nominae: { nombre: 'Nómina electrónica', rutas: ['nominae'], requiere: 'nomina' },
   exogena: { nombre: 'Medios magnéticos', rutas: ['exogena', 'exogenacfg'] },
   importar: { nombre: 'Importar plantillas', rutas: ['importar'] },
   informes: { nombre: 'Informes de ventas, compras, cartera y retenciones', rutas: ['auxiliar', 'retpracticadas', 'certificados', 'libroventas', 'ventascliente', 'ventasproducto', 'librocompras', 'comprasproveedor'] },
@@ -18,7 +27,21 @@ export const MODULOS = {
 export const PROXIMAMENTE = ['documento soporte y nota de ajuste electrónicos', 'sedes o sucursales', 'integración por API'];
 
 export const moduloDeRuta = v => Object.keys(MODULOS).find(k => MODULOS[k].rutas.includes(v)) || null;
-export const tieneModulo = (plan, mod) => !plan || !mod || plan.modulos?.[mod] !== false;
+
+// Módulos fijados a mano a la cuenta por el administrador (perfiles.modulos, supabase/050_modulos_por_cuenta.sql).
+// null = según el plan. {clave: true|false}; '*' = lo que no esté en la lista (p. ej. {'*': false} = solo la base).
+// Lo que fija la cuenta gana sobre el plan, para encender o apagar.
+let CUENTA = null;
+export const fijarModulosCuenta = m => { CUENTA = m && typeof m === 'object' && !Array.isArray(m) ? m : null; };
+const enCuenta = mod => !CUENTA ? null : Object.hasOwn(CUENTA, mod) ? CUENTA[mod] !== false : Object.hasOwn(CUENTA, '*') ? CUENTA['*'] !== false : null;
+export const apagadoEnCuenta = mod => !!mod && (enCuenta(mod) === false || (!!MODULOS[mod]?.requiere && apagadoEnCuenta(MODULOS[mod].requiere)));
+export const tieneModulo = (plan, mod) => {
+  if (!mod) return true;
+  const r = MODULOS[mod]?.requiere;
+  if (r && !tieneModulo(plan, r)) return false;
+  const c = enCuenta(mod);
+  return c !== null ? c : (!plan || plan.modulos?.[mod] !== false);
+};
 
 // Facturas y notas electrónicas que ya gastaron cupo en el mes (los anulados también: ya se enviaron).
 export const docsFeMes = (documentos, mes) => (documentos || []).filter(d => d.electronica && d.estado !== 'borrador' && ['FV', 'NC', 'ND'].includes(d.tipo) && String(d.fecha).startsWith(mes)).length;
