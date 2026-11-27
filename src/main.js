@@ -271,14 +271,14 @@ function renderNav(actual) {
     // Operación es opcional por empresa: sin activarla no sale en el menú; con ella, un solo enlace a sus tarjetas.
     if (x.op && !operacionActiva()) return '';
     if (x.i === 'inventario' && !conInv()) x = { ...x, t: 'Productos y servicios', l: [['productos', 'Productos y servicios'], ['existencias', 'Control de inventario']] };
-    // Lo que el administrador apagó en la cuenta no se muestra (lo del plan sale con "Plan superior").
-    const fuera = k => apagadoEnCuenta(moduloDeRuta(k.split('/')[0]));
+    // Lo que no está habilitado (en la cuenta o en el plan) no se muestra.
+    const fuera = k => !tieneModulo(S.plan, moduloDeRuta(k.split('/')[0]));
     if (x.k && fuera(x.k)) return '';
     if (x.l) { x = { ...x, l: x.l.filter(([k]) => !fuera(k)) }; if (!x.l.length && !x.k) return ''; }
     if (x.k) return `<a class="nav-it" href="#/${x.k}" ${x.k === actual ? 'aria-current="page"' : ''}>${navIco(x.i)}<span>${x.t}</span></a>`;
     const open = x.l.some(([k]) => k === actual) || abiertos.includes(x.t), activo = x.l.some(([k]) => k === actual);
     const n = x.l.reduce((s, [k]) => s + (av[k]?.[0] || 0), 0);
-    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}><span>${t}</span>${av[k] ? `<span class="nav-badge" title="${av[k][1]}">${av[k][0]}</span>` : ''}${tieneModulo(S.plan, moduloDeRuta(k.split('/')[0])) ? '' : '<span class="lock" title="No incluido en tu plan">Plan superior</span>'}</a>`).join('');
+    const links = x.l.map(([k, t]) => `<a href="#/${k}" ${k === actual ? 'aria-current="page"' : ''}><span>${t}</span>${av[k] ? `<span class="nav-badge" title="${av[k][1]}">${av[k][0]}</span>` : ''}</a>`).join('');
     return `<div class="nav-g${activo ? ' activo' : ''}" data-g="${x.t}" ${open ? 'data-open' : ''}><button type="button" class="nav-it" aria-expanded="${open}">${navIco(x.i)}<span>${x.t}</span>${n ? `<span class="nav-badge" title="Vencidas" ${open ? 'hidden' : ''}>${n}</span>` : ''}${navIco('car', 'nav-car')}</button><div class="nav-sub"><div>${links}</div></div></div>`;
   }).join('');
   $('nav').querySelectorAll('.nav-g>button').forEach(b => b.onclick = () => {
@@ -616,8 +616,8 @@ function pintarTarjetas(m, titulo, sub, grupos, buscar) {
   const acciones = {};
   const tarjeta = ([k, ic, t, est, acc, sw, tag]) => {
     if (acc) acciones[k] = acc;
-    if (typeof acc === 'string' && apagadoEnCuenta(moduloDeRuta(acc.slice(2).split('/')[0]))) return '';
-    const bloq = typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2).split('/')[0]));
+    if (typeof acc === 'string' && !tieneModulo(S.plan, moduloDeRuta(acc.slice(2).split('/')[0]))) return '';
+    const bloq = false;
     const cuerpo = `${ico(ic)}<span class="cfg-t"><b>${esc(t)}${tag ? ` <span class="tag ${tag[0]}">${tag[1]}</span>` : ''}${bloq ? ' <span class="tag">Plan superior</span>' : ''}</b><small>${esc(est)}</small></span>`;
     const main = acc ? `<button type="button" class="cfg-main" data-acc="${k}">${cuerpo}${sw ? '' : '<span class="cfg-arrow" aria-hidden="true">›</span>'}</button>` : `<span class="cfg-main">${cuerpo}</span>`;
     return `<div class="cfg-tile" data-q="${esc((t + ' ' + est).toLowerCase())}">${main}${sw ? `<label class="switch" title="${esc(t)}"><input type="checkbox" id="${sw.id}" ${sw.on ? 'checked' : ''} aria-label="${esc(t)}"><i></i></label>` : ''}</div>`;
