@@ -67,7 +67,7 @@ let registro = false;
 // Página de entrada: los botones llevan al formulario (entrar o prueba gratis).
 const irForm = quiereRegistro => { if (registro !== quiereRegistro) $('aToggle').click(); $('authForm').scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => (quiereRegistro ? $('aNombre') : $('aEmail')).focus({ preventScroll: true }), 350); };
 $('lpEntrar').onclick = () => irForm(false);
-$('lpPrueba').onclick = $('lpPrueba2').onclick = () => irForm(true);
+$('lpPrueba').onclick = () => irForm(true);
 $('aToggle').onclick = () => {
   registro = !registro;
   $('fNombre').hidden = !registro;
