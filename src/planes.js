@@ -23,6 +23,12 @@ export const MODULOS = {
   inventario: { nombre: 'Control de inventario', rutas: ['existencias', 'kardex', 'ajustesinv', 'ajusteinvnuevo', 'ajusteinveditar', 'ajusteinv', 'traslados', 'trasladonuevo', 'trasladoeditar', 'traslado', 'costoproducto', 'costoventas', 'inventariocfg'] },
 };
 
+// Plan base (Romario, 2026-11-28): ventas, compras, contabilidad, nómina electrónica, informes y configuración.
+// La base fija ya trae ventas, compras, comprobantes y configuración; aquí va lo que se suma.
+export const PLAN_BASE = ['contables', 'informes', 'conciliacion', 'activos', 'cierre', 'nomina', 'nominae'];
+// ¿Está encendido el módulo en una lista {clave: bool, '*': bool}? Sin dato = encendido.
+export const modOn = (mods, k) => !mods ? true : Object.hasOwn(mods, k) ? mods[k] !== false : Object.hasOwn(mods, '*') ? mods['*'] !== false : true;
+
 // Lo que todavía no existe y se anuncia aparte (no como incluido).
 export const PROXIMAMENTE = ['documento soporte y nota de ajuste electrónicos', 'sedes o sucursales', 'integración por API'];
 
@@ -40,7 +46,7 @@ export const tieneModulo = (plan, mod) => {
   const r = MODULOS[mod]?.requiere;
   if (r && !tieneModulo(plan, r)) return false;
   const c = enCuenta(mod);
-  return c !== null ? c : (!plan || plan.modulos?.[mod] !== false);
+  return c !== null ? c : (!plan || modOn(plan.modulos, mod));
 };
 
 // Facturas y notas electrónicas que ya gastaron cupo en el mes (los anulados también: ya se enviaron).
@@ -60,12 +66,12 @@ export function avisoCupo(usados, max) {
 }
 
 // Plan más barato que incluye un módulo (para decir "Disponible desde el plan Pyme").
-export const planDesde = (planes, mod) => (planes || []).filter(p => p.activo !== false && p.modulos?.[mod] !== false).sort((a, b) => Number(a.precio_mensual) - Number(b.precio_mensual))[0] || null;
+export const planDesde = (planes, mod) => (planes || []).filter(p => p.activo !== false && modOn(p.modulos, mod)).sort((a, b) => Number(a.precio_mensual) - Number(b.precio_mensual))[0] || null;
 
 // Lo que trae cada plan, en frases cortas para las tarjetas de planes.
 // max_usuarios cuenta las personas a las que el dueño da acceso; el dueño es un usuario más.
 export function incluye(p) {
-  const m = k => p.modulos?.[k] !== false, l = ['Factura electrónica, notas crédito y débito', 'Cartera, compras y contabilidad automática'];
+  const m = k => modOn(p.modulos, k), l = ['Factura electrónica, notas crédito y débito', 'Cartera, compras y contabilidad automática'];
   if (p.max_documentos_fe_mes != null) l.push(`${p.max_documentos_fe_mes.toLocaleString('es-CO')} documentos electrónicos al mes`);
   else if (p.max_documentos_mes != null) l.push(`${p.max_documentos_mes.toLocaleString('es-CO')} documentos al mes`);
   const u = p.max_usuarios == null ? null : p.max_usuarios + 1;

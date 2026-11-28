@@ -23,9 +23,9 @@ partes.push(`
    Limpieza para una instalación nueva
    ====================================================================== */
 -- Los planes viejos (Básico, Profesional, Contador, Empresa Plus) quedan inactivos por las migraciones 009/029/030.
--- En una base nueva nadie los usa: se borran para que en /admin solo queden Emprendedor, Pyme y Empresa.
+-- En una base nueva nadie los usa: se borran (menos el plan Base, que se activa al ponerle precio).
 delete from public.planes p
-where not p.activo
+where not p.activo and lower(p.nombre) <> 'base'
   and not exists (select 1 from public.perfiles x where x.plan_id = p.id or x.plan_solicitado = p.id);
 
 notify pgrst, 'reload schema';
