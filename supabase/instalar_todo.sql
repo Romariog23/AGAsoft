@@ -1,5 +1,5 @@
 -- AGAsoft: instalación completa en un proyecto NUEVO de Supabase (solo estructura, sin datos).
--- Generado con: node scripts/armar-instalacion.mjs  (no editar a mano; se arma con schema.sql + 002_departamento.sql … 050_modulos_por_cuenta.sql).
+-- Generado con: node scripts/armar-instalacion.mjs  (no editar a mano; se arma con schema.sql + 002_departamento.sql … 051_plan_base.sql).
 -- Cómo usarlo: Supabase › SQL Editor › New query › pegar todo › Run. Se puede volver a correr sin perder datos.
 -- Después: registrarse en la app; el PRIMER usuario que se registra queda como administrador.
 
@@ -4108,12 +4108,30 @@ end $$;
 notify pgrst, 'reload schema';
 
 /* ======================================================================
+   051_plan_base.sql
+   ====================================================================== */
+-- 051: plan "Base" (Romario, 2026-11-28): ventas, compras, contabilidad, nómina electrónica, informes y configuración,
+-- con los documentos electrónicos. Lo demás (inventario, operación, cotizaciones, calendario, centros de costo,
+-- medios magnéticos, importar, informes avanzados, usuarios de consulta) queda apagado, y '*': false hace que los
+-- módulos nuevos de AGAsoft también lleguen apagados a este plan.
+-- Se crea INACTIVO y en $0: en /admin › Planes ponle el precio y márcalo como activo para asignarlo.
+-- Correr una vez en Supabase › SQL Editor. Si ya existe un plan llamado "Base", no hace nada.
+
+insert into public.planes (nombre, precio_mensual, por_empresa, max_empresas, max_documentos_mes, max_documentos_fe_mes, max_usuarios, max_empleados, modulos, descripcion, activo, orden)
+select 'Base', 0, true, null, null, null, null, null,
+  '{"*": false, "contables": true, "informes": true, "conciliacion": true, "activos": true, "cierre": true, "nomina": true, "nominae": true}'::jsonb,
+  'Ventas, compras, contabilidad, nómina electrónica, informes y configuración, con documentos electrónicos.', false, 5
+where not exists (select 1 from public.planes where lower(nombre) = 'base');
+
+notify pgrst, 'reload schema';
+
+/* ======================================================================
    Limpieza para una instalación nueva
    ====================================================================== */
 -- Los planes viejos (Básico, Profesional, Contador, Empresa Plus) quedan inactivos por las migraciones 009/029/030.
--- En una base nueva nadie los usa: se borran para que en /admin solo queden Emprendedor, Pyme y Empresa.
+-- En una base nueva nadie los usa: se borran (menos el plan Base, que se activa al ponerle precio).
 delete from public.planes p
-where not p.activo
+where not p.activo and lower(p.nombre) <> 'base'
   and not exists (select 1 from public.perfiles x where x.plan_id = p.id or x.plan_solicitado = p.id);
 
 notify pgrst, 'reload schema';

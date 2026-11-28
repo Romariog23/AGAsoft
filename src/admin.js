@@ -2,7 +2,7 @@
 // Entra con su propio login y solo deja pasar al administrador. Los límites de cada plan los hace cumplir la base de datos.
 import './style.css';
 import { crearStore } from './store.js';
-import { MODULOS } from './planes.js';
+import { MODULOS, PLAN_BASE, modOn } from './planes.js';
 
 const store = crearStore();
 const $ = id => document.getElementById(id);
@@ -257,13 +257,14 @@ function formDueno(e) {
 // Todos los módulos que se pueden encender o apagar (src/planes.js). La base no se apaga nunca.
 const MODS = Object.entries(MODULOS).map(([k, m]) => [k, m.nombre + (m.requiere ? ` (requiere ${MODULOS[m.requiere].nombre.toLowerCase()})` : '')]);
 const BASE = 'Ventas (facturas, notas crédito y débito, recibos de caja, cartera), compras y gastos (facturas de proveedor, documento soporte, notas de ajuste, comprobantes de egreso, cuentas por pagar), comprobantes contables, terceros, productos y servicios, configuración y documentos electrónicos ante la DIAN.';
-const encendido = (mods, k) => Object.hasOwn(mods, k) ? mods[k] !== false : Object.hasOwn(mods, '*') ? mods['*'] !== false : true;
+const encendido = (mods, k) => modOn(mods, k);
 const resumenMods = mods => { const on = MODS.filter(([k]) => encendido(mods, k)).map(([, t]) => t); return on.length ? 'Activos: ' + on.join(', ') : 'Solo la base'; };
 const casillas = mods => `<p class="hint"><b>Siempre incluido:</b> ${BASE}</p>
-  <div class="row"><button type="button" class="sm ghost" data-todos="1">Marcar todos</button><button type="button" class="sm ghost" data-todos="0">Solo la base</button></div>
+  <div class="row"><button type="button" class="sm ghost" data-todos="1">Marcar todos</button><button type="button" class="sm ghost" data-todos="base">Plan base</button><button type="button" class="sm ghost" data-todos="0">Solo la base</button></div>
   ${MODS.map(([k, t]) => `<label class="check"><input type="checkbox" name="mod_${k}" ${encendido(mods, k) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}`;
 const leerCasillas = fd => ({ '*': false, ...Object.fromEntries(MODS.map(([k]) => [k, fd.get('mod_' + k) === 'on'])) });
-const conBotonesTodos = f => f.querySelectorAll('[data-todos]').forEach(b => b.onclick = () => f.querySelectorAll('input[name^="mod_"]').forEach(i => { i.checked = b.dataset.todos === '1'; }));
+// Marcar todos / Plan base (ventas, compras, contabilidad, nómina electrónica, informes y configuración) / Solo la base.
+const conBotonesTodos = f => f.querySelectorAll('[data-todos]').forEach(b => b.onclick = () => f.querySelectorAll('input[name^="mod_"]').forEach(i => { const k = i.name.slice(4); i.checked = b.dataset.todos === '1' || (b.dataset.todos === 'base' && PLAN_BASE.includes(k)); }));
 const aviso050 = () => S.falta050 ? '<p class="aviso bad">Falta correr en Supabase el archivo supabase/050_modulos_por_cuenta.sql.</p>' : '';
 
 // Módulos de una cuenta: según su plan (como siempre) o escogidos a mano. Lo escogido gana sobre el plan.
@@ -304,7 +305,7 @@ function pintarPlanes() {
   $('tabC').innerHTML = `<header class="vhead"><p class="hint">Los límites se aplican al dueño de cada cuenta, sumando todas sus contabilidades. Deja un límite vacío para que no tenga tope.</p><button class="primary" id="nuevoP">Nuevo plan</button></header>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plan</th><th class="r">Precio mensual</th><th class="r">Contabilidades</th><th class="r">Documentos al mes</th><th class="r">Personas con acceso</th><th class="r">Electrónicos al mes por empresa</th><th class="r">Empleados por empresa</th><th>Módulos</th><th class="r">Cuentas</th><th></th></tr></thead><tbody>
     ${S.planes.map(p => `<tr class="${p.activo ? '' : 'muted'}"><td><b>${esc(p.nombre)}</b>${p.activo ? '' : ' <span class="tag">Inactivo</span>'}<br><small class="muted">${esc(p.descripcion)}</small></td>
-      <td class="r mono">${money(p.precio_mensual)}${p.por_empresa ? '<br><small class="muted">por empresa</small>' : ''}</td><td class="r mono">${lim(p.max_empresas)}</td><td class="r mono">${lim(p.max_documentos_mes)}</td><td class="r mono">${lim(p.max_usuarios)}</td><td class="r mono">${lim(p.max_documentos_fe_mes)}</td><td class="r mono">${lim(p.max_empleados)}</td><td><small>${MODS.filter(([k]) => p.modulos?.[k] !== false).map(([, t]) => t).join(', ') || 'Ninguno'}</small></td><td class="r mono">${usan(p.id)}</td>
+      <td class="r mono">${money(p.precio_mensual)}${p.por_empresa ? '<br><small class="muted">por empresa</small>' : ''}</td><td class="r mono">${lim(p.max_empresas)}</td><td class="r mono">${lim(p.max_documentos_mes)}</td><td class="r mono">${lim(p.max_usuarios)}</td><td class="r mono">${lim(p.max_documentos_fe_mes)}</td><td class="r mono">${lim(p.max_empleados)}</td><td><small>${MODS.filter(([k]) => modOn(p.modulos, k)).map(([, t]) => t).join(', ') || 'Ninguno'}</small></td><td class="r mono">${usan(p.id)}</td>
       <td class="r"><button class="sm" data-ep="${p.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="10" class="muted">No hay planes.</td></tr>'}</tbody></table></div>`;
   $('nuevoP').onclick = () => formPlan({ activo: true, orden: S.planes.length + 1 });
   $('tabC').querySelectorAll('[data-ep]').forEach(b => b.onclick = () => formPlan(S.planes.find(p => p.id === b.dataset.ep)));
@@ -323,19 +324,20 @@ function formPlan(p) {
     <div class="grid2"><div><label for="p_fe">Documentos electrónicos al mes, por empresa</label><input id="p_fe" name="max_documentos_fe_mes" type="number" min="0" class="mono" value="${n(p.max_documentos_fe_mes)}" placeholder="Sin límite"></div>
       <div><label for="p_em">Empleados activos, por empresa</label><input id="p_em" name="max_empleados" type="number" min="0" class="mono" value="${n(p.max_empleados)}" placeholder="Sin límite"></div></div>
     <p class="hint">Electrónicos: facturas y notas crédito y débito electrónicas del mes (cuentan también las anuladas). Al llegar al tope no se pueden emitir más ese mes.</p>
-    <fieldset class="stack"><legend>Módulos incluidos</legend>${MODS.map(([k, t]) => `<label class="check"><input type="checkbox" name="mod_${k}" ${p.modulos?.[k] !== false ? 'checked' : ''}> ${t}</label>`).join('')}</fieldset>
+    <fieldset class="stack"><legend>Módulos incluidos</legend>${casillas(p.modulos || {})}</fieldset>
     <div><label for="p_ds">Descripción</label><input id="p_ds" name="descripcion" maxlength="200" value="${esc(p.descripcion)}"></div>
     <label class="check"><input type="checkbox" name="activo" ${p.activo !== false ? 'checked' : ''}> Activo (se puede asignar a cuentas)</label>
     ${p.id && !enUso ? '<button type="button" class="ghost" id="delP">Borrar este plan</button>' : p.id ? `<p class="hint">${enUso} cuenta(s) usan este plan: para dejar de ofrecerlo, desmárcalo como activo.</p>` : ''}`, async fd => {
     const lim = k => { const v = String(fd.get(k) ?? '').trim(); return v === '' ? null : Math.max(0, Math.round(Number(v))); };
     const row = { nombre: String(fd.get('nombre')).trim(), precio_mensual: Math.max(0, Number(fd.get('precio_mensual')) || 0), max_empresas: lim('max_empresas'), max_documentos_mes: lim('max_documentos_mes'),
       max_usuarios: lim('max_usuarios'), por_empresa: fd.get('por_empresa') === 'on', max_documentos_fe_mes: lim('max_documentos_fe_mes'), max_empleados: lim('max_empleados'),
-      modulos: Object.fromEntries(MODS.map(([k]) => [k, fd.get('mod_' + k) === 'on'])), descripcion: String(fd.get('descripcion') || '').trim(), activo: fd.get('activo') === 'on', orden: p.orden ?? S.planes.length + 1 };
+      modulos: leerCasillas(fd), descripcion: String(fd.get('descripcion') || '').trim(), activo: fd.get('activo') === 'on', orden: p.orden ?? S.planes.length + 1 };
     if (!row.nombre) throw new Error('Escribe el nombre del plan.');
     try { await api.guardarPlan(p.id ? { ...row, id: p.id } : row); } catch (e) { throw /por_empresa|max_documentos_fe_mes|max_empleados|modulos/.test(e.message) ? new Error('Falta correr en Supabase el archivo supabase/029_planes_permisos.sql.') : e; }
     toast('Plan guardado.'); await cargar();
   });
   const del = f.querySelector('#delP');
+  conBotonesTodos(f);
   if (del) del.onclick = async () => { try { await api.borrarPlan(p.id); $('dlg').close(); toast('Plan borrado.'); await cargar(); } catch (e) { fail(e); } };
 }
 
